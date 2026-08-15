@@ -57,6 +57,11 @@ ehthumbs.db
 
 # IDE / Editor
 .idea/
+*.iml
+out/
+.gradle/
+target/
+build/
 .vscode/
 *.swp
 *.swo
