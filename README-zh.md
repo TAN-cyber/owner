@@ -284,11 +284,23 @@ npm pack --dry-run
 
 1. 将仓库推送到 GitHub。
 2. 使用拥有 `redv` 作用域的 npm 账号执行 `npm login`。
-3. 使用 `npm publish --access public` 发布公开包。
-4. 在干净项目运行 `npm install @redv/owner`。
-5. 分别验证 `--platform claude` 与 `--platform codex`。
-6. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
-7. 保留 LICENSE 与 NOTICE，不要删除授权文件。
+3. npm 发布需要双因素认证。交互式发布时执行 `npm publish --access public --otp=<六位验证码>`；npm 也可能在命令执行后提示输入验证码。
+4. CI 或其他非交互发布场景需要创建 Granular Access Token，授予 `redv` 作用域的包读写权限，并启用该 Token 的 2FA bypass。Token 只能放在密码管理器或 CI Secret 中，不要提交到 Git 或写入受跟踪的 `.npmrc`。
+5. 使用 `npm publish --access public` 发布公开包。
+6. 在干净项目运行 `npm install @redv/owner`。
+7. 分别验证 `--platform claude` 与 `--platform codex`。
+8. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
+9. 保留 LICENSE 与 NOTICE，不要删除授权文件。
+
+本机临时使用 Token 发布时，可以这样配置，发布后立即删除本机配置：
+
+```bash
+export NPM_TOKEN="<granular-token>"
+npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+npm publish --access public
+npm config delete //registry.npmjs.org/:_authToken
+unset NPM_TOKEN
+```
 
 ## 安全边界
 
