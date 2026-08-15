@@ -14,4 +14,14 @@ describe('release prepare script', () => {
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain('skipped during npm publish');
   });
+
+  it('skips Husky setup during a global Git dependency install', () => {
+    const result = spawnSync(process.execPath, [prepareScript], {
+      encoding: 'utf-8',
+      env: { ...process.env, npm_config_global: 'true' },
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain('skipped Husky setup (global install)');
+  });
 });
