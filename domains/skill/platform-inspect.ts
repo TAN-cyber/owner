@@ -25,13 +25,13 @@ export interface HookInspectionResult {
   error?: string;
 }
 
-const LEGACY_HOOK_SCRIPT_NAMES = ['owner-hook-guard.mjs', 'owner-native-hook-guard.mjs'] as const;
+const LEGACY_HOOK_SCRIPT_NAMES = ['owner-hook-guard.mjs', 'owner-loop-hook-guard.mjs'] as const;
 const LEGACY_HOOK_SCRIPT_PATHS = [
   'owner/scripts/owner-hook-guard.mjs',
-  'owner-native/scripts/owner-native-hook-guard.mjs',
+  'owner-loop/scripts/owner-loop-hook-guard.mjs',
 ] as const;
 
-const LEGACY_RULE_FILE_NAMES = ['owner-phase-guard.md', 'owner-native-phase-guard.md'] as const;
+const LEGACY_RULE_FILE_NAMES = ['owner-phase-guard.md', 'owner-loop-phase-guard.md'] as const;
 
 type JsonReadResult =
   | { status: 'missing' }
@@ -50,7 +50,7 @@ export async function getPlatformRuleDestinations(
   baseDir: string,
   platform: Platform,
   scope: InstallScope,
-  _workflowSelection: InitWorkflowSelection = 'classic',
+  _workflowSelection: InitWorkflowSelection = 'pipeline',
 ): Promise<string[]> {
   if (!platform.rulesDir || !platform.rulesFormat) return [];
 
@@ -219,7 +219,7 @@ export async function inspectOwnerHooksForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope,
-  _workflowSelection: InitWorkflowSelection = 'classic',
+  _workflowSelection: InitWorkflowSelection = 'pipeline',
 ): Promise<HookInspectionResult> {
   if (!platform.supportsHooks || !platform.hookFormat) return { present: false };
 

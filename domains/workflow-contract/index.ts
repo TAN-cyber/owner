@@ -1,4 +1,4 @@
-export { builtinOwnerFivePhaseWorkflow, builtinOwnerNativeWorkflow } from './builtins.js';
+export { builtinOwnerFivePhaseWorkflow, builtinOwnerLoopWorkflow } from './builtins.js';
 export {
   atomicWriteContainedBytes,
   atomicWriteContainedJson,
@@ -14,11 +14,11 @@ export { hashWorkflowProtocol } from './hash.js';
 export { normalizeWorkflowDefinition } from './normalize.js';
 export {
   defaultWorkflowProjectConfig,
-  DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG,
+  DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG,
   MAX_WORKFLOW_SNAPSHOT_PATTERN_LENGTH,
   MAX_WORKFLOW_SNAPSHOT_PATTERN_WILDCARDS,
   mergeWorkflowProjectConfigDocument,
-  normalizeClassicArtifactLayout,
+  normalizePipelineArtifactLayout,
   normalizeWorkflowSnapshotPattern,
   normalizeWorkflowArtifactRoot,
   normalizeWorkflowRelativePath,

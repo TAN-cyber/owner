@@ -1,19 +1,19 @@
 import os from 'os';
 
 import {
-  assertClassicLayoutInitializationSafe,
-  beginClassicLayoutInitialization,
-  checkpointClassicLayoutInitialization,
-  completeClassicLayoutInitialization,
-  type ClassicLayoutInitializationPermit,
-} from '../owner-classic/classic-layout-initialization.js';
-import { classicLayoutPaths, classicProjectRelative } from '../owner-classic/classic-layout.js';
-import { assertClassicOpenSpecRootHealthy } from '../owner-classic/classic-openspec-root.js';
+  assertPipelineLayoutInitializationSafe,
+  beginPipelineLayoutInitialization,
+  checkpointPipelineLayoutInitialization,
+  completePipelineLayoutInitialization,
+  type PipelineLayoutInitializationPermit,
+} from '../owner-pipeline/pipeline-layout-initialization.js';
+import { pipelineLayoutPaths, pipelineProjectRelative } from '../owner-pipeline/pipeline-layout.js';
+import { assertPipelineOpenSpecRootHealthy } from '../owner-pipeline/pipeline-openspec-root.js';
 import {
-  discoverNativeProject,
-  ensureNativeDirectories,
-  nativeProjectPaths,
-} from '../owner-native/native-paths.js';
+  discoverLoopProject,
+  ensureLoopDirectories,
+  loopProjectPaths,
+} from '../owner-loop/loop-paths.js';
 import { installOpenSpec } from '../integrations/openspec.js';
 import { projectOwnerHooksFromInstalledScope } from '../skill/project-hook-projection.js';
 import {
@@ -45,24 +45,22 @@ export interface ProjectActivationResult {
 async function ensureWorkflowDirectories(
   projectRoot: string,
   config: WorkflowProjectConfig,
-): Promise<ClassicLayoutInitializationPermit | undefined> {
+): Promise<PipelineLayoutInitializationPermit | undefined> {
   const workflows = config.workflows ?? [config.default_workflow];
-  if (workflows.includes('native')) {
-    if (!config.native) {
-      throw new Error('Global Owner config enables Native without a native configuration');
+  if (workflows.includes('loop')) {
+    if (!config.loop) {
+      throw new Error('Global Owner config enables Loop without a loop configuration');
     }
-    await ensureNativeDirectories(
-      await nativeProjectPaths(projectRoot, config.native.artifact_root),
-    );
+    await ensureLoopDirectories(await loopProjectPaths(projectRoot, config.loop.artifact_root));
   }
-  if (!workflows.includes('classic')) return undefined;
+  if (!workflows.includes('pipeline')) return undefined;
 
-  const artifactLayout = config.classic?.artifact_layout ?? 'docs';
-  let initialization = await assertClassicLayoutInitializationSafe(projectRoot, artifactLayout);
-  initialization = await beginClassicLayoutInitialization(projectRoot, initialization);
+  const artifactLayout = config.pipeline?.artifact_layout ?? 'docs';
+  let initialization = await assertPipelineLayoutInitializationSafe(projectRoot, artifactLayout);
+  initialization = await beginPipelineLayoutInitialization(projectRoot, initialization);
   const permit = initialization.initializationPermit;
   const mutationGuard = async () => {
-    await assertClassicLayoutInitializationSafe(projectRoot, artifactLayout, permit);
+    await assertPipelineLayoutInitializationSafe(projectRoot, artifactLayout, permit);
   };
   const status = await installOpenSpec(
     projectRoot,
@@ -74,12 +72,12 @@ async function ensureWorkflowDirectories(
   );
   if (status !== 'installed') {
     throw new Error(
-      'Classic project activation requires a compatible globally installed OpenSpec CLI',
+      'Pipeline project activation requires a compatible globally installed OpenSpec CLI',
     );
   }
 
-  const layout = classicLayoutPaths(projectRoot, artifactLayout);
-  await assertClassicOpenSpecRootHealthy(projectRoot, layout);
+  const layout = pipelineLayoutPaths(projectRoot, artifactLayout);
+  await assertPipelineOpenSpecRootHealthy(projectRoot, layout);
   for (const directory of [
     layout.archiveDir,
     layout.specsDir,
@@ -87,15 +85,15 @@ async function ensureWorkflowDirectories(
     layout.superpowersPlansDir,
     layout.superpowersReportsDir,
   ]) {
-    const relative = classicProjectRelative(projectRoot, directory);
+    const relative = pipelineProjectRelative(projectRoot, directory);
     await ensureProtectedProjectDirectory(projectRoot, relative, {
-      label: `Classic working directory ${relative}`,
+      label: `Pipeline working directory ${relative}`,
     });
   }
   await ensureProtectedProjectDirectory(projectRoot, '.owner', {
     label: 'Owner project state directory',
   });
-  await checkpointClassicLayoutInitialization(projectRoot, permit);
+  await checkpointPipelineLayoutInitialization(projectRoot, permit);
   return permit;
 }
 
@@ -114,15 +112,15 @@ export async function activateOwnerProject(
   if (projectDecision.source === 'legacy-project') {
     config = {
       schema: 'owner.project.v1',
-      default_workflow: 'classic',
-      workflows: ['classic'],
+      default_workflow: 'pipeline',
+      workflows: ['pipeline'],
       ambient_resume: config.ambient_resume,
-      classic: {
-        artifact_layout: projectDecision.classicArtifactLayout,
-        language: config.classic?.language ?? config.native?.language ?? 'en',
-        context_compression: config.classic?.context_compression ?? 'off',
-        review_mode: config.classic?.review_mode ?? 'standard',
-        auto_transition: config.classic?.auto_transition ?? true,
+      pipeline: {
+        artifact_layout: projectDecision.pipelineArtifactLayout,
+        language: config.pipeline?.language ?? config.loop?.language ?? 'en',
+        context_compression: config.pipeline?.context_compression ?? 'off',
+        review_mode: config.pipeline?.review_mode ?? 'standard',
+        auto_transition: config.pipeline?.auto_transition ?? true,
       },
     };
     source = 'legacy-project';
@@ -131,12 +129,10 @@ export async function activateOwnerProject(
   // Materialize project-owned artifact directories before publishing the
   // project config. A failed activation therefore never leaves a configured
   // project pointing at an incomplete artifact root.
-  const classicPermit = await ensureWorkflowDirectories(projectRoot, config);
+  const pipelinePermit = await ensureWorkflowDirectories(projectRoot, config);
   const workflows = config.workflows ?? [config.default_workflow];
   const workflowSelection =
-    workflows.includes('native') && workflows.includes('classic')
-      ? 'both'
-      : config.default_workflow;
+    workflows.includes('loop') && workflows.includes('pipeline') ? 'both' : config.default_workflow;
   const hookProjection = await projectOwnerHooksFromInstalledScope(
     projectRoot,
     options.homeDir ?? os.homedir(),
@@ -152,8 +148,8 @@ export async function activateOwnerProject(
   }
   await ensureOwnerProjectGitignore(projectRoot);
   await writeWorkflowProjectConfig(projectRoot, config);
-  if (classicPermit) {
-    await completeClassicLayoutInitialization(projectRoot, classicPermit);
+  if (pipelinePermit) {
+    await completePipelineLayoutInitialization(projectRoot, pipelinePermit);
   }
   return { config, source };
 }
@@ -162,13 +158,13 @@ export async function resolveOrActivateOwnerEntry(
   startPath: string,
   options: ProjectActivationOptions = {},
 ): Promise<OwnerEntryResolution> {
-  const projectRoot = await discoverNativeProject(startPath);
+  const projectRoot = await discoverLoopProject(startPath);
   const existing = await readWorkflowProjectConfig(projectRoot);
   const activated = existing ? null : await activateOwnerProject(projectRoot, options);
   const config = existing ?? activated!.config;
   return {
     workflow: config.default_workflow,
-    skill: config.default_workflow === 'native' ? 'owner-native' : 'owner-classic',
+    skill: config.default_workflow === 'loop' ? 'owner-loop' : 'owner-pipeline',
     source: activated?.source ?? 'project-config',
   };
 }

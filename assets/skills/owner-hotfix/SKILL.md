@@ -5,7 +5,7 @@ description: "Owner preset — fix an existing behavior bug through a short open
 
 # Owner Preset Path: Hotfix
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 Quick bug fix workflow: open → build → verify → archive. Skip brainstorming and full plan, applicable for behavior fixes not involving new capability design.
 
@@ -14,7 +14,7 @@ Quick bug fix workflow: open → build → verify → archive. Skip brainstormin
 2. No interface changes or architecture adjustments
 3. Change scope is predictable (file count is a hint only, not a hard upgrade condition; see Upgrade Assessment below)
 
-**Not applicable**: If the fix process hits a qualitative-change signal (see "Upgrade Assessment" section), the user decides whether to upgrade to the full `/owner-classic` workflow.
+**Not applicable**: If the fix process hits a qualitative-change signal (see "Upgrade Assessment" section), the user decides whether to upgrade to the full `/owner-pipeline` workflow.
 
 ---
 
@@ -22,11 +22,11 @@ Quick bug fix workflow: open → build → verify → archive. Skip brainstormin
 
 ### 0. Output Language Constraint
 
-Streamlined OpenSpec artifacts must use the configured Owner artifact language. Before `.owner.yaml` exists, read `classic.language` from project `.owner/config.yaml`, then fall back to global `~/.owner/config.yaml`; after initialization, use `owner state get <name> language`.
+Streamlined OpenSpec artifacts must use the configured Owner artifact language. Before `.owner.yaml` exists, read `pipeline.language` from project `.owner/config.yaml`, then fall back to global `~/.owner/config.yaml`; after initialization, use `owner state get <name> language`.
 
 Execution chain: open → build → root cause check → verify → archive. Hotfix provides default decisions for each phase: streamlined open, direct build, root cause confirmation, scale-based verification, and final archive confirmation after verification passes.
 
-Before starting, use `owner-classic/reference/scripts.md` to run the public Owner CLI command. When resuming from any entry point, first use `owner-classic/reference/context-recovery.md` to check phase/workflow.
+Before starting, use `owner-pipeline/reference/scripts.md` to run the public Owner CLI command. When resuming from any entry point, first use `owner-pipeline/reference/context-recovery.md` to check phase/workflow.
 
 When resuming an existing hotfix change, the first state operation must be `owner state select <change-name>`. For a new change, run the command immediately after `.owner.yaml` initialization and before source writes.
 
@@ -37,7 +37,7 @@ Reuse Owner open capability to create change, but use hotfix defaults: do not ex
 **Immediately execute:** Use the Skill tool to load the `openspec-new-change` skill. Skipping this step is prohibited.
 
 <!-- external-openspec-skill-override -->
-**External OpenSpec Skill override:** Do not execute its direct official CLI, fixed-cwd, or fixed physical OpenSpec path instructions. Route every OpenSpec command through `owner classic openspec -- <args...>` and use the `<classic-*>` logical roots bound for this run for every change and artifact path.
+**External OpenSpec Skill override:** Do not execute its direct official CLI, fixed-cwd, or fixed physical OpenSpec path instructions. Route every OpenSpec command through `owner pipeline openspec -- <args...>` and use the `<pipeline-*>` logical roots bound for this run for every change and artifact path.
 
 After the skill loads, create the change skeleton first, then immediately initialize recoverable state and bind the current change:
 
@@ -47,9 +47,9 @@ owner state select <name>
 owner state check <name> open
 ```
 
-If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-classic/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
+If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-pipeline/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
 
-Entry workspace isolation is a user decision point; do not use `current` as the default isolation mode. Pause under `owner-classic/reference/decision-point.md` and let the user choose one option:
+Entry workspace isolation is a user decision point; do not use `current` as the default isolation mode. Pause under `owner-pipeline/reference/decision-point.md` and let the user choose one option:
 
 - A. Work directly on the current branch: run `owner state set <name> isolation current` to truthfully bind the current branch
 - B. Create a branch: create and switch to `hotfix/YYYYMMDD/<change-name>`, then run `owner state set <name> isolation branch`
@@ -86,7 +86,7 @@ owner state next <name>
 
 Use hotfix defaults: `build_mode: direct`, `tdd_mode: direct`, and `review_mode: off`. `isolation` must keep the entry workspace isolation the user confirmed in Step 1; do not change it back to `current` on your own. Here `direct` skips full planning/TDD orchestration; it never skips reproduction, regression coverage, or verification. Skip Superpowers `brainstorming` and `writing-plans`; **task count alone does not route to `/owner-build`**. Keep larger task lists ordered in the current hotfix and ask about upgrading only when a qualitative-change signal or scope tripwire is hit.
 
-Before continuing or starting changes, handle uncommitted changes through `owner-classic/reference/dirty-worktree.md`. If attribution shows a qualitative-change signal or file-count tripwire is hit, handle it through this file's "Upgrade Assessment".
+Before continuing or starting changes, handle uncommitted changes through `owner-pipeline/reference/dirty-worktree.md`. If attribution shows a qualitative-change signal or file-count tripwire is hit, handle it through this file's "Upgrade Assessment".
 
 Before implementation, **reproduce the bug and record failing evidence first**:
 
@@ -96,7 +96,7 @@ Before implementation, **reproduce the bug and record failing evidence first**:
 
 After RED evidence exists, execute tasks one by one according to tasks.md:
 
-1. Read `<classic-change-dir>/tasks.md`, get incomplete task list
+1. Read `<pipeline-change-dir>/tasks.md`, get incomplete task list
 2. For each incomplete task:
    - Modify code according to task description
    - Run project formatter (e.g., `mvn spotless:apply`, `npm run format`)
@@ -106,12 +106,12 @@ After RED evidence exists, execute tasks one by one according to tasks.md:
 3. After all tasks complete, explicitly run relevant project tests and build commands
 
 **If fix affects existing spec acceptance scenarios**:
-- Create delta spec in `<classic-change-dir>/specs/<capability>/spec.md`
+- Create delta spec in `<pipeline-change-dir>/specs/<capability>/spec.md`
 - Only include `## MODIFIED Requirements` section
 
 During hotfix execution, whenever a crash, unexpected behavior, test failure, or build failure appears while running the program, tests, build, or manual verification, must use the Skill tool to load the Superpowers `systematic-debugging` skill. Before root-cause investigation is complete, must not propose or implement source-code fixes.
 
-For specific investigation, minimal failing test, fix verification, and keeping the current change verification loop, follow `owner-classic/reference/debug-gate.md`.
+For specific investigation, minimal failing test, fix verification, and keeping the current change verification loop, follow `owner-pipeline/reference/debug-gate.md`.
 
 ### 3. Root Cause Elimination Check
 
@@ -161,7 +161,7 @@ Exception: when `.owner.yaml` has `auto_transition: false`, end the current invo
 
 The following genuine user decisions still pause:
 
-1. Encountering an upgrade-assessment signal (see "Upgrade Assessment" section). **Pause, present the choices, and wait for the user to explicitly choose**: continue the hotfix flow, or upgrade to the full `/owner-classic` workflow
+1. Encountering an upgrade-assessment signal (see "Upgrade Assessment" section). **Pause, present the choices, and wait for the user to explicitly choose**: continue the hotfix flow, or upgrade to the full `/owner-pipeline` workflow
 2. Verify-phase acceptance of WARNING/SUGGESTION deviations, Spec drift handling, or strategy after the automatic repair limit; the first 3 clearly repairable failures close automatically
 3. Final archive confirmation and the branch-handling decision after the archive commit
 
@@ -176,13 +176,13 @@ After each step completes, immediately enter next step. Within each phase, must 
 
 Hotfix upgrade assessment only decides whether to move from the preset workflow to full; file count never upgrades automatically, and `owner state scale` only decides verification weight.
 
-If `/owner-classic` passes an intent frame from the entry, hotfix must recheck `risk_signal` and escalation signals only before build: new capability, public API, schema change, cross-module coordination, or deep architecture work. When any signal matches, enter the existing escalation decision point; do not reimplement entry intent recognition.
+If `/owner-pipeline` passes an intent frame from the entry, hotfix must recheck `risk_signal` and escalation signals only before build: new capability, public API, schema change, cross-module coordination, or deep architecture work. When any signal matches, enter the existing escalation decision point; do not reimplement entry intent recognition.
 
 Continuously check these qualitative-change signals: cross-module coordination, needing a new capability, database schema changes, introducing a new public API, or touching a deep architecture problem (in hotfix context this often surfaces during the root-cause elimination check). If any signal appears, the agent **must not self-upgrade or self-decide to continue**.
 
 The file-count tripwire is only a prompt: when changed files exceed the hint threshold (for example > 4 files), ask the user whether to continue hotfix or upgrade full. More files do not necessarily mean qualitative change. A bug fix is usually focused on 1-3 files, so exceeding the threshold means the change surface is larger and is worth having the user confirm it still fits the preset scope.
 
-When a qualitative-change signal or file-count tripwire is hit, **must pause under the `owner-classic/reference/decision-point.md` protocol and wait for the user's explicit choice**. Do not directly enter `/owner-design`; do not automatically add a Design Doc.
+When a qualitative-change signal or file-count tripwire is hit, **must pause under the `owner-pipeline/reference/decision-point.md` protocol and wait for the user's explicit choice**. Do not directly enter `/owner-design`; do not automatically add a Design Doc.
 
 After the user chooses upgrade (option B), use the legal state-machine upgrade channel, a single command that converts the preset workflow to full and rolls back to design:
 
@@ -190,7 +190,7 @@ After the user chooses upgrade (option B), use the legal state-machine upgrade c
 owner state transition <name> preset-escalate
 ```
 
-This command atomically sets `workflow`/`classic_profile` to `full`, rolls `phase` back to `design`, clears `design_doc`, and clears preset-only `build_mode`, `tdd_mode`, `review_mode`, `isolation`, and `verify_mode`. Then add the Design Doc on the current change: **immediately use the Skill tool to load the `owner-design` skill**. On entering build, run the full joint workflow-configuration decision again.
+This command atomically sets `workflow`/`pipeline_profile` to `full`, rolls `phase` back to `design`, clears `design_doc`, and clears preset-only `build_mode`, `tdd_mode`, `review_mode`, `isolation`, and `verify_mode`. Then add the Design Doc on the current change: **immediately use the Skill tool to load the `owner-design` skill**. On entering build, run the full joint workflow-configuration decision again.
 
 When the user chooses continue (option A), continue the hotfix workflow and record the user's reason for continuing.
 
@@ -205,7 +205,7 @@ When the user chooses continue (option A), continue the hotfix workflow and reco
 
 ## Automatic Handoff to Next Phase
 
-Follow `owner-classic/reference/auto-transition.md`. Key command:
+Follow `owner-pipeline/reference/auto-transition.md`. Key command:
 
 ```bash
 owner state next <name>

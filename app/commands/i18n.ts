@@ -34,8 +34,8 @@ export type TranslationKey =
   | 'failedLabel'
   | 'failedStatus'
   | 'workingDirs'
-  | 'nativeWorkingDir'
-  | 'classicWorkingDirs'
+  | 'loopWorkingDir'
+  | 'pipelineWorkingDirs'
   | 'getStarted'
   | 'getStartedOwner'
   | 'getStartedHotfix'
@@ -74,10 +74,10 @@ export type TranslationKey =
   | 'updateAllProjectsYes'
   | 'updateAllProjectsNo'
   | 'configMerged'
-  | 'classicLayoutChoice'
-  | 'classicLayoutLegacy'
-  | 'classicLayoutDocs'
-  | 'classicLayoutChoiceRequired'
+  | 'pipelineLayoutChoice'
+  | 'pipelineLayoutLegacy'
+  | 'pipelineLayoutDocs'
+  | 'pipelineLayoutChoiceRequired'
   | 'cancelled'
   | 'installMode'
   | 'installModeCopy'
@@ -95,9 +95,9 @@ export type TranslationKey =
   | 'uninstallPlatformsRequired'
   | 'noInstalledPlatformsSelected'
   | 'selectWorkflowsToUninstall'
-  | 'nativeWorkflow'
-  | 'classicWorkflow'
-  | 'removeClassicCompanionSkills'
+  | 'loopWorkflow'
+  | 'pipelineWorkflow'
+  | 'removePipelineCompanionSkills'
   | 'openSpecSkills'
   | 'superpowersSkills'
   | 'foundOwnerInstallations'
@@ -165,8 +165,8 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     failedLabel: 'Failed:',
     failedStatus: 'failed',
     workingDirs: 'Working directories:',
-    nativeWorkingDir: 'Native:',
-    classicWorkingDirs: 'Classic: docs/superpowers/specs/, docs/superpowers/plans/',
+    loopWorkingDir: 'Loop:',
+    pipelineWorkingDirs: 'Pipeline: docs/superpowers/specs/, docs/superpowers/plans/',
     getStarted: 'Get started:',
     getStartedOwner: '/owner "your idea"  — Start a new change with full workflow',
     getStartedHotfix: '/owner-hotfix       — Quick bug fix (skip brainstorming)',
@@ -174,7 +174,7 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     selectNpmDeps: 'Select npm dependencies to install/upgrade:',
     npmDepOpenSpec: 'OpenSpec CLI (global, @fission-ai/openspec@latest)',
     npmDepOpenSpecInstalled: 'OpenSpec CLI (already installed globally — upgrade to latest)',
-    npmDepOpenSpecRequired: 'Classic setup requires a compatible OpenSpec CLI.',
+    npmDepOpenSpecRequired: 'Pipeline setup requires a compatible OpenSpec CLI.',
     npmDepSuperpowers: 'Superpowers (npx skills add obra/superpowers)',
     npmDepSuperpowersInstalled: 'Superpowers (already installed — re-run install)',
     npmDepSuperpowersHint: 'v6.0.0+ recommended — ~2× faster, ~50% fewer tokens',
@@ -206,12 +206,12 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     updateAllProjectsNo: 'No, cancel',
     configMerged:
       'Project config merged (.owner/config.yaml): preserved your values, added any missing fields',
-    classicLayoutChoice:
-      'Both Classic roots exist. Choose the root Owner should record for this project:',
-    classicLayoutLegacy: 'Legacy layout — openspec/',
-    classicLayoutDocs: 'Docs layout — docs/openspec/',
-    classicLayoutChoiceRequired:
-      'Both Classic roots exist. Run `owner update` interactively, or pass --classic-layout legacy|docs.',
+    pipelineLayoutChoice:
+      'Both Pipeline roots exist. Choose the root Owner should record for this project:',
+    pipelineLayoutLegacy: 'Legacy layout — openspec/',
+    pipelineLayoutDocs: 'Docs layout — docs/openspec/',
+    pipelineLayoutChoiceRequired:
+      'Both Pipeline roots exist. Run `owner update` interactively, or pass --pipeline-layout legacy|docs.',
     cancelled: 'Cancelled.',
     installMode: 'Installation mode:',
     installModeCopy: 'Copy (traditional, independent copies per platform)',
@@ -229,9 +229,9 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     uninstallPlatformsRequired: 'Select at least one platform.',
     noInstalledPlatformsSelected: 'No installed platforms selected. Cancelled.',
     selectWorkflowsToUninstall: 'Select workflows to uninstall:',
-    nativeWorkflow: 'Native workflow',
-    classicWorkflow: 'Classic workflow',
-    removeClassicCompanionSkills: 'Also remove Classic companion Skills?',
+    loopWorkflow: 'Loop workflow',
+    pipelineWorkflow: 'Pipeline workflow',
+    removePipelineCompanionSkills: 'Also remove Pipeline companion Skills?',
     openSpecSkills: 'OpenSpec Skills',
     superpowersSkills: 'Superpowers Skills',
     foundOwnerInstallations: 'Found Owner installations on the following targets:',
@@ -302,8 +302,8 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     failedLabel: '失败：',
     failedStatus: '失败',
     workingDirs: '工作目录：',
-    nativeWorkingDir: 'Native：',
-    classicWorkingDirs: 'Classic：docs/superpowers/specs/, docs/superpowers/plans/',
+    loopWorkingDir: 'Loop：',
+    pipelineWorkingDirs: 'Pipeline：docs/superpowers/specs/, docs/superpowers/plans/',
     getStarted: '开始使用：',
     getStartedOwner: '/owner "你的想法"  — 启动完整工作流',
     getStartedHotfix: '/owner-hotfix       — 快速修复（跳过 brainstorming）',
@@ -311,7 +311,7 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     selectNpmDeps: '选择要安装/升级的 npm 依赖：',
     npmDepOpenSpec: 'OpenSpec CLI（全局安装，@fission-ai/openspec@latest）',
     npmDepOpenSpecInstalled: 'OpenSpec CLI（已全局安装 — 升级到最新版本）',
-    npmDepOpenSpecRequired: 'Classic 初始化需要兼容版本的 OpenSpec CLI。',
+    npmDepOpenSpecRequired: 'Pipeline 初始化需要兼容版本的 OpenSpec CLI。',
     npmDepSuperpowers: 'Superpowers (npx skills add obra/superpowers)',
     npmDepSuperpowersInstalled: 'Superpowers（已安装 — 重新运行安装）',
     npmDepSuperpowersHint: '推荐 v6.0.0+ — 速度快约 2 倍，节省约 50% token',
@@ -342,11 +342,11 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     updateAllProjectsYes: '是，更新所有已索引项目',
     updateAllProjectsNo: '否，取消',
     configMerged: '项目配置已合并 (.owner/config.yaml)：已保留你的设置，补齐缺失字段',
-    classicLayoutChoice: '检测到两个 Classic 产物根目录。请选择要写入项目配置的根目录：',
-    classicLayoutLegacy: '旧布局 — openspec/',
-    classicLayoutDocs: '文档布局 — docs/openspec/',
-    classicLayoutChoiceRequired:
-      '检测到两个 Classic 产物根目录。请交互式运行 `owner update`，或传入 --classic-layout legacy|docs。',
+    pipelineLayoutChoice: '检测到两个 Pipeline 产物根目录。请选择要写入项目配置的根目录：',
+    pipelineLayoutLegacy: '旧布局 — openspec/',
+    pipelineLayoutDocs: '文档布局 — docs/openspec/',
+    pipelineLayoutChoiceRequired:
+      '检测到两个 Pipeline 产物根目录。请交互式运行 `owner update`，或传入 --pipeline-layout legacy|docs。',
     cancelled: '已取消。',
     installMode: '安装模式：',
     installModeCopy: 'Copy（传统方式，每个平台独立副本）',
@@ -364,9 +364,9 @@ const TRANSLATIONS: Record<Language, Record<TranslationKey, string>> = {
     uninstallPlatformsRequired: '请至少选择一个平台。',
     noInstalledPlatformsSelected: '未选择已安装的平台，已取消。',
     selectWorkflowsToUninstall: '选择要卸载的工作流：',
-    nativeWorkflow: 'Native 工作流',
-    classicWorkflow: 'Classic 工作流',
-    removeClassicCompanionSkills: '同时移除 Classic 配套 Skills？',
+    loopWorkflow: 'Loop 工作流',
+    pipelineWorkflow: 'Pipeline 工作流',
+    removePipelineCompanionSkills: '同时移除 Pipeline 配套 Skills？',
     openSpecSkills: 'OpenSpec Skills',
     superpowersSkills: 'Superpowers Skills',
     foundOwnerInstallations: '检测到以下平台已安装 Owner：',

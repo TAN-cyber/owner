@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  classic-latest-installers:
-    name: Classic external installers
+  pipeline-latest-installers:
+    name: Pipeline external installers
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -26,13 +26,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Exercise latest Classic integrations
+      - name: Exercise latest Pipeline integrations
         env:
-          CANARY_PROJECT: ${{ runner.temp }}/owner-classic-canary
-          CANARY_RESULT: ${{ runner.temp }}/owner-classic-canary.json
+          CANARY_PROJECT: ${{ runner.temp }}/owner-pipeline-canary
+          CANARY_RESULT: ${{ runner.temp }}/owner-pipeline-canary.json
         run: |
           mkdir -p "$CANARY_PROJECT"
-          node bin/owner.js init "$CANARY_PROJECT" --yes --workflow classic --json > "$CANARY_RESULT"
+          node bin/owner.js init "$CANARY_PROJECT" --yes --workflow pipeline --json > "$CANARY_RESULT"
           node - <<'NODE'
           const fs = require('node:fs');
           const raw = fs.readFileSync(process.env.CANARY_RESULT, 'utf8');

@@ -3,7 +3,7 @@ import type { InstallScope } from './types.js';
 
 export type PlatformTargetResolution = {
   platform: Platform;
-  native: boolean;
+  loop: boolean;
 };
 
 export function resolvePlatformTarget(
@@ -20,7 +20,7 @@ export function resolvePlatformTarget(
 
   const registered = SUPPORTED_PLATFORMS.find((platform) => platform.id === normalized);
   if (registered) {
-    return { platform: registered, native: true };
+    return { platform: registered, loop: true };
   }
 
   throw new Error(

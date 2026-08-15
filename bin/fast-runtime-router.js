@@ -1,14 +1,14 @@
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
-const CLASSIC_ASSETS = {
+const PIPELINE_ASSETS = {
   state: 'assets/skills/owner/scripts/owner-state.mjs',
   guard: 'assets/skills/owner/scripts/owner-guard.mjs',
   handoff: 'assets/skills/owner/scripts/owner-handoff.mjs',
   archive: 'assets/skills/owner/scripts/owner-archive.mjs',
 };
 
-const NATIVE_COMMANDS = new Set([
+const LOOP_COMMANDS = new Set([
   'init',
   'root',
   'new',
@@ -36,8 +36,8 @@ export function resolveFastRuntime(argv) {
   if (argv.length === 0 || hasHelpFlag(argv)) return null;
 
   const [group, command, ...tail] = argv;
-  const classicAsset = CLASSIC_ASSETS[group];
-  if (classicAsset) return { assetPath: classicAsset, args: argv.slice(1) };
+  const pipelineAsset = PIPELINE_ASSETS[group];
+  if (pipelineAsset) return { assetPath: pipelineAsset, args: argv.slice(1) };
 
   if (group === 'workflow' && command === 'resolve') {
     if (tail.includes('--activate')) return null;
@@ -47,9 +47,9 @@ export function resolveFastRuntime(argv) {
     };
   }
 
-  if (group === 'native' && command && NATIVE_COMMANDS.has(command)) {
+  if (group === 'loop' && command && LOOP_COMMANDS.has(command)) {
     return {
-      assetPath: `assets/skills/owner-native/scripts/owner-native-${command}.mjs`,
+      assetPath: `assets/skills/owner-loop/scripts/owner-loop-${command}.mjs`,
       args: tail,
     };
   }

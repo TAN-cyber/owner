@@ -10,7 +10,7 @@ export async function reconcileOwnerHooksForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope = 'project',
-  workflowSelection: InitWorkflowSelection = 'classic',
+  workflowSelection: InitWorkflowSelection = 'pipeline',
 ): Promise<HookInstallResult> {
   if (scope === 'project') {
     return installOwnerHooksForPlatform(baseDir, platform, scope, workflowSelection);

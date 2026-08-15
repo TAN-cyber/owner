@@ -41,8 +41,8 @@ pnpm test           # 高风险修改或最终交付前需要本地全量验证�
 
 示例：
 
-- `feat(native): add archive preview output`
-- `fix(classic): preserve checkpoint recovery state`
+- `feat(loop): add archive preview output`
+- `fix(pipeline): preserve checkpoint recovery state`
 - `docs: update contributor commit rules`
 
 ## 项目结构规范
@@ -50,7 +50,7 @@ pnpm test           # 高风险修改或最终交付前需要本地全量验证�
 当前源码目录按责任分层：
 
 - `app/`：CLI 入口、命令编排和用户交互层。只能组合 domain/platform 能力，不承载领域规则。
-- `domains/`：业务领域模块。当前仅包含共享 Engine、OpenSpec/Superpowers 集成、Native、Classic、统一入口、Skill 安装和 workflow contract。
+- `domains/`：业务领域模块。当前仅包含共享 Engine、OpenSpec/Superpowers 集成、Loop、Pipeline、统一入口、Skill 安装和 workflow contract。
 - `platform/`：文件系统、进程、安装平台、版本、路径等平台适配能力。domain 不应直接散落平台差异逻辑。
 - `scripts/`：构建、发布、benchmark、lint 等仓库自动化脚本。可调用源码模块，但不要成为运行时业务入口。
 - `assets/`：发布资产和内置 Skill 内容。修改 runtime 源码后必须通过构建同步生成资产，不要把业务逻辑只写在生成物里。
@@ -65,53 +65,53 @@ pnpm test           # 高风险修改或最终交付前需要本地全量验证�
 - `test/fixtures/` 和 `test/helpers/` 只放测试数据与测试工具。
 - 禁止新增或恢复 `test/ts/` 这种横向桶；旧文件应迁移到上面对应目录。
 
-架构约束由 `pnpm run lint:architecture` 校验，并已接入 `pnpm lint`。它会检查顶层目录白名单、活跃源码根、app/domain/platform 子模块、脚本模块、Classic/Native/Entry runtime 入口与生成物、内置 Skill 根目录、测试归属和禁止旧目录回归。如果确实需要新增顶层目录、源码模块、测试根目录或例外，必须先更新 `config/repository-layout.json`、架构 linter 和本节说明。
+架构约束由 `pnpm run lint:architecture` 校验，并已接入 `pnpm lint`。它会检查顶层目录白名单、活跃源码根、app/domain/platform 子模块、脚本模块、Pipeline/Loop/Entry runtime 入口与生成物、内置 Skill 根目录、测试归属和禁止旧目录回归。如果确实需要新增顶层目录、源码模块、测试根目录或例外，必须先更新 `config/repository-layout.json`、架构 linter 和本节说明。
 
-## Classic runtime 脚本规范
+## Pipeline runtime 脚本规范
 
 脚本位于 `assets/skills/owner/scripts/`，当前发布形态是 CLI 聚合 runtime + 每命令独立的自包含 `.mjs` bundle：
 
-- 运行时源码与每命令 entry 位于 `domains/owner-classic/`，修改后必须运行 `pnpm build:classic-runtime` 同步 `owner-runtime.mjs` 和所有 `owner-*.mjs` 命令 bundle
+- 运行时源码与每命令 entry 位于 `domains/owner-pipeline/`，修改后必须运行 `pnpm build:pipeline-runtime` 同步 `owner-runtime.mjs` 和所有 `owner-*.mjs` 命令 bundle
 - 命令 bundle 必须由对应 entry 构建为自包含产物；不要在生成物中直接编写业务逻辑，也不要恢复对 `owner-runtime.mjs` 的运行时 import
-- 不再新增 `.sh` runtime；测试 fixture `test/fixtures/classic-0.3.9/` 是冻结参考实现，只用于差分兼容
-- 新增命令 bundle 或 runtime 文件必须加入 `test/domains/owner-classic/owner-scripts.test.ts` 的 `beforeEach` 拷贝列表、`config/repository-layout.json` 和 `assets/manifest.json`
-- `owner-hook-guard.mjs` 是 Classic Guard 的自包含命令 bundle，不作为平台 Hook 直接安装；平台统一安装的 Hook 入口是 `owner-hook-router.mjs`
+- 不再新增 `.sh` runtime；测试 fixture `test/fixtures/pipeline-0.3.9/` 是冻结参考实现，只用于差分兼容
+- 新增命令 bundle 或 runtime 文件必须加入 `test/domains/owner-pipeline/owner-scripts.test.ts` 的 `beforeEach` 拷贝列表、`config/repository-layout.json` 和 `assets/manifest.json`
+- `owner-hook-guard.mjs` 是 Pipeline Guard 的自包含命令 bundle，不作为平台 Hook 直接安装；平台统一安装的 Hook 入口是 `owner-hook-router.mjs`
 
-## Native 与 Entry runtime 规范
+## Loop 与 Entry runtime 规范
 
-- Native 运行时源码与每命令 entry 位于 `domains/owner-native/`，修改后必须运行 `pnpm build:native-runtime` 同步 `owner-native-runtime.mjs` 和所有 `owner-native-*.mjs` 命令 bundle
-- `owner-native-hook-guard.mjs` 是 Native Guard 的自包含命令 bundle，不作为平台 Hook 直接安装；Native 主流程与 Guard 都不得依赖外部 Skill
+- Loop 运行时源码与每命令 entry 位于 `domains/owner-loop/`，修改后必须运行 `pnpm build:loop-runtime` 同步 `owner-loop-runtime.mjs` 和所有 `owner-loop-*.mjs` 命令 bundle
+- `owner-loop-hook-guard.mjs` 是 Loop Guard 的自包含命令 bundle，不作为平台 Hook 直接安装；Loop 主流程与 Guard 都不得依赖外部 Skill
 - 共享入口与 Hook Router 源码位于 `domains/owner-entry/`，修改后必须运行 `pnpm build:entry-runtime`，同步 `owner-entry-runtime.mjs` 与 `owner-hook-router.mjs`
 - 每个平台只安装一份 `owner-workflow-guard` Rule；支持 Hook 的平台只安装一个 `owner-hook-router.mjs`
-- Router 通过 `.owner/current-change.json` 的 `workflow + change` 确定当前需求归属，一次写入最多调用一个 workflow Guard；Native 与 Classic 的 phase、目录、schema 和 Guard 逻辑保持独立
+- Router 通过 `.owner/current-change.json` 的 `workflow + change` 确定当前需求归属，一次写入最多调用一个 workflow Guard；Loop 与 Pipeline 的 phase、目录、schema 和 Guard 逻辑保持独立
 - 新增或重命名 runtime 入口/生成物时，同步 `config/repository-layout.json`、`assets/manifest.json` 和对应的 `test/repository/*-runtime-assets.test.ts`
 
 ## 脚本依赖关系
 
 ```
-owner-runtime.mjs ← domains/owner-classic/*
-owner-state.mjs ← domains/owner-classic/classic-state-entry.ts
-owner-guard.mjs ← domains/owner-classic/classic-guard-entry.ts
-owner-handoff.mjs ← domains/owner-classic/classic-handoff-entry.ts (写入 handoff_context/handoff_hash)
-owner-archive.mjs ← domains/owner-classic/classic-archive-entry.ts
-owner-yaml-validate.mjs ← domains/owner-classic/classic-validate-entry.ts
-owner-hook-guard.mjs ← domains/owner-classic/classic-hook-guard-entry.ts (不直接安装为平台 Hook)
-owner-native-runtime.mjs ← domains/owner-native/*
-owner-native-<command>.mjs ← domains/owner-native/native-<command>-entry.ts
-owner-native-hook-guard.mjs ← domains/owner-native/native-hook-guard-entry.ts (不直接安装为平台 Hook)
+owner-runtime.mjs ← domains/owner-pipeline/*
+owner-state.mjs ← domains/owner-pipeline/pipeline-state-entry.ts
+owner-guard.mjs ← domains/owner-pipeline/pipeline-guard-entry.ts
+owner-handoff.mjs ← domains/owner-pipeline/pipeline-handoff-entry.ts (写入 handoff_context/handoff_hash)
+owner-archive.mjs ← domains/owner-pipeline/pipeline-archive-entry.ts
+owner-yaml-validate.mjs ← domains/owner-pipeline/pipeline-validate-entry.ts
+owner-hook-guard.mjs ← domains/owner-pipeline/pipeline-hook-guard-entry.ts (不直接安装为平台 Hook)
+owner-loop-runtime.mjs ← domains/owner-loop/*
+owner-loop-<command>.mjs ← domains/owner-loop/loop-<command>-entry.ts
+owner-loop-hook-guard.mjs ← domains/owner-loop/loop-hook-guard-entry.ts (不直接安装为平台 Hook)
 owner-entry-runtime.mjs ← domains/owner-entry/*
 owner-hook-router.mjs ← domains/owner-entry/* (平台唯一 Hook 入口，路由一个 workflow Guard)
 ```
 
-Classic 命令之间新增共享工具函数时（如 archive 目录解析、change name 校验、hash、yaml 解析），优先放在 `domains/owner-classic/` 的共享模块中，再重新生成全部 bundle，避免多个命令漂移。跨 workflow 的稳定契约放在 `domains/workflow-contract/`，入口归属与路由放在 `domains/owner-entry/`；不要为了复用而合并 Native 与 Classic 的状态机或 Guard。
+Pipeline 命令之间新增共享工具函数时（如 archive 目录解析、change name 校验、hash、yaml 解析），优先放在 `domains/owner-pipeline/` 的共享模块中，再重新生成全部 bundle，避免多个命令漂移。跨 workflow 的稳定契约放在 `domains/workflow-contract/`，入口归属与路由放在 `domains/owner-entry/`；不要为了复用而合并 Loop 与 Pipeline 的状态机或 Guard。
 
 ## .owner.yaml 状态机
 
 每个 change 的状态文件，字段变更需要同步三处：
 
-1. `domains/owner-classic/classic-state-command.ts` — `set` 白名单 + enum 验证
-2. `domains/owner-classic/classic-validate-command.ts` — schema 校验 + KNOWN_KEYS
-3. `test/domains/owner-classic/owner-scripts.test.ts` — 测试中的 yaml 字符串
+1. `domains/owner-pipeline/pipeline-state-command.ts` — `set` 白名单 + enum 验证
+2. `domains/owner-pipeline/pipeline-validate-command.ts` — schema 校验 + KNOWN_KEYS
+3. `test/domains/owner-pipeline/owner-scripts.test.ts` — 测试中的 yaml 字符串
 
 ## 双语言 Skill
 

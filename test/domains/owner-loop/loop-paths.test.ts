@@ -1,0 +1,156 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+
+import {
+  inspectLoopRuntimeStorage,
+  loopChangeRuntimeDir,
+  loopLegacyChangeRuntimeDir,
+  loopPreferredChangeRuntimeDir,
+  loopProjectPaths,
+  loopRuntimeRefFile,
+  loopStorageRoot,
+  normalizeArtifactRootRef,
+  resolveArtifactRoot,
+} from '../../../domains/owner-loop/loop-paths.js';
+
+describe('Loop artifact root safety', () => {
+  let projectRoot: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-loop-paths-'));
+    outside = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-loop-outside-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['.', '.'],
+    ['docs', 'docs'],
+    ['docs\\specs', 'docs/specs'],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(normalizeArtifactRootRef(input)).toBe(expected);
+  });
+
+  it.each(['../docs', '/tmp/docs', 'C:\\docs', '~/.docs', ''])('rejects %s', (input) => {
+    expect(() => normalizeArtifactRootRef(input)).toThrow();
+  });
+
+  it('accepts an in-project directory junction', async () => {
+    const actual = path.join(projectRoot, 'actual');
+    const link = path.join(projectRoot, 'linked');
+    await fs.mkdir(actual);
+    await fs.symlink(actual, link, process.platform === 'win32' ? 'junction' : 'dir');
+
+    expect(await resolveArtifactRoot(projectRoot, 'linked')).toBe(link);
+  });
+
+  it('rejects a junction that escapes the project', async () => {
+    const link = path.join(projectRoot, 'escaped');
+    await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(resolveArtifactRoot(projectRoot, 'escaped')).rejects.toThrow(
+      'resolves outside the project root',
+    );
+  });
+
+  it('rejects a configured owner root that is itself a junction', async () => {
+    const linkedRoot = path.join(projectRoot, 'owner');
+    await fs.symlink(outside, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(loopProjectPaths(projectRoot, '.')).rejects.toThrow(
+      'Loop owner root must not be a symbolic link',
+    );
+  });
+
+  it('rejects a .owner parent junction that redirects Runtime outside the project', async () => {
+    await fs.symlink(
+      outside,
+      path.join(projectRoot, '.owner'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    await expect(loopProjectPaths(projectRoot, 'docs')).rejects.toThrow(
+      'Loop Runtime root resolves outside the project root',
+    );
+  });
+
+  it('keeps Runtime project-local when the document artifact root changes', async () => {
+    const rootPaths = await loopProjectPaths(projectRoot, '.');
+    const docsPaths = await loopProjectPaths(projectRoot, 'docs');
+
+    expect(rootPaths.runtimeDir).toBe(path.join(projectRoot, '.owner', 'runtime', 'loop'));
+    expect(docsPaths.runtimeDir).toBe(rootPaths.runtimeDir);
+    expect(loopPreferredChangeRuntimeDir(docsPaths, 'focused-change')).toBe(
+      path.join(projectRoot, '.owner', 'runtime', 'loop', 'changes', 'focused-change'),
+    );
+  });
+
+  it('reports preferred, legacy, missing, and conflicting Runtime storage', async () => {
+    const paths = await loopProjectPaths(projectRoot, 'docs');
+    const name = 'runtime-health';
+    const preferred = loopPreferredChangeRuntimeDir(paths, name);
+    const legacy = loopLegacyChangeRuntimeDir(paths, name);
+
+    await expect(inspectLoopRuntimeStorage(paths, name)).resolves.toMatchObject({
+      status: 'missing',
+      layout: 'missing',
+      path: preferred,
+    });
+    expect(loopChangeRuntimeDir(paths, name)).toBe(preferred);
+
+    await fs.mkdir(preferred, { recursive: true });
+    await expect(inspectLoopRuntimeStorage(paths, name)).resolves.toMatchObject({
+      status: 'available',
+      layout: 'project-local',
+      path: preferred,
+    });
+    expect(loopChangeRuntimeDir(paths, name)).toBe(preferred);
+
+    await fs.rm(preferred, { recursive: true });
+    await fs.mkdir(legacy, { recursive: true });
+    await expect(inspectLoopRuntimeStorage(paths, name)).resolves.toMatchObject({
+      status: 'available',
+      layout: 'legacy',
+      path: legacy,
+    });
+    expect(loopChangeRuntimeDir(paths, name)).toBe(legacy);
+
+    await fs.mkdir(preferred, { recursive: true });
+    await expect(inspectLoopRuntimeStorage(paths, name)).resolves.toMatchObject({
+      status: 'invalid',
+      layout: 'project-local',
+      message: 'Both project-local and legacy Loop Runtime directories exist',
+    });
+
+    await fs.rm(legacy, { recursive: true });
+    await fs.rm(preferred, { recursive: true });
+    await fs.writeFile(preferred, 'not a directory');
+    await expect(inspectLoopRuntimeStorage(paths, name)).resolves.toMatchObject({
+      status: 'invalid',
+      layout: 'project-local',
+      message: 'Loop Runtime path must be a real directory',
+    });
+  });
+
+  it('keeps Runtime references and storage roots contained', async () => {
+    const paths = await loopProjectPaths(projectRoot, 'docs');
+
+    expect(loopRuntimeRefFile(paths.runtimeDir, 'runtime/changes/example/state.json')).toBe(
+      path.join(paths.runtimeDir, 'changes', 'example', 'state.json'),
+    );
+    expect(() => loopRuntimeRefFile(paths.runtimeDir, '../outside.json')).toThrow(
+      'Invalid Loop Runtime ref',
+    );
+    expect(loopStorageRoot(paths, paths.runtimeDir)).toBe(paths.runtimeDir);
+    expect(loopStorageRoot(paths, paths.loopRoot)).toBe(paths.loopRoot);
+    expect(() => loopStorageRoot(paths, projectRoot)).toThrow(
+      'outside Loop document and Runtime roots',
+    );
+  });
+});

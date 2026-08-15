@@ -7,7 +7,7 @@ import { resolveInitWorkflow } from '../../../domains/owner-entry/init-workflow.
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
+} from '../../../domains/owner-loop/loop-config.js';
 
 describe('Owner init workflow policy', () => {
   let projectRoot: string;
@@ -20,14 +20,14 @@ describe('Owner init workflow policy', () => {
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('defaults a project with no Owner history to Native without writing during resolution', async () => {
+  it('defaults a project with no Owner history to Loop without writing during resolution', async () => {
     const before = await fs.readdir(projectRoot);
 
     await expect(resolveInitWorkflow(projectRoot)).resolves.toEqual({
-      workflow: 'native',
+      workflow: 'loop',
       source: 'new-project-default',
       artifactRoot: 'docs',
-      classicArtifactLayout: 'docs',
+      pipelineArtifactLayout: 'docs',
       writeProjectConfig: true,
       legacyEvidence: [],
     });
@@ -39,13 +39,13 @@ describe('Owner init workflow policy', () => {
     '.owner/config.yaml',
     'openspec/changes/active-change/.owner.yaml',
     'openspec/changes/archive/old-change/.owner.yaml',
-  ])('preserves the Classic fallback when legacy evidence exists at %s', async (legacyPath) => {
+  ])('preserves the Pipeline fallback when legacy evidence exists at %s', async (legacyPath) => {
     const file = path.join(projectRoot, ...legacyPath.split('/'));
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, 'workflow: full\n', 'utf8');
 
     await expect(resolveInitWorkflow(projectRoot)).resolves.toMatchObject({
-      workflow: 'classic',
+      workflow: 'pipeline',
       source: 'legacy-project',
       writeProjectConfig: false,
       legacyEvidence: [legacyPath],
@@ -53,12 +53,12 @@ describe('Owner init workflow policy', () => {
   });
 
   it.each(['openspec', 'docs/superpowers'])(
-    'does not mistake standalone %s usage for an existing Owner Classic project',
+    'does not mistake standalone %s usage for an existing Owner Pipeline project',
     async (standalonePath) => {
       await fs.mkdir(path.join(projectRoot, ...standalonePath.split('/')), { recursive: true });
 
       await expect(resolveInitWorkflow(projectRoot)).resolves.toMatchObject({
-        workflow: 'native',
+        workflow: 'loop',
         source: 'new-project-default',
         writeProjectConfig: true,
         legacyEvidence: [],
@@ -74,13 +74,13 @@ describe('Owner init workflow policy', () => {
     );
 
     await expect(resolveInitWorkflow(projectRoot)).resolves.toMatchObject({
-      workflow: 'classic',
+      workflow: 'pipeline',
       source: 'legacy-project',
       legacyEvidence: ['AGENTS.md#owner-ambient-resume'],
     });
   });
 
-  it('does not mistake the workflow-neutral v2 resume block for Classic state', async () => {
+  it('does not mistake the workflow-neutral v2 resume block for Pipeline state', async () => {
     await fs.writeFile(
       path.join(projectRoot, 'AGENTS.md'),
       [
@@ -93,7 +93,7 @@ describe('Owner init workflow policy', () => {
     );
 
     await expect(resolveInitWorkflow(projectRoot)).resolves.toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       source: 'new-project-default',
       legacyEvidence: [],
     });
@@ -160,56 +160,56 @@ describe('Owner init workflow policy', () => {
     }
 
     await expect(resolveInitWorkflow(projectRoot)).resolves.toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       source: 'new-project-default',
       legacyEvidence: [],
     });
   });
 
-  it('lets an explicit Native choice override legacy fallback and select a custom root', async () => {
+  it('lets an explicit Loop choice override legacy fallback and select a custom root', async () => {
     const state = path.join(projectRoot, 'openspec', 'changes', 'legacy', '.owner.yaml');
     await fs.mkdir(path.dirname(state), { recursive: true });
     await fs.writeFile(state, 'workflow: full\n', 'utf8');
 
     await expect(
-      resolveInitWorkflow(projectRoot, { workflow: 'native', artifactRoot: 'docs' }),
+      resolveInitWorkflow(projectRoot, { workflow: 'loop', artifactRoot: 'docs' }),
     ).resolves.toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       source: 'explicit-option',
       artifactRoot: 'docs',
-      classicArtifactLayout: 'legacy',
+      pipelineArtifactLayout: 'legacy',
       writeProjectConfig: true,
       legacyEvidence: ['openspec/changes/legacy/.owner.yaml'],
     });
   });
 
-  it('treats an explicit Native root as an explicit Native choice', async () => {
+  it('treats an explicit Loop root as an explicit Loop choice', async () => {
     await fs.mkdir(path.join(projectRoot, '.owner'));
     await fs.writeFile(path.join(projectRoot, '.owner', 'config.yaml'), 'language: en\n', 'utf8');
 
     await expect(resolveInitWorkflow(projectRoot, { artifactRoot: 'docs' })).resolves.toMatchObject(
       {
-        workflow: 'native',
+        workflow: 'loop',
         source: 'explicit-option',
         artifactRoot: 'docs',
-        classicArtifactLayout: 'docs',
+        pipelineArtifactLayout: 'docs',
         writeProjectConfig: true,
       },
     );
   });
 
-  it('persists an explicit Classic choice for a new project', async () => {
-    await expect(resolveInitWorkflow(projectRoot, { workflow: 'classic' })).resolves.toEqual({
-      workflow: 'classic',
+  it('persists an explicit Pipeline choice for a new project', async () => {
+    await expect(resolveInitWorkflow(projectRoot, { workflow: 'pipeline' })).resolves.toEqual({
+      workflow: 'pipeline',
       source: 'explicit-option',
       artifactRoot: 'docs',
-      classicArtifactLayout: 'docs',
+      pipelineArtifactLayout: 'docs',
       writeProjectConfig: true,
       legacyEvidence: [],
     });
   });
 
-  it.each(['native', 'classic'] as const)(
+  it.each(['loop', 'pipeline'] as const)(
     'keeps an existing %s project config authoritative',
     async (workflow) => {
       const config = defaultProjectConfig('docs');
@@ -220,61 +220,65 @@ describe('Owner init workflow policy', () => {
         workflow,
         source: 'project-config',
         artifactRoot: 'docs',
-        classicArtifactLayout: 'docs',
+        pipelineArtifactLayout: 'docs',
         writeProjectConfig: false,
         legacyEvidence: [],
       });
     },
   );
 
-  it('chooses docs when a Native-only project enables Classic for the first time', async () => {
+  it('chooses docs when a Loop-only project enables Pipeline for the first time', async () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('docs'));
 
-    await expect(resolveInitWorkflow(projectRoot, { workflow: 'classic' })).resolves.toMatchObject({
-      workflow: 'classic',
-      source: 'explicit-option',
-      artifactRoot: 'docs',
-      classicArtifactLayout: 'docs',
-      writeProjectConfig: true,
-    });
+    await expect(resolveInitWorkflow(projectRoot, { workflow: 'pipeline' })).resolves.toMatchObject(
+      {
+        workflow: 'pipeline',
+        source: 'explicit-option',
+        artifactRoot: 'docs',
+        pipelineArtifactLayout: 'docs',
+        writeProjectConfig: true,
+      },
+    );
   });
 
   it('lets an explicit workflow change only the configured default entry', async () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
 
-    await expect(resolveInitWorkflow(projectRoot, { workflow: 'classic' })).resolves.toEqual({
-      workflow: 'classic',
+    await expect(resolveInitWorkflow(projectRoot, { workflow: 'pipeline' })).resolves.toEqual({
+      workflow: 'pipeline',
       source: 'explicit-option',
       artifactRoot: '.',
-      classicArtifactLayout: 'docs',
+      pipelineArtifactLayout: 'docs',
       writeProjectConfig: true,
       legacyEvidence: [],
     });
   });
 
-  it('preserves an explicit dormant Classic layout when a Native-only project enables Classic', async () => {
+  it('preserves an explicit dormant Pipeline layout when a Loop-only project enables Pipeline', async () => {
     const config = defaultProjectConfig('docs');
-    config.classic = { artifact_layout: 'legacy' };
+    config.pipeline = { artifact_layout: 'legacy' };
     await writeProjectConfig(projectRoot, config);
 
-    await expect(resolveInitWorkflow(projectRoot, { workflow: 'classic' })).resolves.toMatchObject({
-      workflow: 'classic',
-      classicArtifactLayout: 'legacy',
-      writeProjectConfig: true,
-    });
+    await expect(resolveInitWorkflow(projectRoot, { workflow: 'pipeline' })).resolves.toMatchObject(
+      {
+        workflow: 'pipeline',
+        pipelineArtifactLayout: 'legacy',
+        writeProjectConfig: true,
+      },
+    );
   });
 
   it('fails closed when an explicit root conflicts with project config', async () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('docs'));
 
     await expect(resolveInitWorkflow(projectRoot, { artifactRoot: 'artifacts' })).rejects.toThrow(
-      /configured Native artifact root is docs/u,
+      /configured Loop artifact root is docs/u,
     );
   });
 
-  it('rejects a Native artifact root for an explicitly Classic initialization', async () => {
+  it('rejects a Loop artifact root for an explicitly Pipeline initialization', async () => {
     await expect(
-      resolveInitWorkflow(projectRoot, { workflow: 'classic', artifactRoot: 'docs' }),
-    ).rejects.toThrow(/--root is only valid with the Native workflow/u);
+      resolveInitWorkflow(projectRoot, { workflow: 'pipeline', artifactRoot: 'docs' }),
+    ).rejects.toThrow(/--root is only valid with the Loop workflow/u);
   });
 });

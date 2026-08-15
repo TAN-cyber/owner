@@ -6,8 +6,8 @@ Owner is a resumable vibe-coding workflow for Claude Code and Codex. It turns an
 
 Owner provides two independent workflows:
 
-- **Native**: `Shape → Build ↔ Verify → Archive`. A self-contained runtime for strong autonomous models. It does not depend on OpenSpec or Superpowers.
-- **Classic**: `Open → Design → Build → Verify → Archive`. OpenSpec owns WHAT, Superpowers owns design/TDD/debug/review methods, and Owner owns orchestration, guards, recovery, and archive.
+- **Loop**: `Shape → Build ↔ Verify → Archive`. A self-contained runtime for strong autonomous models. It does not depend on OpenSpec or Superpowers.
+- **Pipeline**: `Open → Design → Build → Verify → Archive`. OpenSpec owns WHAT, Superpowers owns design/TDD/debug/review methods, and Owner owns orchestration, guards, recovery, and archive.
 
 Supported hosts:
 
@@ -22,7 +22,7 @@ Owner is distributed under the MIT License. See [LICENSE](./LICENSE).
 - npm or pnpm
 - Git
 - Claude Code or Codex
-- Network access for Classic dependencies (OpenSpec and Superpowers)
+- Network access for Pipeline dependencies (OpenSpec and Superpowers)
 
 ## Install from GitHub
 
@@ -46,13 +46,13 @@ owner init /path/to/project \
   --workflow both
 ```
 
-Claude Code with Native:
+Claude Code with Loop:
 
 ```bash
 owner init /path/to/project \
   --scope project \
   --platform claude \
-  --workflow native
+  --workflow loop
 ```
 
 Global installation is explicit:
@@ -93,7 +93,7 @@ The unified entry runs:
 owner workflow resolve . --activate --json
 ```
 
-It loads exactly one of `owner-native` or `owner-classic` from `.owner/config.yaml`. It never switches workflows based on task size or model judgment.
+It loads exactly one of `owner-loop` or `owner-pipeline` from `.owner/config.yaml`. It never switches workflows based on task size or model judgment.
 
 ## Core commands
 
@@ -102,10 +102,10 @@ owner status [project] --json
 owner resume-probe [project] --utterance "continue yesterday's task" --json
 owner doctor [project] --json
 
-owner native new <change> --json
-owner native status [change] --details --json
-owner native next <change> [required inputs] --json
-owner native archive <change> --preview --json
+owner loop new <change> --json
+owner loop status [change] --details --json
+owner loop next <change> [required inputs] --json
+owner loop archive <change> --preview --json
 
 owner state init <change> full --isolation current
 owner state next <change>
@@ -114,7 +114,7 @@ owner handoff <change> design --write
 owner archive <change> --dry-run
 ```
 
-Native portable artifacts live under `docs/owner/`; local locks, logs, receipts, and transactions live under `.owner/runtime/native/`. Classic state lives in `docs/openspec/changes/<change>/.owner.yaml` by default.
+Loop portable artifacts live under `docs/owner/`; local locks, logs, receipts, and transactions live under `.owner/runtime/loop/`. Pipeline state lives in `docs/openspec/changes/<change>/.owner.yaml` by default.
 
 ## Develop
 
@@ -132,7 +132,7 @@ pnpm test:package-e2e
 1. Push this repository to GitHub.
 2. Replace `<YOUR_GITHUB_USER>` in both READMEs.
 3. Test the GitHub install command in a clean environment.
-4. Test both hosts and all three workflow selections: `native`, `classic`, and `both`.
+4. Test both hosts and all three workflow selections: `loop`, `pipeline`, and `both`.
 5. Keep LICENSE and NOTICE intact.
 
 ## Boundaries
@@ -141,7 +141,7 @@ pnpm test:package-e2e
 - Owner cannot verify a requirement that was never captured in acceptance/specs.
 - Unsynced code cannot be recovered from portable state alone.
 - A passing Verify result does not authorize push, PR, or merge.
-- Classic installs third-party OpenSpec and Superpowers packages.
+- Pipeline installs third-party OpenSpec and Superpowers packages.
 
 ## License
 

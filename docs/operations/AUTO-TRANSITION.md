@@ -1,6 +1,6 @@
 # 自动流转（Auto Transition）
 
-> 版本状态：Stable（`.owner/config.yaml` 的 `classic.auto_transition: true` 为默认值）
+> 版本状态：Stable（`.owner/config.yaml` 的 `pipeline.auto_transition: true` 为默认值）
 
 ## 概述
 
@@ -58,18 +58,18 @@ auto_transition: false
 
 `auto_transition` 支持三层配置，优先级从高到低：
 
-下文的 `<classic-change-dir>` 表示当前 `classic.artifact_layout` 解析出的 change 目录；可用 `owner classic root show` 查看其 OpenSpec 根。
+下文的 `<pipeline-change-dir>` 表示当前 `pipeline.artifact_layout` 解析出的 change 目录；可用 `owner pipeline root show` 查看其 OpenSpec 根。
 
 | 层级      | 位置                                              | 说明                                   |
 | --------- | ------------------------------------------------- | -------------------------------------- |
 | 环境变量  | `OWNER_AUTO_TRANSITION`                           | 最高优先级，适合 CI/CD 或临时覆盖      |
-| 项目级    | `.owner/config.yaml` 的 `classic.auto_transition` | 项目默认值，所有 change 继承           |
-| Change 级 | `<classic-change-dir>/.owner.yaml`                | 单个 change 的覆盖值，最高运行时优先级 |
+| 项目级    | `.owner/config.yaml` 的 `pipeline.auto_transition` | 项目默认值，所有 change 继承           |
+| Change 级 | `<pipeline-change-dir>/.owner.yaml`                | 单个 change 的覆盖值，最高运行时优先级 |
 
 解析逻辑：
 
 1. 读取 change 的 `.owner.yaml` 中的 `auto_transition`
-2. 若为 `null` 或空，回退到 `.owner/config.yaml` 的 `classic.auto_transition` 项目级默认
+2. 若为 `null` 或空，回退到 `.owner/config.yaml` 的 `pipeline.auto_transition` 项目级默认
 3. 若项目级也未设置，回退到 `true`
 
 ### 配置示例
@@ -77,12 +77,12 @@ auto_transition: false
 #### 项目级配置（`.owner/config.yaml`）
 
 ```yaml
-classic:
+pipeline:
   auto_transition: false # 本项目所有 change 默认手动转场
   context_compression: off
 ```
 
-#### Change 级配置（`<classic-change-dir>/.owner.yaml`）
+#### Change 级配置（`<pipeline-change-dir>/.owner.yaml`）
 
 ```yaml
 workflow: full
@@ -115,7 +115,7 @@ export OWNER_AUTO_TRANSITION=true
 
 ## 与上下文压缩的关系
 
-`auto_transition` 和 `context_compression` 是独立的配置项，都存储在同一配置文件的 `classic:` 块中但互不影响：
+`auto_transition` 和 `context_compression` 是独立的配置项，都存储在同一配置文件的 `pipeline:` 块中但互不影响：
 
 | 配置项                | 控制内容                               | 有效值           |
 | --------------------- | -------------------------------------- | ---------------- |

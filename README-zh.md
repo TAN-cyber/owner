@@ -2,8 +2,8 @@
 
 Owner 是一个面向 Claude Code 和 Codex 的可恢复 vibe coding 工作流。它把一次 AI 代码变更组织为需求确认、实现、验证、失败修复和归档闭环，并提供两套互相独立的工作流：
 
-- **Native**：`Shape → Build ↔ Verify → Archive`。面向自主规划能力较强的模型，使用 Owner 自带 Runtime，不依赖 OpenSpec 或 Superpowers。
-- **Classic**：`Open → Design → Build → Verify → Archive`。使用 OpenSpec 管理 WHAT，使用 Superpowers 管理深设计、计划、TDD、调试和评审，Owner 负责状态、守卫、恢复和归档。
+- **Loop**：`Shape → Build ↔ Verify → Archive`。面向自主规划能力较强的模型，使用 Owner 自带 Runtime，不依赖 OpenSpec 或 Superpowers。
+- **Pipeline**：`Open → Design → Build → Verify → Archive`。使用 OpenSpec 管理 WHAT，使用 Superpowers 管理深设计、计划、TDD、调试和评审，Owner 负责状态、守卫、恢复和归档。
 
 Owner 仅支持：
 
@@ -24,9 +24,9 @@ Owner 使用 MIT License。详见 [LICENSE](./LICENSE)。
 
 Owner 用磁盘状态、阶段守卫、候选版本、Runtime check receipt、独立验证、失败预算、工作区绑定和归档事务处理这些问题。
 
-## Native 与 Classic 怎么选
+## Loop 与 Pipeline 怎么选
 
-| 维度 | Native | Classic |
+| 维度 | Loop | Pipeline |
 |---|---|---|
 | 流程 | Shape → Build ↔ Verify → Archive | Open → Design → Build → Verify → Archive |
 | 规格 | brief + 完整目标 spec + acceptance | OpenSpec proposal + delta spec + tasks |
@@ -44,7 +44,7 @@ Owner 用磁盘状态、阶段守卫、候选版本、Runtime check receipt、�
 - npm 或 pnpm
 - Git
 - Claude Code 或 Codex
-- Classic 模式需要网络安装 OpenSpec 与 Superpowers
+- Pipeline 模式需要网络安装 OpenSpec 与 Superpowers
 
 ## 从 GitHub 安装
 
@@ -72,25 +72,25 @@ npm link
 
 ### 安装到一个项目
 
-Codex + Native：
+Codex + Loop：
 
 ```bash
 owner init /path/to/project \
   --scope project \
   --platform codex \
-  --workflow native
+  --workflow loop
 ```
 
-Claude Code + Classic：
+Claude Code + Pipeline：
 
 ```bash
 owner init /path/to/project \
   --scope project \
   --platform claude \
-  --workflow classic
+  --workflow pipeline
 ```
 
-同时安装 Native 和 Classic：
+同时安装 Loop 和 Pipeline：
 
 ```bash
 owner init /path/to/project \
@@ -153,21 +153,21 @@ $owner 实现订单取消与幂等退款
 owner workflow resolve . --activate --json
 ```
 
-它只返回 `owner-native` 或 `owner-classic`，不会根据文件数或模型临场判断切换工作流。
+它只返回 `owner-loop` 或 `owner-pipeline`，不会根据文件数或模型临场判断切换工作流。
 
 ### 显式入口
 
 ```text
-/owner-native   # Claude Code
-/owner-classic  # Claude Code
+/owner-loop   # Claude Code
+/owner-pipeline  # Claude Code
 
-$owner-native   # Codex
-$owner-classic  # Codex
+$owner-loop   # Codex
+$owner-pipeline  # Codex
 ```
 
-## Native 工作流
+## Loop 工作流
 
-Native 用户可读产物默认位于：
+Loop 用户可读产物默认位于：
 
 ```text
 docs/owner/
@@ -180,20 +180,20 @@ docs/owner/
 └── archive/
 ```
 
-本机锁、日志、任务、receipt 和 transaction 位于 `.owner/runtime/native/`，不应提交到 Git。
+本机锁、日志、任务、receipt 和 transaction 位于 `.owner/runtime/loop/`，不应提交到 Git。
 
 常用 Runtime 命令：
 
 ```bash
-owner native new <change> --isolation current --json
-owner native status [change] --details --json
-owner native show <change> --json
-owner native next <change> [required inputs] --json
-owner native doctor [change] --json
-owner native archive <change> --preview --json
+owner loop new <change> --isolation current --json
+owner loop status [change] --details --json
+owner loop show <change> --json
+owner loop next <change> [required inputs] --json
+owner loop doctor [change] --json
+owner loop archive <change> --preview --json
 ```
 
-Native 使用：
+Loop 使用：
 
 - 严格 portable state schema；
 - `state_version` compare-and-swap；
@@ -205,16 +205,16 @@ Native 使用：
 - 有预算的 Build/Verify 修复循环；
 - 跨设备恢复后的重新验证。
 
-## Classic 工作流
+## Pipeline 工作流
 
-Classic 项目默认使用：
+Pipeline 项目默认使用：
 
 ```text
 docs/openspec/changes/<change>/.owner.yaml
 docs/superpowers/
 ```
 
-永久入口是 `owner-classic`，阶段 Skills 包括：
+永久入口是 `owner-pipeline`，阶段 Skills 包括：
 
 | 阶段 | Skill | 职责 |
 |---|---|---|
@@ -228,9 +228,9 @@ docs/superpowers/
 
 - `owner-hotfix`：修复已有行为，先复现 RED 和根因分析；
 - `owner-tweak`：单 change 的局部规格修改；
-- `owner-classic` full：高风险或跨模块能力。
+- `owner-pipeline` full：高风险或跨模块能力。
 
-Classic 常用 Runtime 命令：
+Pipeline 常用 Runtime 命令：
 
 ```bash
 owner state init <change> full --isolation current
@@ -239,7 +239,7 @@ owner state next <change>
 owner guard <change> <phase> --apply
 owner handoff <change> design --write
 owner archive <change> --dry-run
-owner classic openspec -- status --change <change> --json
+owner pipeline openspec -- status --change <change> --json
 ```
 
 ## 恢复与诊断
@@ -288,7 +288,7 @@ npm pack --dry-run
 2. 把 README 中的 `<YOUR_GITHUB_USER>` 替换为真实账号。
 3. 在干净机器或容器运行 GitHub 安装命令。
 4. 分别验证 `--platform claude` 与 `--platform codex`。
-5. 分别验证 `--workflow native`、`classic` 和 `both`。
+5. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
 6. 保留 LICENSE 与 NOTICE，不要删除上游版权声明。
 
 ## 安全边界
@@ -297,7 +297,7 @@ npm pack --dry-run
 - 独立 Verifier 不能保证业务绝对正确；高风险系统仍需要可信 CI、人工评审和生产监控。
 - Owner 只能验证已经明确写入 acceptance/spec 的行为。
 - Verify 通过不自动表示用户授权 push、PR 或 merge。
-- Classic 会安装第三方 OpenSpec 与 Superpowers，它们有各自的许可证和更新周期。
+- Pipeline 会安装第三方 OpenSpec 与 Superpowers，它们有各自的许可证和更新周期。
 
 ## 许可证与来源
 
@@ -306,6 +306,6 @@ Owner 使用 MIT License。
 - 品牌、CLI、状态目录、Skill 和 schema 统一改为 Owner；
 - 公开平台限制为 Claude Code 与 Codex；
 - 包名与 GitHub 分发说明改为独立项目；
-- 保留 Native 与 Classic 双工作流、Runtime、测试和生成物体系。
+- 保留 Loop 与 Pipeline 双工作流、Runtime、测试和生成物体系。
 
 详细归属信息见 [NOTICE](./NOTICE)。

@@ -4,10 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { workflowResolveCommand } from '../../app/commands/workflow.js';
-import {
-  defaultProjectConfig,
-  writeProjectConfig,
-} from '../../domains/owner-native/native-config.js';
+import { defaultProjectConfig, writeProjectConfig } from '../../domains/owner-loop/loop-config.js';
 
 describe('workflow resolve command', () => {
   let projectRoot: string;
@@ -29,8 +26,8 @@ describe('workflow resolve command', () => {
 
     expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual({
       schema: 'owner.workflow-resolution.v1',
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       source: 'project-config',
     });
   });
@@ -56,7 +53,7 @@ describe('workflow resolve command', () => {
 
     expect(JSON.parse(log.mock.calls[0][0] as string)).toMatchObject({
       schema: 'owner.workflow-resolution.v1',
-      workflow: 'native',
+      workflow: 'loop',
       source: 'built-in-default',
     });
     await expect(

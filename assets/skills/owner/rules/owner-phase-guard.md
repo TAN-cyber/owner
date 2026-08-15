@@ -8,7 +8,7 @@
 
 ### 阶段感知（最高优先级）
 
-有活跃 owner change 时（Classic layout resolver 绑定的 `<classic-change-dir>/.owner.yaml` 存在），**每次开始执行操作前**必须读取 `phase` 字段确认当前阶段。
+有活跃 owner change 时（Pipeline layout resolver 绑定的 `<pipeline-change-dir>/.owner.yaml` 存在），**每次开始执行操作前**必须读取 `phase` 字段确认当前阶段。
 
 当存在多个 active change 时，必须先明确当前 change，再运行：
 
@@ -28,7 +28,7 @@ owner state select <change-name>
 | `verify` | 验证、记录验证报告 | 跳过失败处理、提前处理分支 |
 | `archive` | 确认归档、运行归档脚本、提交归档改动、分支处理 | 写源代码 |
 
-Hook 硬拦截仅豁免 Classic layout resolver 返回的当前阶段合法产物，以及 Owner 自有的 `.owner/*`、`.superpowers/*` 控制工作区和根目录 Markdown。配置目录及其中的 worktree/source 文件不属于通用豁免范围，必须服从当前 change 的阶段约束。
+Hook 硬拦截仅豁免 Pipeline layout resolver 返回的当前阶段合法产物，以及 Owner 自有的 `.owner/*`、`.superpowers/*` 控制工作区和根目录 Markdown。配置目录及其中的 worktree/source 文件不属于通用豁免范围，必须服从当前 change 的阶段约束。
 
 ### 阶段进入自洽性校验（写源代码前必查）
 
@@ -113,8 +113,8 @@ owner state check <name> <phase> --recover
 
 **特别注意 `build_mode`**：若恢复脚本输出 `build_mode: subagent-driven-development`，你是协调者，不是执行者。必须：
 1. 使用 Skill 工具重新加载 Superpowers `subagent-driven-development` 技能 (Use the Skill tool to reload the Superpowers `subagent-driven-development` skill)
-2. 读取 `owner-classic/reference/subagent-dispatch.md` 获取 Owner 专属扩展 (re-read `owner-classic/reference/subagent-dispatch.md` for Owner-specific extensions)
-3. 读取 `<classic-change-dir>/.owner/subagent-progress.md` 恢复精确阶段、证据和审查-修复轮次 (Read `<classic-change-dir>/.owner/subagent-progress.md` to recover the exact stage, evidence, and review-fix round)
+2. 读取 `owner-pipeline/reference/subagent-dispatch.md` 获取 Owner 专属扩展 (re-read `owner-pipeline/reference/subagent-dispatch.md` for Owner-specific extensions)
+3. 读取 `<pipeline-change-dir>/.owner/subagent-progress.md` 恢复精确阶段、证据和审查-修复轮次 (Read `<pipeline-change-dir>/.owner/subagent-progress.md` to recover the exact stage, evidence, and review-fix round)
 4. 禁止在主会话中直接执行 task (Do not execute the pending task directly in the main window)
 5. 按检查点恢复；缺失或不匹配时才从第一个未勾选 task 开始
 6. 已提交但未按 `review_mode` 完成验收的 task 保持未勾选，继续对应的验证/审查/修复循环

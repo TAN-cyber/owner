@@ -1,11 +1,11 @@
 ---
 name: owner-design
-description: "Phase 2 of Owner Classic — produce the deep technical Design Doc behind a change."
+description: "Phase 2 of Owner Pipeline — produce the deep technical Design Doc behind a change."
 ---
 
 # Owner Phase 2: Deep Design (Design)
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ Before starting or recovering, read and follow `owner-classic/reference/classic-
 
 ### 0. Entry State Verification (Entry Check)
 
-Locate scripts via `owner-classic/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-classic/reference/context-recovery.md`:
+Locate scripts via `owner-pipeline/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-pipeline/reference/context-recovery.md`:
 
 ```bash
 owner state select <change-name>
@@ -42,21 +42,21 @@ The script reads the change `.owner.yaml` `context_compression` snapshot, then g
 Default `context_compression: off` generates:
 
 ```
-<classic-change-dir>/.owner/handoff/design-context.json
-<classic-change-dir>/.owner/handoff/design-context.md
+<pipeline-change-dir>/.owner/handoff/design-context.json
+<pipeline-change-dir>/.owner/handoff/design-context.md
 ```
 
-Beta mode (`classic.context_compression: beta` in project `.owner/config.yaml`, snapshotted into `.owner.yaml` when the change is created) generates:
+Beta mode (`pipeline.context_compression: beta` in project `.owner/config.yaml`, snapshotted into `.owner.yaml` when the change is created) generates:
 
 ```
-<classic-change-dir>/.owner/handoff/spec-context.json
-<classic-change-dir>/.owner/handoff/spec-context.md
+<pipeline-change-dir>/.owner/handoff/spec-context.json
+<pipeline-change-dir>/.owner/handoff/spec-context.md
 ```
 
 And writes to `.owner.yaml`:
 
 ```yaml
-handoff_context: <classic-change-dir>/.owner/handoff/design-context.json
+handoff_context: <pipeline-change-dir>/.owner/handoff/design-context.json
 handoff_hash: <sha256>
 ```
 
@@ -96,12 +96,12 @@ After the skill loads, follow its guidance and use the following context:
 
 ```
 Change: <change-name>
-OpenSpec Context Pack: <classic-change-dir>/.owner/handoff/design-context.md
-Machine handoff: <classic-change-dir>/.owner/handoff/design-context.json
+OpenSpec Context Pack: <pipeline-change-dir>/.owner/handoff/design-context.md
+Machine handoff: <pipeline-change-dir>/.owner/handoff/design-context.json
 
 If context_compression is beta, use:
-OpenSpec Context Pack: <classic-change-dir>/.owner/handoff/spec-context.md
-Machine handoff: <classic-change-dir>/.owner/handoff/spec-context.json
+OpenSpec Context Pack: <pipeline-change-dir>/.owner/handoff/spec-context.md
+Machine handoff: <pipeline-change-dir>/.owner/handoff/spec-context.json
 
 OpenSpec artifacts are the upstream source of truth, but you must not weaken the Superpowers `brainstorming` clarification flow by "skipping redundant context exploration".
 Your task is to perform deep technical design based on the handoff package: implementation approach, technical risks, testing strategy, boundary conditions.
@@ -134,7 +134,7 @@ For context compaction recovery, the agent must incrementally update `brainstorm
 
 ### 1c. User Confirms Design Proposal (Blocking Point)
 
-After brainstorming produces a design proposal, **must follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for the user to explicitly confirm the design proposal**. Must not create the final Design Doc, write `design_doc`, run design guard, or enter `/owner-build` before user confirmation.
+After brainstorming produces a design proposal, **must follow the `owner-pipeline/reference/decision-point.md` protocol to pause and wait for the user to explicitly confirm the design proposal**. Must not create the final Design Doc, write `design_doc`, run design guard, or enter `/owner-build` before user confirmation.
 
 When pausing, only present essential summary:
 - Technical approach adopted
@@ -148,9 +148,9 @@ Only after the user explicitly confirms, proceed to Step 2. If the user requests
 
 After the user confirms the design proposal, before creating the Design Doc, create or update the incrementally maintained checkpoint file and finalize it as the confirmed design summary:
 
-Use the file tool to ensure `<classic-change-dir>/.owner/handoff/` exists; do not rely on a POSIX-only directory command.
+Use the file tool to ensure `<pipeline-change-dir>/.owner/handoff/` exists; do not rely on a POSIX-only directory command.
 
-`<classic-change-dir>/.owner/handoff/brainstorm-summary.md` structure:
+`<pipeline-change-dir>/.owner/handoff/brainstorm-summary.md` structure:
 
 ```markdown
 # Brainstorm Summary
@@ -176,9 +176,9 @@ Use the file tool to ensure `<classic-change-dir>/.owner/handoff/` exists; do no
 ```
 
 **Context compaction note**: Each incremental update to `brainstorm-summary.md` is a relatively safe recovery point. After brainstorming completes, if the context window is tight, prefer compacting here. After compaction, reload the following files to continue Step 2:
-- `<classic-change-dir>/.owner/handoff/brainstorm-summary.md`
-- `<classic-change-dir>/.owner/handoff/design-context.md` (or `spec-context.md` in beta mode)
-- `<classic-change-dir>/.owner/handoff/design-context.json` (or `spec-context.json` in beta mode)
+- `<pipeline-change-dir>/.owner/handoff/brainstorm-summary.md`
+- `<pipeline-change-dir>/.owner/handoff/design-context.md` (or `spec-context.md` in beta mode)
+- `<pipeline-change-dir>/.owner/handoff/design-context.json` (or `spec-context.json` in beta mode)
 
 ### 1e. Compaction Policy (Non-blocking Here)
 
@@ -248,11 +248,11 @@ owner guard <change-name> design --apply
 
 ## Context Compression Recovery
 
-Follow `owner-classic/reference/context-recovery.md` with phase set to `design`.
+Follow `owner-pipeline/reference/context-recovery.md` with phase set to `design`.
 
 ## Automatic Handoff to Next Phase
 
-Follow `owner-classic/reference/auto-transition.md`. Key command:
+Follow `owner-pipeline/reference/auto-transition.md`. Key command:
 
 ```bash
 owner state next <change-name>

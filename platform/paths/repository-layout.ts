@@ -8,11 +8,11 @@ export interface RepositoryLayout {
     en: string;
     zh: string;
   };
-  classicRuntime: {
+  pipelineRuntime: {
     entries: Record<string, string>;
     outputs: Record<string, string>;
   };
-  nativeRuntime: {
+  loopRuntime: {
     entries: { runtime: string };
     outputs: { runtime: string };
   };

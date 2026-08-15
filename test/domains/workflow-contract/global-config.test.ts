@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { defaultProjectConfig } from '../../../domains/owner-native/native-config.js';
+import { defaultProjectConfig } from '../../../domains/owner-loop/loop-config.js';
 import {
   readWorkflowGlobalConfig,
   writeWorkflowGlobalConfig,
@@ -30,9 +30,9 @@ describe('global workflow configuration', () => {
 
     await expect(readWorkflowGlobalConfig(homeDir)).resolves.toMatchObject({
       schema: 'owner.global.v1',
-      default_workflow: 'native',
-      workflows: ['native'],
-      native: { artifact_root: 'docs', language: 'zh-CN' },
+      default_workflow: 'loop',
+      workflows: ['loop'],
+      loop: { artifact_root: 'docs', language: 'zh-CN' },
     });
     const source = await fs.readFile(path.join(homeDir, '.owner', 'config.yaml'), 'utf8');
     expect(source).toContain('schema: owner.global.v1');
@@ -41,19 +41,19 @@ describe('global workflow configuration', () => {
 
   it('rejects absolute global artifact templates', async () => {
     const project = defaultProjectConfig('docs');
-    project.native.artifact_root = path.resolve(homeDir, 'artifacts');
+    project.loop.artifact_root = path.resolve(homeDir, 'artifacts');
 
     await expect(
       writeWorkflowGlobalConfig(homeDir, {
         ...project,
         schema: 'owner.global.v1',
       }),
-    ).rejects.toThrow('native.artifact_root must be a project-relative path');
+    ).rejects.toThrow('loop.artifact_root must be a project-relative path');
   });
 
-  it('rejects project-only Native root-move state in a global template', async () => {
+  it('rejects project-only Loop root-move state in a global template', async () => {
     const project = defaultProjectConfig('docs');
-    project.native.pending_root_move = {
+    project.loop.pending_root_move = {
       id: 'move-1',
       fromArtifactRoot: 'docs',
       toArtifactRoot: 'artifacts',
@@ -65,16 +65,16 @@ describe('global workflow configuration', () => {
         ...project,
         schema: 'owner.global.v1',
       }),
-    ).rejects.toThrow('Global Owner config cannot contain native.pending_root_move');
+    ).rejects.toThrow('Global Owner config cannot contain loop.pending_root_move');
   });
 
-  it('migrates legacy global Classic defaults without changing their values', async () => {
+  it('migrates legacy global Pipeline defaults without changing their values', async () => {
     await fs.mkdir(path.join(homeDir, '.owner'));
     await fs.writeFile(
       path.join(homeDir, '.owner', 'config.yaml'),
       [
         'ambient_resume: false',
-        'classic:',
+        'pipeline:',
         '  language: zh-CN',
         '  artifact_layout: legacy',
         '  review_mode: thorough',
@@ -85,10 +85,10 @@ describe('global workflow configuration', () => {
 
     await expect(readWorkflowGlobalConfig(homeDir)).resolves.toMatchObject({
       schema: 'owner.global.v1',
-      default_workflow: 'classic',
-      workflows: ['classic'],
+      default_workflow: 'pipeline',
+      workflows: ['pipeline'],
       ambient_resume: false,
-      classic: {
+      pipeline: {
         language: 'zh-CN',
         artifact_layout: 'legacy',
         review_mode: 'thorough',

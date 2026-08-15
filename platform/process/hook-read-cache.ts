@@ -12,7 +12,7 @@
  * cache dies with the process.
  *
  * The cache is opt-in: only the Hook entry point activates it, and only the
- * Hook-path read functions consult it. CLI commands, writes, and Native
+ * Hook-path read functions consult it. CLI commands, writes, and Loop
  * receipt/hash verification never go through this cache. This module lives
  * in `platform/` so every domain can share it without creating import
  * cycles (no domain dependency on a higher layer).

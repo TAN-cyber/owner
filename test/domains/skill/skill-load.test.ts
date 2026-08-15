@@ -139,7 +139,7 @@ confirmationRequiredFor: []
   });
 
   it('loads a YAML-only runtime package from root-level control files', async () => {
-    const runtimeRoot = path.join(tmpDir, 'runtime', 'classic');
+    const runtimeRoot = path.join(tmpDir, 'runtime', 'pipeline');
     await fs.mkdir(runtimeRoot, { recursive: true });
     await fs.writeFile(path.join(runtimeRoot, 'skill.yaml'), skillDefinition);
     await fs.writeFile(

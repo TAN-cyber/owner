@@ -58,7 +58,7 @@ describe('Owner entry resolver runtime release asset', () => {
     expect(source.startsWith('#!/usr/bin/env node\n')).toBe(true);
     expect(source).toContain('owner.workflow-resolution.v1');
     expect(source).not.toMatch(
-      /openspec|superpowers|owner native|owner state|owner guard|runNativeCli|runClassicCli|classic-runtime|native-runtime/iu,
+      /openspec|superpowers|owner loop|owner state|owner guard|runLoopCli|runPipelineCli|pipeline-runtime|loop-runtime/iu,
     );
     execFileSync(process.execPath, [builder, '--check'], { stdio: 'pipe' });
   });
@@ -92,16 +92,16 @@ describe('Owner entry resolver runtime release asset', () => {
     expect(outsideProject.stderr).toBe('');
   });
 
-  it('resolves Native from project config with only the bundled Skill runtime available', async () => {
-    const projectRoot = path.join(temporaryRoot, 'native-project');
+  it('resolves Loop from project config with only the bundled Skill runtime available', async () => {
+    const projectRoot = path.join(temporaryRoot, 'loop-project');
     await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true });
     await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(projectRoot, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: docs',
         '',
       ].join('\n'),
@@ -113,14 +113,14 @@ describe('Owner entry resolver runtime release asset', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
       schema: 'owner.workflow-resolution.v1',
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       source: 'project-config',
     });
   });
 
   it('fails closed when configuration is absent with only the bundled Skill runtime available', async () => {
-    const projectRoot = path.join(temporaryRoot, 'classic-project');
+    const projectRoot = path.join(temporaryRoot, 'pipeline-project');
     await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true });
 
     const result = runSkillOnly(projectRoot);
@@ -130,7 +130,7 @@ describe('Owner entry resolver runtime release asset', () => {
     expect(result.stderr).toContain('.owner/config.yaml is missing');
   });
 
-  it('fails closed on malformed config instead of falling back to Classic', async () => {
+  it('fails closed on malformed config instead of falling back to Pipeline', async () => {
     const projectRoot = path.join(temporaryRoot, 'invalid-project');
     await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true });
     await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });

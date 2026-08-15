@@ -23,8 +23,8 @@ async function makeMinimalRepository(): Promise<string> {
     assetsRoot: 'assets',
     manifestPath: 'assets/manifest.json',
     skillsRoots: { en: 'assets/skills', zh: 'assets/skills-zh' },
-    classicRuntime: {
-      entries: { state: 'domains/owner-classic/classic-state-entry.ts' },
+    pipelineRuntime: {
+      entries: { state: 'domains/owner-pipeline/pipeline-state-entry.ts' },
       outputs: { state: 'assets/skills/owner/scripts/owner-state.mjs' },
     },
     allowedTopLevelEntries: [
@@ -42,7 +42,7 @@ async function makeMinimalRepository(): Promise<string> {
     ],
     sourceRoots: ['app', 'domains', 'platform'],
     appModules: [],
-    domainModules: ['owner-classic'],
+    domainModules: ['owner-pipeline'],
     platformModules: [],
     scriptModules: [],
     testRoots: ['test'],
@@ -56,7 +56,7 @@ async function makeMinimalRepository(): Promise<string> {
     fs.mkdir(path.join(root, 'assets', 'skills-zh'), { recursive: true }),
     writeFile(root, 'config/repository-layout.json', JSON.stringify(layout, null, 2)),
     writeFile(root, 'assets/manifest.json', '{}\n'),
-    writeFile(root, 'domains/owner-classic/classic-state-entry.ts', 'export {};\n'),
+    writeFile(root, 'domains/owner-pipeline/pipeline-state-entry.ts', 'export {};\n'),
     writeFile(root, 'assets/skills/owner/scripts/owner-state.mjs', 'export {};\n'),
     writeFile(
       root,

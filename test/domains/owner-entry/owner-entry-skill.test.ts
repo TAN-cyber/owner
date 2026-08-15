@@ -15,7 +15,7 @@ describe('Chinese Owner entry Skills', () => {
 
     expect(source).toContain('name: owner');
     expect(source).toContain(
-      'description: "Owner 工作流入口。当用户明确调用 /owner，或明确要求使用 Owner 但未指定 Native/Classic 时使用；解析项目配置并加载唯一入口。"',
+      'description: "Owner 工作流入口。当用户明确调用 /owner，或明确要求使用 Owner 但未指定 Loop/Pipeline 时使用；解析项目配置并加载唯一入口。"',
     );
     expect(source).not.toContain('存在需要恢复的 active Owner change');
     expect(source).toContain('owner workflow resolve . --activate --json');
@@ -26,40 +26,40 @@ describe('Chinese Owner entry Skills', () => {
     expect(source).toContain('CLI 已启动但返回非零');
     expect(source).toContain('owner.workflow-resolution.v1');
     expect(source).toContain('只接受');
-    expect(source).toContain('/owner-native');
-    expect(source).toContain('/owner-classic');
+    expect(source).toContain('/owner-loop');
+    expect(source).toContain('/owner-pipeline');
     expect(source).toContain('不根据任务');
     expect(source.length).toBeLessThan(2_000);
     expect(source).not.toMatch(/OpenSpec|Superpowers|brainstorming|TDD|\/owner-open/iu);
   });
 
-  it('publishes the existing thick workflow only through /owner-classic', async () => {
-    const source = await readSkill(chineseRoot, 'owner-classic');
+  it('publishes the existing thick workflow only through /owner-pipeline', async () => {
+    const source = await readSkill(chineseRoot, 'owner-pipeline');
 
-    expect(source).toContain('name: owner-classic');
+    expect(source).toContain('name: owner-pipeline');
     expect(source).toContain('OpenSpec');
     expect(source).toContain('Superpowers');
     expect(source).toContain('owner state select <change-name>');
     expect(source).toContain('/owner-open');
     expect(source).toContain('/owner-build');
-    expect(source).toContain('owner-classic/reference/scripts.md');
+    expect(source).toContain('owner-pipeline/reference/scripts.md');
     expect(source.length).toBeGreaterThan(10_000);
     expect(source).not.toMatch(/\/owner(?![-/])/u);
   });
 
-  it('keeps shared Classic references on the explicit Classic entry', async () => {
-    const referenceRoot = path.join(chineseRoot, 'owner-classic', 'reference');
+  it('keeps shared Pipeline references on the explicit Pipeline entry', async () => {
+    const referenceRoot = path.join(chineseRoot, 'owner-pipeline', 'reference');
     const files = (await fs.readdir(referenceRoot)).filter((name) => name.endsWith('.md'));
     const source = (
       await Promise.all(files.map((name) => fs.readFile(path.join(referenceRoot, name), 'utf8')))
     ).join('\n');
 
-    expect(source).toContain('/owner-classic');
+    expect(source).toContain('/owner-pipeline');
     expect(source).not.toMatch(/\/owner(?![-/])/u);
   });
 
-  it('keeps Classic child Skills inside the explicit Classic entry', async () => {
-    const classicChildren = [
+  it('keeps Pipeline child Skills inside the explicit Pipeline entry', async () => {
+    const pipelineChildren = [
       'owner-open',
       'owner-design',
       'owner-build',
@@ -68,18 +68,18 @@ describe('Chinese Owner entry Skills', () => {
       'owner-hotfix',
       'owner-tweak',
     ];
-    const sources = await Promise.all(classicChildren.map((name) => readSkill(chineseRoot, name)));
+    const sources = await Promise.all(pipelineChildren.map((name) => readSkill(chineseRoot, name)));
 
     for (const source of sources) {
       expect(source).not.toMatch(/\/owner(?![-/])/u);
-      expect(source).not.toContain('/owner-native');
+      expect(source).not.toContain('/owner-loop');
     }
   });
 
-  it('publishes the bilingual Classic entry through the shared manifest', async () => {
+  it('publishes the bilingual Pipeline entry through the shared manifest', async () => {
     const manifest = JSON.parse(await fs.readFile(path.resolve('assets', 'manifest.json'), 'utf8'));
 
-    expect(manifest.skills).toContain('owner-classic/SKILL.md');
+    expect(manifest.skills).toContain('owner-pipeline/SKILL.md');
   });
 });
 
@@ -89,7 +89,7 @@ describe('English Owner entry Skills', () => {
 
     expect(source).toContain('name: owner');
     expect(source).toContain(
-      'description: "Owner workflow entry. Use when the user invokes /owner or asks to use Owner without choosing Native or Classic; resolve and load exactly one entry from project configuration."',
+      'description: "Owner workflow entry. Use when the user invokes /owner or asks to use Owner without choosing Loop or Pipeline; resolve and load exactly one entry from project configuration."',
     );
     expect(source).not.toContain('an active Owner change needs to be resumed');
     expect(source).toContain('owner workflow resolve . --activate --json');
@@ -102,40 +102,40 @@ describe('English Owner entry Skills', () => {
     expect(source).toContain('If the CLI starts but exits nonzero');
     expect(source).toContain('owner.workflow-resolution.v1');
     expect(source).toContain('Only accept');
-    expect(source).toContain('/owner-native');
-    expect(source).toContain('/owner-classic');
+    expect(source).toContain('/owner-loop');
+    expect(source).toContain('/owner-pipeline');
     expect(source).toContain('Do not switch');
     expect(source.length).toBeLessThan(2_000);
     expect(source).not.toMatch(/OpenSpec|Superpowers|brainstorming|TDD|\/owner-open/iu);
   });
 
-  it('publishes the existing thick workflow only through /owner-classic', async () => {
-    const source = await readSkill(englishRoot, 'owner-classic');
+  it('publishes the existing thick workflow only through /owner-pipeline', async () => {
+    const source = await readSkill(englishRoot, 'owner-pipeline');
 
-    expect(source).toContain('name: owner-classic');
+    expect(source).toContain('name: owner-pipeline');
     expect(source).toContain('OpenSpec');
     expect(source).toContain('Superpowers');
     expect(source).toContain('owner state select <change-name>');
     expect(source).toContain('/owner-open');
     expect(source).toContain('/owner-build');
-    expect(source).toContain('owner-classic/reference/scripts.md');
+    expect(source).toContain('owner-pipeline/reference/scripts.md');
     expect(source.length).toBeGreaterThan(10_000);
     expect(source).not.toMatch(/\/owner(?![-/])/u);
   });
 
-  it('keeps shared Classic references on the explicit Classic entry', async () => {
-    const referenceRoot = path.join(englishRoot, 'owner-classic', 'reference');
+  it('keeps shared Pipeline references on the explicit Pipeline entry', async () => {
+    const referenceRoot = path.join(englishRoot, 'owner-pipeline', 'reference');
     const files = (await fs.readdir(referenceRoot)).filter((name) => name.endsWith('.md'));
     const source = (
       await Promise.all(files.map((name) => fs.readFile(path.join(referenceRoot, name), 'utf8')))
     ).join('\n');
 
-    expect(source).toContain('/owner-classic');
+    expect(source).toContain('/owner-pipeline');
     expect(source).not.toMatch(/\/owner(?![-/])/u);
   });
 
-  it('keeps Classic child Skills inside the explicit Classic entry', async () => {
-    const classicChildren = [
+  it('keeps Pipeline child Skills inside the explicit Pipeline entry', async () => {
+    const pipelineChildren = [
       'owner-open',
       'owner-design',
       'owner-build',
@@ -144,11 +144,11 @@ describe('English Owner entry Skills', () => {
       'owner-hotfix',
       'owner-tweak',
     ];
-    const sources = await Promise.all(classicChildren.map((name) => readSkill(englishRoot, name)));
+    const sources = await Promise.all(pipelineChildren.map((name) => readSkill(englishRoot, name)));
 
     for (const source of sources) {
       expect(source).not.toMatch(/\/owner(?![-/])/u);
-      expect(source).not.toContain('/owner-native');
+      expect(source).not.toContain('/owner-loop');
     }
   });
 });

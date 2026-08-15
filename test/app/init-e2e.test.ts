@@ -46,22 +46,22 @@ async function readManifest() {
   return JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
 }
 
-function isNativeInstallSkillPath(skillPath: string): boolean {
+function isLoopInstallSkillPath(skillPath: string): boolean {
   return (
     skillPath === 'owner/SKILL.md' ||
     skillPath === 'owner/scripts/owner-entry-runtime.mjs' ||
     skillPath === 'owner/scripts/owner-hook-router.mjs' ||
-    skillPath.startsWith('owner-native/')
+    skillPath.startsWith('owner-loop/')
   );
 }
 
 function skillPathsForWorkflow(
   manifest: { skills: string[] },
-  workflow: 'native' | 'classic' | 'both',
+  workflow: 'loop' | 'pipeline' | 'both',
 ): string[] {
   if (workflow === 'both') return manifest.skills;
-  if (workflow === 'native') return manifest.skills.filter(isNativeInstallSkillPath);
-  return manifest.skills.filter((skillPath) => !skillPath.startsWith('owner-native/'));
+  if (workflow === 'loop') return manifest.skills.filter(isLoopInstallSkillPath);
+  return manifest.skills.filter((skillPath) => !skillPath.startsWith('owner-loop/'));
 }
 
 function mockExternalSuccess(options: { openSpecConfig?: 'healthy' | 'missing' | 'corrupt' } = {}) {
@@ -162,12 +162,12 @@ describe('owner init E2E', () => {
     await fs.rm(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it('offers Native, Classic, and Both with concise user-facing descriptions', async () => {
+  it('offers Loop, Pipeline, and Both with concise user-facing descriptions', async () => {
     const { workflowChoiceNames } = await import('../../app/commands/init.js');
 
     expect(workflowChoiceNames('zh')).toEqual([
-      expect.objectContaining({ value: 'native', name: expect.stringContaining('强模型') }),
-      expect.objectContaining({ value: 'classic', name: expect.stringContaining('Spec/TDD') }),
+      expect.objectContaining({ value: 'loop', name: expect.stringContaining('强模型') }),
+      expect.objectContaining({ value: 'pipeline', name: expect.stringContaining('Spec/TDD') }),
       expect.objectContaining({ value: 'both', name: expect.stringContaining('两套独立入口') }),
     ]);
   });
@@ -210,7 +210,7 @@ describe('owner init E2E', () => {
   });
 
   it(
-    'initializes a genuinely new project as self-contained Native with --yes --json',
+    'initializes a genuinely new project as self-contained Loop with --yes --json',
     async () => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
@@ -224,10 +224,10 @@ describe('owner init E2E', () => {
       expect(result.selectedPlatforms).toContain('claude');
       expect(result.workingDirsCreated).toBe(true);
       expect(result).toMatchObject({
-        workflow: 'native',
+        workflow: 'loop',
         workflowSource: 'new-project-default',
         projectConfigCreated: true,
-        nativeArtifactRoot: 'docs',
+        loopArtifactRoot: 'docs',
       });
 
       const claudeResult = (
@@ -247,12 +247,12 @@ describe('owner init E2E', () => {
         ...manifest.skills,
         ...(manifest.internalSkills ?? []),
       ] as string[];
-      for (const skillPath of managedSkillPaths.filter(isNativeInstallSkillPath)) {
+      for (const skillPath of managedSkillPaths.filter(isLoopInstallSkillPath)) {
         const dest = path.join(tmpDir, '.claude', 'skills', skillPath);
         await expect(fs.access(dest)).resolves.toBeUndefined();
       }
       for (const skillPath of managedSkillPaths.filter(
-        (skillPath) => !isNativeInstallSkillPath(skillPath),
+        (skillPath) => !isLoopInstallSkillPath(skillPath),
       )) {
         const dest = path.join(tmpDir, '.claude', 'skills', skillPath);
         await expect(fs.access(dest)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -272,7 +272,7 @@ describe('owner init E2E', () => {
       ).resolves.toBeDefined();
 
       const projectConfig = await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8');
-      expect(projectConfig).toContain('default_workflow: native');
+      expect(projectConfig).toContain('default_workflow: loop');
       expect(projectConfig).toContain('artifact_root: docs');
       expect(projectConfig).toContain('clarification_mode: batch');
       expect(projectConfig).not.toMatch(/^\s+snapshot:/mu);
@@ -294,7 +294,7 @@ describe('owner init E2E', () => {
     INIT_E2E_TIMEOUT_MS,
   );
 
-  it('preserves a legacy Classic project and its dependency-aware setup by default', async () => {
+  it('preserves a legacy Pipeline project and its dependency-aware setup by default', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
@@ -310,7 +310,7 @@ describe('owner init E2E', () => {
     const result = await captureJsonOutput(() => initCommand(tmpDir, { yes: true, json: true }));
 
     expect(result).toMatchObject({
-      workflow: 'classic',
+      workflow: 'pipeline',
       workflowSource: 'legacy-project',
       projectConfigCreated: false,
     });
@@ -325,7 +325,7 @@ describe('owner init E2E', () => {
     expect(mockedExecFileSync.mock.calls.some((call) => String(call[0]) === 'openspec')).toBe(true);
   });
 
-  it('upgrades an incompatible OpenSpec CLI before non-interactive Classic setup', async () => {
+  it('upgrades an incompatible OpenSpec CLI before non-interactive Pipeline setup', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const externalSuccess = mockedExecFileSync.getMockImplementation();
@@ -348,7 +348,7 @@ describe('owner init E2E', () => {
 
     const { initCommand } = await import('../../app/commands/init.js');
     const result = await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'classic', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline', language: 'en' }),
     );
 
     expect(result).toMatchObject({ status: 'complete' });
@@ -362,7 +362,7 @@ describe('owner init E2E', () => {
     ).toBe(true);
   });
 
-  it('supports an explicit Native artifact root through the main init command', async () => {
+  it('supports an explicit Loop artifact root through the main init command', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
 
@@ -371,24 +371,24 @@ describe('owner init E2E', () => {
       initCommand(tmpDir, {
         yes: true,
         json: true,
-        workflow: 'native',
+        workflow: 'loop',
         artifactRoot: 'docs',
         installMode: 'symlink',
       }),
     );
 
     expect(result).toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       workflowSource: 'explicit-option',
       projectConfigCreated: true,
-      nativeArtifactRoot: 'docs',
+      loopArtifactRoot: 'docs',
     });
     await expect(fs.stat(path.join(tmpDir, 'docs', 'owner', 'changes'))).resolves.toBeDefined();
     await expect(fs.stat(path.join(tmpDir, 'owner'))).rejects.toThrow();
     await expect(fs.stat(path.join(tmpDir, '.owner'))).resolves.toBeDefined();
   });
 
-  it('initializes Native and Classic independently while defaulting /owner to Native', async () => {
+  it('initializes Loop and Pipeline independently while defaulting /owner to Loop', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
 
@@ -403,21 +403,21 @@ describe('owner init E2E', () => {
     );
 
     expect(result).toMatchObject({
-      workflow: 'native',
-      initializedWorkflows: ['native', 'classic'],
-      nativeArtifactRoot: 'docs',
+      workflow: 'loop',
+      initializedWorkflows: ['loop', 'pipeline'],
+      loopArtifactRoot: 'docs',
     });
     const config = await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8');
-    expect(config).toContain('default_workflow: native');
-    expect(config).toContain('- native');
-    expect(config).toContain('- classic');
+    expect(config).toContain('default_workflow: loop');
+    expect(config).toContain('- loop');
+    expect(config).toContain('- pipeline');
     expect(config).toContain('clarification_mode: batch');
     await expect(fs.stat(path.join(tmpDir, 'docs', 'owner', 'changes'))).resolves.toBeDefined();
     await expect(fs.stat(path.join(tmpDir, 'docs', 'superpowers', 'specs'))).resolves.toBeDefined();
     await expect(
       fs.stat(path.join(tmpDir, '.claude', 'rules', 'owner-workflow-guard.md')),
     ).resolves.toBeDefined();
-    for (const skill of ['owner-native', 'owner-classic', 'owner-open']) {
+    for (const skill of ['owner-loop', 'owner-pipeline', 'owner-open']) {
       await expect(
         fs.access(path.join(tmpDir, '.claude', 'skills', skill, 'SKILL.md')),
       ).resolves.toBeUndefined();
@@ -427,13 +427,13 @@ describe('owner init E2E', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('adds Classic with the docs layout when a Native-only project is reinitialized as Both', async () => {
+  it('adds Pipeline with the docs layout when a Loop-only project is reinitialized as Both', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     mockedExecFileSync.mockClear();
     mockExternalSuccess();
@@ -443,7 +443,7 @@ describe('owner init E2E', () => {
     );
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8')) as {
       workflows?: string[];
-      classic?: { artifact_layout?: string };
+      pipeline?: { artifact_layout?: string };
     };
 
     expect(result).toMatchObject({
@@ -451,15 +451,15 @@ describe('owner init E2E', () => {
       projectConfigCreated: false,
       projectConfigUpdated: true,
     });
-    expect(config.workflows).toEqual(['native', 'classic']);
-    expect(config.classic?.artifact_layout).toBe('docs');
+    expect(config.workflows).toEqual(['loop', 'pipeline']);
+    expect(config.pipeline?.artifact_layout).toBe('docs');
     await expect(fs.stat(path.join(tmpDir, 'docs', 'openspec'))).resolves.toBeDefined();
     await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
   });
 
-  it('adopts a legacy Classic root when the project configuration is missing', async () => {
+  it('adopts a legacy Pipeline root when the project configuration is missing', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, 'openspec', 'changes', 'archive'), { recursive: true });
@@ -469,7 +469,7 @@ describe('owner init E2E', () => {
       initCommand(tmpDir, {
         yes: true,
         json: true,
-        workflow: 'classic',
+        workflow: 'pipeline',
         language: 'en',
         overwrite: true,
       }),
@@ -477,20 +477,20 @@ describe('owner init E2E', () => {
 
     expect(result).toMatchObject({
       status: 'complete',
-      classicArtifactLayout: 'legacy',
+      pipelineArtifactLayout: 'legacy',
       projectConfigCreated: true,
     });
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8')) as {
-      classic?: { artifact_layout?: string };
+      pipeline?: { artifact_layout?: string };
     };
-    expect(config.classic?.artifact_layout).toBe('legacy');
+    expect(config.pipeline?.artifact_layout).toBe('legacy');
     await expect(fs.stat(path.join(tmpDir, 'openspec', 'config.yaml'))).resolves.toBeDefined();
     await expect(fs.access(path.join(tmpDir, 'docs', 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
   });
 
-  it('repairs missing Native defaults and removes legacy snapshot config while initializing Both', async () => {
+  it('repairs missing Loop defaults and removes legacy snapshot config while initializing Both', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, 'openspec', 'changes', 'archive'), { recursive: true });
@@ -499,9 +499,9 @@ describe('owner init E2E', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native]',
-        'native:',
+        'default_workflow: loop',
+        'workflows: [loop]',
+        'loop:',
         '  language: en',
         '  snapshot:',
         '    include: ["**/*"]',
@@ -525,17 +525,17 @@ describe('owner init E2E', () => {
 
     expect(result).toMatchObject({
       status: 'complete',
-      classicArtifactLayout: 'legacy',
+      pipelineArtifactLayout: 'legacy',
       projectConfigCreated: false,
       projectConfigUpdated: true,
     });
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8')) as {
-      native?: { artifact_root?: string; snapshot?: unknown };
-      classic?: { artifact_layout?: string };
+      loop?: { artifact_root?: string; snapshot?: unknown };
+      pipeline?: { artifact_layout?: string };
     };
-    expect(config.native?.artifact_root).toBe('docs');
-    expect(config.native?.snapshot).toBeUndefined();
-    expect(config.classic?.artifact_layout).toBe('legacy');
+    expect(config.loop?.artifact_root).toBe('docs');
+    expect(config.loop?.snapshot).toBeUndefined();
+    expect(config.pipeline?.artifact_layout).toBe('legacy');
     await expect(fs.stat(path.join(tmpDir, 'openspec', 'config.yaml'))).resolves.toBeDefined();
     await expect(fs.access(path.join(tmpDir, 'docs', 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -559,29 +559,29 @@ describe('owner init E2E', () => {
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8')) as {
       default_workflow?: string;
       workflows?: string[];
-      native?: unknown;
-      classic?: unknown;
+      loop?: unknown;
+      pipeline?: unknown;
     };
 
     expect(result).toMatchObject({
       status: 'complete',
-      initializedWorkflows: ['native', 'classic'],
+      initializedWorkflows: ['loop', 'pipeline'],
     });
     expect(config).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
-      native: expect.any(Object),
-      classic: expect.any(Object),
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
+      loop: expect.any(Object),
+      pipeline: expect.any(Object),
     });
   });
 
-  it('uninstalls Owner-owned directories after real Classic init while preserving the OpenSpec root', async () => {
+  it('uninstalls Owner-owned directories after real Pipeline init while preserving the OpenSpec root', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
     const { removeWorkingDirs } = await import('../../domains/skill/uninstall.js');
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'classic', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline', language: 'en' }),
     );
     const openSpecConfig = path.join(tmpDir, 'docs', 'openspec', 'config.yaml');
     await expect(fs.readFile(openSpecConfig, 'utf8')).resolves.toContain('schema: spec-driven');
@@ -597,26 +597,26 @@ describe('owner init E2E', () => {
     });
   });
 
-  it('keeps a Classic-only config lossless when reinitializing it as Both', async () => {
+  it('keeps a Pipeline-only config lossless when reinitializing it as Both', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'classic', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
-    const classicOnly = await fs.readFile(configPath, 'utf8');
-    expect(parse(classicOnly)).toMatchObject({
-      default_workflow: 'classic',
-      workflows: ['classic'],
-      classic: { artifact_layout: 'docs' },
+    const pipelineOnly = await fs.readFile(configPath, 'utf8');
+    expect(parse(pipelineOnly)).toMatchObject({
+      default_workflow: 'pipeline',
+      workflows: ['pipeline'],
+      pipeline: { artifact_layout: 'docs' },
     });
-    expect(parse(classicOnly)).not.toHaveProperty('native');
+    expect(parse(pipelineOnly)).not.toHaveProperty('loop');
     await fs.writeFile(
       configPath,
-      classicOnly
-        .replace('classic:\n', 'classic:\n  custom_classic: keep-classic\n')
+      pipelineOnly
+        .replace('pipeline:\n', 'pipeline:\n  custom_pipeline: keep-pipeline\n')
         .concat('custom_top: keep-top\n'),
       'utf8',
     );
@@ -640,30 +640,30 @@ describe('owner init E2E', () => {
       projectConfigUpdated: true,
     });
     expect(updated).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
-      native: { artifact_root: 'docs' },
-      classic: {
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
+      loop: { artifact_root: 'docs' },
+      pipeline: {
         artifact_layout: 'docs',
-        custom_classic: 'keep-classic',
+        custom_pipeline: 'keep-pipeline',
       },
       custom_top: 'keep-top',
     });
   });
 
-  it('keeps the prior Classic-only config when the final Both config write fails', async () => {
+  it('keeps the prior Pipeline-only config when the final Both config write fails', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'classic', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
-    const classicOnly = await fs.readFile(configPath, 'utf8');
-    expect(parse(classicOnly)).toMatchObject({
-      default_workflow: 'classic',
-      workflows: ['classic'],
+    const pipelineOnly = await fs.readFile(configPath, 'utf8');
+    expect(parse(pipelineOnly)).toMatchObject({
+      default_workflow: 'pipeline',
+      workflows: ['pipeline'],
     });
 
     const configWriter = await import('../../domains/workflow-contract/project-config-writer.js');
@@ -694,10 +694,10 @@ describe('owner init E2E', () => {
         }),
       ],
     });
-    expect(await fs.readFile(configPath, 'utf8')).toBe(classicOnly);
+    expect(await fs.readFile(configPath, 'utf8')).toBe(pipelineOnly);
   });
 
-  it('preserves the owned Classic root and journal when a fresh config commit fails', async () => {
+  it('preserves the owned Pipeline root and journal when a fresh config commit fails', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, 'docs'), { recursive: true });
@@ -712,7 +712,7 @@ describe('owner init E2E', () => {
       initCommand(tmpDir, {
         yes: true,
         json: true,
-        workflow: 'classic',
+        workflow: 'pipeline',
         language: 'en',
       }),
     );
@@ -727,17 +727,17 @@ describe('owner init E2E', () => {
     );
     await expect(fs.stat(path.join(tmpDir, 'docs', 'openspec'))).resolves.toBeDefined();
     await expect(
-      fs.stat(path.join(tmpDir, '.owner', 'classic-init-ownership.json')),
+      fs.stat(path.join(tmpDir, '.owner', 'pipeline-init-ownership.json')),
     ).resolves.toBeDefined();
   });
 
-  it('does not overwrite config drift introduced after Classic directories are created', async () => {
+  it('does not overwrite config drift introduced after Pipeline directories are created', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
     const projectInstructions = await import('../../domains/skill/project-instructions.js');
@@ -779,34 +779,34 @@ describe('owner init E2E', () => {
         expect.objectContaining({
           component: 'Finalization',
           reason: expect.stringMatching(
-            /project config changed during Classic layout initialization/iu,
+            /project config changed during Pipeline layout initialization/iu,
           ),
         }),
       ],
     });
     expect(driftedConfig).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native'],
-      native: { artifact_root: 'artifacts' },
+      default_workflow: 'loop',
+      workflows: ['loop'],
+      loop: { artifact_root: 'artifacts' },
     });
-    expect(driftedConfig).not.toHaveProperty('classic');
+    expect(driftedConfig).not.toHaveProperty('pipeline');
   });
 
-  it('does not use a stale workflow decision when config changes before Classic preflight', async () => {
+  it('does not use a stale workflow decision when config changes before Pipeline preflight', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
     const platformInstall = await import('../../domains/skill/platform-install.js');
-    const prepareNativeTarget = platformInstall.prepareNativeSkillInstallTarget;
+    const prepareLoopTarget = platformInstall.prepareLoopSkillInstallTarget;
     let drifted = false;
-    vi.spyOn(platformInstall, 'prepareNativeSkillInstallTarget').mockImplementation(
+    vi.spyOn(platformInstall, 'prepareLoopSkillInstallTarget').mockImplementation(
       async (...args) => {
-        await prepareNativeTarget(...args);
+        await prepareLoopTarget(...args);
         if (!drifted) {
           const source = await fs.readFile(configPath, 'utf8');
           await fs.writeFile(
@@ -847,11 +847,11 @@ describe('owner init E2E', () => {
       ]),
     );
     expect(driftedConfig).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native'],
-      native: { artifact_root: 'artifacts' },
+      default_workflow: 'loop',
+      workflows: ['loop'],
+      loop: { artifact_root: 'artifacts' },
     });
-    expect(driftedConfig).not.toHaveProperty('classic');
+    expect(driftedConfig).not.toHaveProperty('pipeline');
     expect(
       mockedExecFileSync.mock.calls.filter(
         ([command, args]) =>
@@ -869,7 +869,7 @@ describe('owner init E2E', () => {
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
     const configBefore = await fs.readFile(configPath);
@@ -912,13 +912,13 @@ describe('owner init E2E', () => {
     await expect(fs.readFile(configPath)).resolves.toEqual(configBefore);
   });
 
-  it('reuses the Classic permit and reports a partial failure when config drifts during OpenSpec init', async () => {
+  it('reuses the Pipeline permit and reports a partial failure when config drifts during OpenSpec init', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     const configPath = path.join(tmpDir, '.owner', 'config.yaml');
     const externalSuccess = mockedExecFileSync.getMockImplementation();
@@ -962,9 +962,9 @@ describe('owner init E2E', () => {
       ]),
     );
     expect(driftedConfig).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native'],
-      native: { artifact_root: 'artifacts' },
+      default_workflow: 'loop',
+      workflows: ['loop'],
+      loop: { artifact_root: 'artifacts' },
     });
     await expect(fs.access(path.join(tmpDir, 'docs', 'openspec'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -982,7 +982,7 @@ describe('owner init E2E', () => {
         initCommand(tmpDir, {
           yes: true,
           json: true,
-          workflow: 'classic',
+          workflow: 'pipeline',
           language: 'en',
         }),
       );
@@ -1006,13 +1006,13 @@ describe('owner init E2E', () => {
     },
   );
 
-  it('initializes Classic with a config-bound permit when every OpenSpec asset is skipped', async () => {
+  it('initializes Pipeline with a config-bound permit when every OpenSpec asset is skipped', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const { initCommand } = await import('../../app/commands/init.js');
 
     await captureJsonOutput(() =>
-      initCommand(tmpDir, { yes: true, json: true, workflow: 'native', language: 'en' }),
+      initCommand(tmpDir, { yes: true, json: true, workflow: 'loop', language: 'en' }),
     );
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
       recursive: true,
@@ -1039,11 +1039,11 @@ describe('owner init E2E', () => {
     expect(result).toMatchObject({
       status: 'complete',
       projectConfigUpdated: true,
-      classicArtifactLayout: 'docs',
+      pipelineArtifactLayout: 'docs',
     });
     expect(config).toMatchObject({
-      workflows: ['native', 'classic'],
-      classic: { artifact_layout: 'docs' },
+      workflows: ['loop', 'pipeline'],
+      pipeline: { artifact_layout: 'docs' },
     });
     expect(
       mockedExecFileSync.mock.calls.some(
@@ -1070,22 +1070,22 @@ describe('owner init E2E', () => {
 
   it.each([
     {
-      label: 'Native',
-      workflow: 'native' as const,
+      label: 'Loop',
+      workflow: 'loop' as const,
       artifactRoot: undefined,
       included: ['docs/owner/'],
       excluded: ['docs/superpowers/'],
     },
     {
-      label: 'Native with a custom root',
-      workflow: 'native' as const,
+      label: 'Loop with a custom root',
+      workflow: 'loop' as const,
       artifactRoot: 'artifacts',
       included: ['artifacts/owner/'],
       excluded: ['docs/owner/', 'docs/superpowers/'],
     },
     {
-      label: 'Classic',
-      workflow: 'classic' as const,
+      label: 'Pipeline',
+      workflow: 'pipeline' as const,
       artifactRoot: undefined,
       included: ['docs/superpowers/specs/', 'docs/superpowers/plans/'],
       excluded: ['docs/owner/'],
@@ -1122,10 +1122,10 @@ describe('owner init E2E', () => {
   );
 
   it.each([
-    { workflow: 'classic' as const, migrated: true },
-    { workflow: 'native' as const, migrated: false },
+    { workflow: 'pipeline' as const, migrated: true },
+    { workflow: 'loop' as const, migrated: false },
   ])(
-    'migrates Classic v1 selection only when init enables Classic ($workflow)',
+    'migrates Pipeline v1 selection only when init enables Pipeline ($workflow)',
     async ({ workflow, migrated }) => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
@@ -1146,7 +1146,7 @@ describe('owner init E2E', () => {
         migrated
           ? {
               schema: 'owner.selection.v2',
-              workflow: 'classic',
+              workflow: 'pipeline',
               change: 'legacy-change',
               branch: null,
             }
@@ -1155,7 +1155,7 @@ describe('owner init E2E', () => {
     },
   );
 
-  it('materializes an old symlink installation before Native copy without writing through it', async () => {
+  it('materializes an old symlink installation before Loop copy without writing through it', async () => {
     mockExternalSuccess();
     const centralSkills = path.join(tmpDir, '.owner', 'skills', 'skills');
     const centralOwner = path.join(centralSkills, 'owner');
@@ -1175,12 +1175,12 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'project',
-        workflow: 'native',
+        workflow: 'loop',
         installMode: 'symlink',
       }),
     );
 
-    expect(result).toMatchObject({ workflow: 'native', projectConfigCreated: true });
+    expect(result).toMatchObject({ workflow: 'loop', projectConfigCreated: true });
     expect((await fs.lstat(platformSkills)).isSymbolicLink()).toBe(false);
     await expect(
       fs.readFile(path.join(platformSkills, 'owner', 'SKILL.md'), 'utf8'),
@@ -1189,11 +1189,11 @@ describe('owner init E2E', () => {
       '# Central stale Owner\n',
     );
     await expect(
-      fs.access(path.join(centralSkills, 'owner-native', 'SKILL.md')),
+      fs.access(path.join(centralSkills, 'owner-loop', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it.each(['native', 'classic'] as const)(
+  it.each(['loop', 'pipeline'] as const)(
     'installs project-scoped %s assets even when Owner is installed globally',
     async (workflow) => {
       mockExternalSuccess();
@@ -1248,25 +1248,25 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'project',
-        workflow: 'native',
+        workflow: 'loop',
       }),
     );
 
     expect(result).toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       projectConfigCreated: true,
       results: [expect.objectContaining({ platform: 'claude', owner: 'installed' })],
     });
     await expect(fs.readFile(existingSkill, 'utf8')).resolves.toBe(bundledEntry);
     await expect(
-      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-loop', 'SKILL.md')),
     ).resolves.toBeUndefined();
     await expect(
-      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('does not activate Native with --skip-existing when required Native assets are missing', async () => {
+  it('does not activate Loop with --skip-existing when required Loop assets are missing', async () => {
     mockExternalSuccess();
     const skillsRoot = path.join(tmpDir, '.claude', 'skills');
     const preinstalledFiles = ['owner/SKILL.md', 'owner/scripts/owner-entry-runtime.mjs'];
@@ -1283,10 +1283,10 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'project',
-        workflow: 'native',
+        workflow: 'loop',
         skipExisting: true,
       }),
-    ).rejects.toThrow(/required Native asset owner\/scripts\/owner-hook-router\.mjs is missing/u);
+    ).rejects.toThrow(/required Loop asset owner\/scripts\/owner-hook-router\.mjs is missing/u);
 
     await expect(fs.access(path.join(tmpDir, '.owner', 'config.yaml'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -1294,7 +1294,7 @@ describe('owner init E2E', () => {
     await expect(fs.access(path.join(tmpDir, 'owner'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('does not activate Native over a mismatched existing /owner entry without overwrite', async () => {
+  it('does not activate Loop over a mismatched existing /owner entry without overwrite', async () => {
     mockExternalSuccess();
     const existingSkill = path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md');
     await fs.mkdir(path.dirname(existingSkill), { recursive: true });
@@ -1306,7 +1306,7 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'project',
-        workflow: 'native',
+        workflow: 'loop',
       }),
     ).rejects.toThrow(/differs from the bundled routing contract.*--overwrite/iu);
 
@@ -1353,7 +1353,7 @@ describe('owner init E2E', () => {
 
     expect(result).toMatchObject({
       status: 'complete',
-      workflow: 'native',
+      workflow: 'loop',
       projectConfigCreated: true,
       selectedPlatforms: ['codex'],
       results: [expect.objectContaining({ platform: 'codex', owner: 'installed' })],
@@ -1361,7 +1361,7 @@ describe('owner init E2E', () => {
     expect(platformSelectPrompt).not.toHaveBeenCalled();
   });
 
-  it('initializes only the explicit native platform target', async () => {
+  it('initializes only the explicit loop platform target', async () => {
     mockExternalSuccess();
     const { platformSelectPrompt } = await import('../../app/commands/platform-select-prompt.js');
     const { initCommand } = await import('../../app/commands/init.js');
@@ -1388,7 +1388,7 @@ describe('owner init E2E', () => {
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('stores a project-relative Native artifact template at global scope without creating artifacts', async () => {
+  it('stores a project-relative Loop artifact template at global scope without creating artifacts', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
 
@@ -1398,12 +1398,12 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'global',
-        workflow: 'native',
+        workflow: 'loop',
         artifactRoot: 'artifacts',
       }),
     );
 
-    expect(result).toMatchObject({ scope: 'global', workflow: 'native' });
+    expect(result).toMatchObject({ scope: 'global', workflow: 'loop' });
     await expect(
       fs.readFile(path.join(os.homedir(), '.owner', 'config.yaml'), 'utf8'),
     ).resolves.toContain('artifact_root: artifacts');
@@ -1422,11 +1422,11 @@ describe('owner init E2E', () => {
       path.join(fakeHome, '.owner', 'config.yaml'),
       [
         'schema: owner.global.v1',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
+        '  - loop',
         'ambient_resume: false',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '  snapshot:',
         '    include: ["**/*"]',
@@ -1444,7 +1444,7 @@ describe('owner init E2E', () => {
           yes: true,
           json: true,
           scope: 'global',
-          workflow: 'native',
+          workflow: 'loop',
         }),
       );
     } finally {
@@ -1456,11 +1456,11 @@ describe('owner init E2E', () => {
     ).resolves.toMatch(/ambient_resume: false/);
     const globalConfig = parse(
       await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf8'),
-    ) as { native: { snapshot?: unknown } };
-    expect(globalConfig.native.snapshot).toBeUndefined();
+    ) as { loop: { snapshot?: unknown } };
+    expect(globalConfig.loop.snapshot).toBeUndefined();
   });
 
-  it('does not publish a global Classic default when OpenSpec initialization fails', async () => {
+  it('does not publish a global Pipeline default when OpenSpec initialization fails', async () => {
     mockExternalSuccess();
     await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
     const externalSuccess = mockedExecFileSync.getMockImplementation();
@@ -1479,7 +1479,7 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'global',
-        workflow: 'classic',
+        workflow: 'pipeline',
       }),
     );
 
@@ -1490,7 +1490,7 @@ describe('owner init E2E', () => {
   });
 
   it(
-    'initializes both Native and Classic skills at global scope when explicitly selected',
+    'initializes both Loop and Pipeline skills at global scope when explicitly selected',
     async () => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
@@ -1510,11 +1510,11 @@ describe('owner init E2E', () => {
 
       expect(result).toMatchObject({
         scope: 'global',
-        workflow: 'native',
-        initializedWorkflows: ['native', 'classic'],
+        workflow: 'loop',
+        initializedWorkflows: ['loop', 'pipeline'],
         workingDirsCreated: false,
       });
-      for (const skill of ['owner-native', 'owner-classic']) {
+      for (const skill of ['owner-loop', 'owner-pipeline']) {
         await expect(
           fs.access(path.join(fakeHome, '.claude', 'skills', skill, 'SKILL.md')),
         ).resolves.toBeUndefined();
@@ -1524,7 +1524,7 @@ describe('owner init E2E', () => {
   );
 
   it(
-    'offers Native, Classic, and Both during interactive global initialization',
+    'offers Loop, Pipeline, and Both during interactive global initialization',
     async () => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
@@ -1550,14 +1550,14 @@ describe('owner init E2E', () => {
         expect.objectContaining({
           message: 'Select Owner workflow(s):',
           choices: [
-            expect.objectContaining({ value: 'native' }),
-            expect.objectContaining({ value: 'classic' }),
+            expect.objectContaining({ value: 'loop' }),
+            expect.objectContaining({ value: 'pipeline' }),
             expect.objectContaining({ value: 'both' }),
           ],
-          default: 'native',
+          default: 'loop',
         }),
       );
-      for (const skill of ['owner-native', 'owner-classic']) {
+      for (const skill of ['owner-loop', 'owner-pipeline']) {
         await expect(
           fs.access(path.join(fakeHome, '.agents', 'skills', skill, 'SKILL.md')),
         ).resolves.toBeUndefined();
@@ -1579,7 +1579,7 @@ describe('owner init E2E', () => {
 
     expect(result).toMatchObject({
       status: 'incomplete',
-      workflow: 'native',
+      workflow: 'loop',
       projectConfigCreated: false,
       workingDirsCreated: false,
     });
@@ -1611,12 +1611,12 @@ describe('owner init E2E', () => {
         yes: true,
         json: true,
         scope: 'project',
-        workflow: 'native',
+        workflow: 'loop',
       }),
     );
 
     expect(result).toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       projectConfigCreated: false,
       workingDirsCreated: false,
       results: expect.arrayContaining([
@@ -1632,9 +1632,9 @@ describe('owner init E2E', () => {
 
   it.each([
     { label: 'create', existingWorkflow: null },
-    { label: 'switch', existingWorkflow: 'classic' as const },
+    { label: 'switch', existingWorkflow: 'pipeline' as const },
   ])(
-    'does not $label Native activation when the second project instructions file is invalid',
+    'does not $label Loop activation when the second project instructions file is invalid',
     async ({ existingWorkflow }) => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
@@ -1652,7 +1652,7 @@ describe('owner init E2E', () => {
           [
             'schema: owner.project.v1',
             `default_workflow: ${existingWorkflow}`,
-            'native:',
+            'loop:',
             '  artifact_root: .',
             '',
           ].join('\n'),
@@ -1666,7 +1666,7 @@ describe('owner init E2E', () => {
           yes: true,
           json: true,
           scope: 'project',
-          workflow: 'native',
+          workflow: 'loop',
         }),
       );
       expect(result).toMatchObject({
@@ -1682,7 +1682,7 @@ describe('owner init E2E', () => {
       if (existingWorkflow) {
         const config = await fs.readFile(configPath, 'utf8');
         expect(config).toContain(`default_workflow: ${existingWorkflow}`);
-        expect(config).not.toContain('default_workflow: native');
+        expect(config).not.toContain('default_workflow: loop');
       } else {
         await expect(fs.access(configPath)).rejects.toThrow();
       }
@@ -1710,16 +1710,16 @@ describe('owner init E2E', () => {
 
       const config = await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf-8');
       expect(config).toContain('schema: owner.global.v1');
-      expect(config).toContain('default_workflow: native');
+      expect(config).toContain('default_workflow: loop');
       expect(config).toContain('language: en');
 
       const manifest = await readManifest();
-      for (const skillPath of skillPathsForWorkflow(manifest, 'native')) {
+      for (const skillPath of skillPathsForWorkflow(manifest, 'loop')) {
         const dest = path.join(fakeHome, '.claude', 'skills', skillPath);
         await expect(fs.access(dest)).resolves.toBeUndefined();
       }
       await expect(
-        fs.access(path.join(fakeHome, '.claude', 'skills', 'owner-native', 'SKILL.md')),
+        fs.access(path.join(fakeHome, '.claude', 'skills', 'owner-loop', 'SKILL.md')),
       ).resolves.toBeUndefined();
 
       await expect(fs.stat(path.join(tmpDir, 'docs', 'superpowers', 'specs'))).rejects.toThrow();
@@ -1735,7 +1735,7 @@ describe('owner init E2E', () => {
 
       const { initCommand } = await import('../../app/commands/init.js');
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline' }),
       );
 
       expect(result.selectedPlatforms).toEqual(['codex']);
@@ -1781,7 +1781,7 @@ describe('owner init E2E', () => {
           yes: true,
           language: 'en',
           installMode: 'symlink',
-          workflow: 'classic',
+          workflow: 'pipeline',
         }),
       );
 
@@ -1808,14 +1808,14 @@ describe('owner init E2E', () => {
       const { initCommand } = await import('../../app/commands/init.js');
 
       await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       await fs.rm(path.join(tmpDir, '.codex', 'rules'), { recursive: true, force: true });
       await fs.rm(path.join(tmpDir, '.codex', 'hooks.json'), { force: true });
       await fs.rm(getProjectRegistryPath(fakeHome), { force: true });
 
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       const codex = (result.results as Array<{ platform: string; owner: string }>).find(
         (candidate) => candidate.platform === 'codex',
@@ -1837,14 +1837,14 @@ describe('owner init E2E', () => {
   );
 
   it(
-    'repeated init preserves both artifact roots and uses the configured Classic layout when both roots exist',
+    'repeated init preserves both artifact roots and uses the configured Pipeline layout when both roots exist',
     async () => {
       mockExternalSuccess();
       await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
       const { initCommand } = await import('../../app/commands/init.js');
 
       await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
       await fs.writeFile(path.join(tmpDir, 'openspec', 'legacy-marker.txt'), 'legacy\n', 'utf8');
@@ -1856,12 +1856,12 @@ describe('owner init E2E', () => {
       mockedExecFileSync.mockClear();
       mockExternalSuccess();
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
 
       expect(result).toMatchObject({
         status: 'complete',
-        classicArtifactLayout: 'docs',
+        pipelineArtifactLayout: 'docs',
       });
       expect(
         mockedExecFileSync.mock.calls.some(
@@ -1877,9 +1877,9 @@ describe('owner init E2E', () => {
       const config = parse(
         await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'),
       ) as {
-        classic?: { artifact_layout?: string };
+        pipeline?: { artifact_layout?: string };
       };
-      expect(config.classic?.artifact_layout).toBe('docs');
+      expect(config.pipeline?.artifact_layout).toBe('docs');
     },
     INIT_E2E_TIMEOUT_MS,
   );
@@ -1933,7 +1933,7 @@ describe('owner init E2E', () => {
       );
 
       await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       await fs.rm(guardScript, { force: true });
       await fs.rm(path.join(tmpDir, '.codex', 'rules'), { recursive: true, force: true });
@@ -1941,7 +1941,7 @@ describe('owner init E2E', () => {
       await fs.rm(getProjectRegistryPath(fakeHome), { force: true });
 
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       const codex = (result.results as Array<{ platform: string; owner: string }>).find(
         (candidate) => candidate.platform === 'codex',
@@ -1969,13 +1969,13 @@ describe('owner init E2E', () => {
       const { initCommand } = await import('../../app/commands/init.js');
 
       await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       await fs.writeFile(path.join(tmpDir, '.codex', 'hooks.json'), '[]\n', 'utf8');
       await fs.rm(getProjectRegistryPath(fakeHome), { force: true });
 
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       const codex = (result.results as Array<{ platform: string; owner: string }>).find(
         (candidate) => candidate.platform === 'codex',
@@ -2006,7 +2006,7 @@ describe('owner init E2E', () => {
       const { initCommand } = await import('../../app/commands/init.js');
 
       await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       await fs.rm(path.join(tmpDir, '.codex', 'rules'), { recursive: true, force: true });
       await fs.rm(path.join(tmpDir, '.codex', 'hooks.json'), { force: true });
@@ -2017,7 +2017,7 @@ describe('owner init E2E', () => {
           yes: true,
           json: true,
           language: 'en',
-          workflow: 'classic',
+          workflow: 'pipeline',
           skipExisting: true,
         }),
       );
@@ -2070,7 +2070,7 @@ describe('owner init E2E', () => {
 
       const { initCommand } = await import('../../app/commands/init.js');
       const result = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, language: 'en', workflow: 'pipeline' }),
       );
       const codexResult = (result.results as { platform: string; owner: string }[]).find(
         (candidate) => candidate.platform === 'codex',
@@ -2149,7 +2149,7 @@ describe('owner init E2E', () => {
         json: true,
         scope: 'project',
         platform: 'codex',
-        workflow: 'native',
+        workflow: 'loop',
         language: 'en',
       }),
     );
@@ -2177,7 +2177,7 @@ describe('owner init E2E', () => {
         json: true,
         scope: 'project',
         platform: 'codex',
-        workflow: 'native',
+        workflow: 'loop',
         language: 'en',
       }),
     );
@@ -2206,7 +2206,7 @@ describe('owner init E2E', () => {
           yes: true,
           scope: 'project',
           json: true,
-          workflow: 'classic',
+          workflow: 'pipeline',
           platform: 'codex',
           language: 'en',
         }),
@@ -2249,7 +2249,7 @@ describe('owner init E2E', () => {
 
       const { initCommand } = await import('../../app/commands/init.js');
       const result1 = await captureJsonOutput(() =>
-        initCommand(tmpDir, { yes: true, json: true, workflow: 'classic' }),
+        initCommand(tmpDir, { yes: true, json: true, workflow: 'pipeline' }),
       );
       const claude1 = (result1.results as { platform: string; owner: string }[]).find(
         (r) => r.platform === 'claude',
@@ -2263,7 +2263,7 @@ describe('owner init E2E', () => {
 
       const { initCommand: init2 } = await import('../../app/commands/init.js');
       const result2 = await captureJsonOutput(() =>
-        init2(tmpDir, { yes: true, json: true, workflow: 'classic' }),
+        init2(tmpDir, { yes: true, json: true, workflow: 'pipeline' }),
       );
       const claude2 = (result2.results as { platform: string; owner: string }[]).find(
         (r) => r.platform === 'claude',
@@ -2329,7 +2329,7 @@ describe('owner init E2E', () => {
       initCommand(tmpDir, {
         scope: 'project',
         language: 'en',
-        workflow: 'classic',
+        workflow: 'pipeline',
       }),
     );
 

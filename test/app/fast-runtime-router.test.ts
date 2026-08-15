@@ -13,31 +13,29 @@ describe('CLI fast runtime router', () => {
       args: ['.', '--json'],
     });
     expect(resolveFastRuntime(['workflow', 'resolve', '.', '--activate', '--json'])).toBeNull();
-    expect(resolveFastRuntime(['native', 'status', '--project-root', 'project', '--json'])).toEqual(
-      {
-        assetPath: 'assets/skills/owner-native/scripts/owner-native-status.mjs',
-        args: ['--project-root', 'project', '--json'],
-      },
-    );
+    expect(resolveFastRuntime(['loop', 'status', '--project-root', 'project', '--json'])).toEqual({
+      assetPath: 'assets/skills/owner-loop/scripts/owner-loop-status.mjs',
+      args: ['--project-root', 'project', '--json'],
+    });
   });
 
   it('preserves the command tail without parsing it', () => {
     expect(
-      resolveFastRuntime(['native', 'next', 'change', '--summary', 'ready', '--confirmed']),
+      resolveFastRuntime(['loop', 'next', 'change', '--summary', 'ready', '--confirmed']),
     ).toEqual({
-      assetPath: 'assets/skills/owner-native/scripts/owner-native-next.mjs',
+      assetPath: 'assets/skills/owner-loop/scripts/owner-loop-next.mjs',
       args: ['change', '--summary', 'ready', '--confirmed'],
     });
   });
 
   it('falls back to Commander for help, unsupported groups, and unknown subcommands', () => {
     expect(resolveFastRuntime(['state', '--help'])).toBeNull();
-    expect(resolveFastRuntime(['native', '--help'])).toBeNull();
-    expect(resolveFastRuntime(['native', 'unknown'])).toBeNull();
+    expect(resolveFastRuntime(['loop', '--help'])).toBeNull();
+    expect(resolveFastRuntime(['loop', 'unknown'])).toBeNull();
     for (const retired of ['checkpoint', 'check', 'evidence', 'receipt']) {
-      expect(resolveFastRuntime(['native', retired, 'change'])).toBeNull();
+      expect(resolveFastRuntime(['loop', retired, 'change'])).toBeNull();
     }
-    expect(resolveFastRuntime(['classic', 'root', 'show'])).toBeNull();
+    expect(resolveFastRuntime(['pipeline', 'root', 'show'])).toBeNull();
     expect(resolveFastRuntime(['resume-probe', '.', '--json'])).toBeNull();
   });
 });

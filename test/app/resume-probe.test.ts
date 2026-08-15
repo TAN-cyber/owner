@@ -3,8 +3,8 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createNativeChange } from '../../domains/owner-native/native-change.js';
-import { nativeProjectPaths } from '../../domains/owner-native/native-paths.js';
+import { createLoopChange } from '../../domains/owner-loop/loop-change.js';
+import { loopProjectPaths } from '../../domains/owner-loop/loop-paths.js';
 import { ensureCliBuilt } from '../helpers/ensure-cli-built.js';
 import { resolveProjectLanguage } from '../../app/commands/resume-probe.js';
 
@@ -13,13 +13,13 @@ const cli = path.join(repositoryRoot, 'bin', 'owner.js');
 const stateScript = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs');
 const activeChange = 'resume-probe-change';
 
-function classicProjectConfig(ambientResume = true): string {
+function pipelineProjectConfig(ambientResume = true): string {
   return [
     'schema: owner.project.v1',
-    'default_workflow: classic',
-    'workflows: [classic]',
+    'default_workflow: pipeline',
+    'workflows: [pipeline]',
     `ambient_resume: ${String(ambientResume)}`,
-    'classic:',
+    'pipeline:',
     '  artifact_layout: legacy',
     '  language: en',
     '',
@@ -72,7 +72,7 @@ describe('resumeProbe command', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-resume-cli-'));
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
-    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), classicProjectConfig(), 'utf8');
+    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), pipelineProjectConfig(), 'utf8');
     await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
     state(tmpDir, ['init', activeChange, 'full']);
     state(tmpDir, ['set', activeChange, 'build_mode', 'executing-plans']);
@@ -97,11 +97,11 @@ describe('resumeProbe command', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(parseResult(result.stdout)).toMatchObject({
       schema_version: 'owner.resume_probe.v2',
-      workflow: 'classic',
-      skill: 'owner-classic',
+      workflow: 'pipeline',
+      skill: 'owner-pipeline',
       entrySource: 'project-config',
       action: 'auto_resume',
-      nextCommand: '/owner-classic',
+      nextCommand: '/owner-pipeline',
     });
   });
 
@@ -119,15 +119,15 @@ describe('resumeProbe command', () => {
     const result = runCli(tmpDir, ['resume-probe', tmpDir, '--utterance', '继续']);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain('workflow: classic');
-    expect(result.stdout).toContain('skill: owner-classic');
-    expect(result.stdout).toContain('next: /owner-classic');
+    expect(result.stdout).toContain('workflow: pipeline');
+    expect(result.stdout).toContain('skill: owner-pipeline');
+    expect(result.stdout).toContain('next: /owner-pipeline');
   });
 
-  it('honors ambient_resume: false in a legacy Classic project config', async () => {
+  it('honors ambient_resume: false in a legacy Pipeline project config', async () => {
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
-      classicProjectConfig(false),
+      pipelineProjectConfig(false),
       'utf8',
     );
 
@@ -143,31 +143,31 @@ describe('resumeProbe command', () => {
     });
   });
 
-  it('routes a configured Native project without considering Classic changes', async () => {
-    const initialized = runCli(tmpDir, ['native', 'init', '--language', 'en']);
+  it('routes a configured Loop project without considering Pipeline changes', async () => {
+    const initialized = runCli(tmpDir, ['loop', 'init', '--language', 'en']);
     expect(initialized.status, initialized.stderr).toBe(0);
-    await createNativeChange({
-      paths: await nativeProjectPaths(tmpDir, 'docs'),
-      name: 'native-resume',
+    await createLoopChange({
+      paths: await loopProjectPaths(tmpDir, 'docs'),
+      name: 'loop-resume',
       language: 'en',
       verificationProtocol: 'legacy-v1',
     });
-    const changeDir = path.join(tmpDir, 'docs', 'owner', 'changes', 'native-resume');
+    const changeDir = path.join(tmpDir, 'docs', 'owner', 'changes', 'loop-resume');
     await fs.writeFile(
       path.join(changeDir, 'brief.md'),
       [
         '# Outcome',
-        'Resume Native.',
+        'Resume Loop.',
         '# Scope',
         'One change.',
         '# Non-goals',
-        'No Classic work.',
+        'No Pipeline work.',
         '# Acceptance examples',
         '- Resume the selected change.',
         '# Constraints and invariants',
         'Keep workflows separate.',
         '# Decisions',
-        'Use Native.',
+        'Use Loop.',
         '# Open questions',
         'None.',
         '# Verification expectations',
@@ -181,18 +181,18 @@ describe('resumeProbe command', () => {
       'resume-probe',
       tmpDir,
       '--utterance',
-      '继续 native-resume',
+      '继续 loop-resume',
       '--json',
     ]);
 
     expect(result.status, result.stderr).toBe(0);
     expect(parseResult(result.stdout)).toMatchObject({
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       entrySource: 'project-config',
       action: 'auto_resume',
-      changeName: 'native-resume',
-      nextCommand: '/owner-native',
+      changeName: 'loop-resume',
+      nextCommand: '/owner-loop',
     });
   });
 

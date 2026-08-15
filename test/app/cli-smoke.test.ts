@@ -3,8 +3,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
-import { createNativeChange } from '../../domains/owner-native/native-change.js';
-import { nativeProjectPaths } from '../../domains/owner-native/native-paths.js';
+import { createLoopChange } from '../../domains/owner-loop/loop-change.js';
+import { loopProjectPaths } from '../../domains/owner-loop/loop-paths.js';
 import { ensureCliBuilt } from '../helpers/ensure-cli-built.js';
 
 const repositoryRoot = path.resolve('.');
@@ -48,7 +48,7 @@ describe('built CLI smoke', () => {
 
   it('resolves the configured workflow through bin/owner.js from a nested directory', async () => {
     const initialized = runCli(
-      'native',
+      'loop',
       'init',
       '--project-root',
       projectRoot,
@@ -65,8 +65,8 @@ describe('built CLI smoke', () => {
     expect(resolved.status, resolved.stderr).toBe(0);
     expect(JSON.parse(resolved.stdout)).toEqual({
       schema: 'owner.workflow-resolution.v1',
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       source: 'project-config',
     });
   });
@@ -86,7 +86,7 @@ describe('built CLI smoke', () => {
       '--scope',
       'global',
       '--workflow',
-      'classic',
+      'pipeline',
       '--root',
       'docs',
       '--language',
@@ -97,22 +97,22 @@ describe('built CLI smoke', () => {
     expect(result.status).toBe(1);
     expect(JSON.parse(result.stdout)).toMatchObject({
       status: 'failed',
-      error: expect.stringContaining('--root is only valid when the Native workflow is enabled'),
+      error: expect.stringContaining('--root is only valid when the Loop workflow is enabled'),
     });
-    expect(result.stderr).toContain('--root is only valid when the Native workflow is enabled');
+    expect(result.stderr).toContain('--root is only valid when the Loop workflow is enabled');
     expect(result.stderr).not.toContain('at initCommand');
   });
 
-  it('runs the Native facade without changing root status and doctor commands', async () => {
-    const initialized = runCli('native', 'init', '--project-root', projectRoot, '--json');
-    await createNativeChange({
-      paths: await nativeProjectPaths(projectRoot, 'docs'),
+  it('runs the Loop facade without changing root status and doctor commands', async () => {
+    const initialized = runCli('loop', 'init', '--project-root', projectRoot, '--json');
+    await createLoopChange({
+      paths: await loopProjectPaths(projectRoot, 'docs'),
       name: 'smoke-change',
       language: 'en',
       verificationProtocol: 'legacy-v1',
     });
     const status = runCli(
-      'native',
+      'loop',
       'status',
       'smoke-change',
       '--project-root',

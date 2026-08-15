@@ -4,19 +4,13 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  createNativeChange,
-  writeNativeChange,
-} from '../../../domains/owner-native/native-change.js';
+import { createLoopChange, writeLoopChange } from '../../../domains/owner-loop/loop-change.js';
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
-import {
-  ensureNativeDirectories,
-  nativeProjectPaths,
-} from '../../../domains/owner-native/native-paths.js';
-import { selectNativeChange } from '../../../domains/owner-native/native-selection.js';
+} from '../../../domains/owner-loop/loop-config.js';
+import { ensureLoopDirectories, loopProjectPaths } from '../../../domains/owner-loop/loop-paths.js';
+import { selectLoopChange } from '../../../domains/owner-loop/loop-selection.js';
 
 const router = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-hook-router.mjs');
 
@@ -58,17 +52,17 @@ describe('packaged Hook Router worktree isolation', () => {
     phase: 'shape' | 'build',
   ): Promise<void> {
     await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
-    const paths = await nativeProjectPaths(projectRoot, '.');
-    await ensureNativeDirectories(paths);
-    const change = await createNativeChange({
+    const paths = await loopProjectPaths(projectRoot, '.');
+    await ensureLoopDirectories(paths);
+    const change = await createLoopChange({
       paths,
       name,
       language: 'en',
       verificationProtocol: 'legacy-v1',
     });
     change.phase = phase;
-    await writeNativeChange(paths, change);
-    await selectNativeChange(paths, name);
+    await writeLoopChange(paths, change);
+    await selectLoopChange(paths, name);
   }
 
   it('uses the linked worktree state even when the installed command still names the primary root', async () => {
@@ -144,7 +138,7 @@ describe('packaged Hook Router worktree isolation', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it('enforces Native Shape for raw Codex apply_patch input', async () => {
+  it('enforces Loop Shape for raw Codex apply_patch input', async () => {
     await configureChange(primary, 'raw-patch-shape', 'shape');
     const patch = [
       '*** Begin Patch',
@@ -167,7 +161,7 @@ describe('packaged Hook Router worktree isolation', () => {
   });
 
   it.each(['claude', 'codex'] as const)(
-    'enforces Native Shape for %s write payloads through the packaged router',
+    'enforces Loop Shape for %s write payloads through the packaged router',
     async (platform) => {
       await configureChange(primary, `${platform}-shape`, 'shape');
       const payload = JSON.stringify({
@@ -188,7 +182,7 @@ describe('packaged Hook Router worktree isolation', () => {
   );
 
   it.each(['claude', 'codex'] as const)(
-    'allows %s write payloads through the packaged router during Native Build',
+    'allows %s write payloads through the packaged router during Loop Build',
     async (platform) => {
       await configureChange(primary, `${platform}-build`, 'build');
       const payload = JSON.stringify({

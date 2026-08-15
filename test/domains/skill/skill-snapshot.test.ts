@@ -171,7 +171,7 @@ describe('Skill snapshots', () => {
   });
 
   it('snapshots YAML-only runtime packages without SKILL.md', async () => {
-    const runtimeRoot = path.join(root, 'runtime-classic');
+    const runtimeRoot = path.join(root, 'runtime-pipeline');
     await fs.mkdir(runtimeRoot, { recursive: true });
     const value = runtimePkg(runtimeRoot);
 

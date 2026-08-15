@@ -151,24 +151,24 @@ for (const scriptModule of directoryNames('scripts')) {
   }
 }
 
-for (const [name, entry] of Object.entries(layout.classicRuntime.entries ?? {})) {
+for (const [name, entry] of Object.entries(layout.pipelineRuntime.entries ?? {})) {
   if (!isFile(entry)) {
-    fail(`classic runtime entry "${name}" -> "${entry}" is missing`);
+    fail(`pipeline runtime entry "${name}" -> "${entry}" is missing`);
   }
 }
-for (const [name, output] of Object.entries(layout.classicRuntime.outputs ?? {})) {
+for (const [name, output] of Object.entries(layout.pipelineRuntime.outputs ?? {})) {
   if (!isFile(output)) {
-    fail(`classic runtime output "${name}" -> "${output}" is missing`);
+    fail(`pipeline runtime output "${name}" -> "${output}" is missing`);
   }
 }
-for (const [name, entry] of Object.entries(layout.nativeRuntime?.entries ?? {})) {
+for (const [name, entry] of Object.entries(layout.loopRuntime?.entries ?? {})) {
   if (!isFile(entry)) {
-    fail(`native runtime entry "${name}" -> "${entry}" is missing`);
+    fail(`loop runtime entry "${name}" -> "${entry}" is missing`);
   }
 }
-for (const [name, output] of Object.entries(layout.nativeRuntime?.outputs ?? {})) {
+for (const [name, output] of Object.entries(layout.loopRuntime?.outputs ?? {})) {
   if (!isFile(output)) {
-    fail(`native runtime output "${name}" -> "${output}" is missing`);
+    fail(`loop runtime output "${name}" -> "${output}" is missing`);
   }
 }
 for (const [name, entry] of Object.entries(layout.entryRuntime?.entries ?? {})) {
@@ -242,7 +242,7 @@ for (const file of walkFiles('.', ignoredGeneratedTrees, ignoredGeneratedRelativ
     normalized.startsWith('scripts/') ||
     normalized.startsWith('test/') ||
     normalized.startsWith('assets/skills/owner/scripts/') ||
-    normalized.startsWith('assets/skills/owner-native/scripts/') ||
+    normalized.startsWith('assets/skills/owner-loop/scripts/') ||
     allowedCodeFiles.has(normalized) ||
     normalized === 'bin/owner.js' ||
     allowedRootSourceFiles.has(normalized);
@@ -251,11 +251,11 @@ for (const file of walkFiles('.', ignoredGeneratedTrees, ignoredGeneratedRelativ
   }
 }
 
-for (const file of walkFiles('domains/owner-native')) {
+for (const file of walkFiles('domains/owner-loop')) {
   if (!/\.ts$/u.test(file)) continue;
   const content = readFileSync(path.join(root, file), 'utf8');
-  if (/\bfrom\s+['"][^'"]*owner-classic[^'"]*['"]/u.test(content)) {
-    fail(`${file} must not import the Classic domain`);
+  if (/\bfrom\s+['"][^'"]*owner-pipeline[^'"]*['"]/u.test(content)) {
+    fail(`${file} must not import the Pipeline domain`);
   }
 }
 

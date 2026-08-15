@@ -15,17 +15,14 @@ import {
   readOwnerCurrentSelection,
   writeOwnerCurrentSelection,
 } from '../../domains/owner-entry/current-selection.js';
-import {
-  defaultProjectConfig,
-  writeProjectConfig,
-} from '../../domains/owner-native/native-config.js';
+import { defaultProjectConfig, writeProjectConfig } from '../../domains/owner-loop/loop-config.js';
 import { writeWorkflowProjectConfig } from '../../domains/workflow-contract/project-config-writer.js';
-import { planClassicRootMove } from '../../domains/owner-classic/classic-root-move.js';
+import { planPipelineRootMove } from '../../domains/owner-pipeline/pipeline-root-move.js';
 import {
-  assertClassicLayoutInitializationSafe,
-  beginClassicLayoutInitialization,
-  checkpointClassicLayoutInitialization,
-} from '../../domains/owner-classic/classic-layout-initialization.js';
+  assertPipelineLayoutInitializationSafe,
+  beginPipelineLayoutInitialization,
+  checkpointPipelineLayoutInitialization,
+} from '../../domains/owner-pipeline/pipeline-layout-initialization.js';
 
 const stateScript = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs');
 
@@ -86,12 +83,12 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-async function writeReadyClassicRootMove(projectRoot: string): Promise<void> {
+async function writeReadyPipelineRootMove(projectRoot: string): Promise<void> {
   const transactionId = '22222222-2222-4222-8222-222222222222';
   const config = defaultProjectConfig('docs', 'en');
-  config.default_workflow = 'classic';
-  config.workflows = ['classic'];
-  config.classic = {
+  config.default_workflow = 'pipeline';
+  config.workflows = ['pipeline'];
+  config.pipeline = {
     artifact_layout: 'legacy',
     language: 'en',
     context_compression: 'off',
@@ -105,12 +102,12 @@ async function writeReadyClassicRootMove(projectRoot: string): Promise<void> {
   const directories = ['changes', 'changes/archive', 'specs'];
   const manifestSource = { directories, files: [], totalBytes: 0 };
   const manifest = { ...manifestSource, hash: sha256(JSON.stringify(manifestSource)) };
-  const plan = await planClassicRootMove(projectRoot);
+  const plan = await planPipelineRootMove(projectRoot);
   const legacyPlanId = sha256(
     JSON.stringify({
       source: 'openspec',
       target: 'docs/openspec',
-      staging: '.owner/transactions/classic-root-move/<transaction-id>/openspec',
+      staging: '.owner/transactions/pipeline-root-move/<transaction-id>/openspec',
       targetInitialState: 'missing',
       fileCount: manifest.files.length,
       directoryCount: manifest.directories.length,
@@ -125,22 +122,22 @@ async function writeReadyClassicRootMove(projectRoot: string): Promise<void> {
     projectRoot,
     '.owner',
     'transactions',
-    'classic-root-move',
+    'pipeline-root-move',
     transactionId,
     'openspec',
   );
   await fs.mkdir(path.dirname(staging), { recursive: true });
   await fs.cp(source, staging, { recursive: true });
   await fs.writeFile(
-    path.join(projectRoot, '.owner', 'classic-root-move.json'),
+    path.join(projectRoot, '.owner', 'pipeline-root-move.json'),
     `${JSON.stringify(
       {
-        schema: 'owner.classic-root-move.v1',
+        schema: 'owner.pipeline-root-move.v1',
         id: transactionId,
         stage: 'ready',
         source: 'openspec',
         target: 'docs/openspec',
-        staging: `.owner/transactions/classic-root-move/${transactionId}/openspec`,
+        staging: `.owner/transactions/pipeline-root-move/${transactionId}/openspec`,
         configPath: plan.configPath,
         originalConfigHash: plan.originalConfigHash,
         expectedConfigHash: plan.expectedConfigHash,
@@ -154,11 +151,11 @@ async function writeReadyClassicRootMove(projectRoot: string): Promise<void> {
   );
 }
 
-async function writeHealthyDocsClassicProject(projectRoot: string): Promise<void> {
+async function writeHealthyDocsPipelineProject(projectRoot: string): Promise<void> {
   const config = defaultProjectConfig('docs', 'en');
-  config.default_workflow = 'classic';
-  config.workflows = ['classic'];
-  config.classic = {
+  config.default_workflow = 'pipeline';
+  config.workflows = ['pipeline'];
+  config.pipeline = {
     artifact_layout: 'docs',
     language: 'en',
     context_compression: 'off',
@@ -193,9 +190,9 @@ async function state(cwd: string, ...args: string[]) {
       configPath,
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
-        'workflows: [classic]',
-        'classic:',
+        'default_workflow: pipeline',
+        'workflows: [pipeline]',
+        'pipeline:',
         '  artifact_layout: legacy',
         '  language: en',
         '',
@@ -345,7 +342,7 @@ describe('doctor command', () => {
       await fs.writeFile(primaryRouter, '// primary Router\n', 'utf8');
       await fs.writeFile(
         path.join(tmpDir, '.owner', 'current-change.json'),
-        '{"schema":"owner.selection.v2","workflow":"native","change":"primary"}',
+        '{"schema":"owner.selection.v2","workflow":"loop","change":"primary"}',
         'utf8',
       );
 
@@ -436,21 +433,21 @@ describe('doctor command', () => {
     }
   });
 
-  it('reports allowed Classic recovery strategies and never chooses one implicitly', async () => {
+  it('reports allowed Pipeline recovery strategies and never chooses one implicitly', async () => {
     await fs.mkdir(path.join(tmpDir, '.git'));
-    await writeReadyClassicRootMove(tmpDir);
+    await writeReadyPipelineRootMove(tmpDir);
 
     const before = await collectDoctorPayload(tmpDir);
     expect(
-      before.results.find((result) => result.check === 'Classic artifact layout'),
+      before.results.find((result) => result.check === 'Pipeline artifact layout'),
     ).toMatchObject({
       status: 'fail',
       message: expect.stringContaining('allowed strategies: continue, rollback'),
     });
     expect(
-      before.results.find((result) => result.check === 'Classic artifact layout')?.message,
+      before.results.find((result) => result.check === 'Pipeline artifact layout')?.message,
     ).toContain(
-      'staging .owner/transactions/classic-root-move/22222222-2222-4222-8222-222222222222/openspec',
+      'staging .owner/transactions/pipeline-root-move/22222222-2222-4222-8222-222222222222/openspec',
     );
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -465,7 +462,7 @@ describe('doctor command', () => {
       log.mockRestore();
     }
     await expect(
-      fs.stat(path.join(tmpDir, '.owner', 'classic-root-move.json')),
+      fs.stat(path.join(tmpDir, '.owner', 'pipeline-root-move.json')),
     ).resolves.toBeDefined();
 
     const repairLog = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -481,7 +478,7 @@ describe('doctor command', () => {
       repairLog.mockRestore();
     }
     await expect(
-      fs.stat(path.join(tmpDir, '.owner', 'classic-root-move.json')),
+      fs.stat(path.join(tmpDir, '.owner', 'pipeline-root-move.json')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -574,19 +571,19 @@ describe('doctor command', () => {
     ).toEqual([]);
   });
 
-  it('reports an owned Classic initialization and atomically quarantines it on rollback', async () => {
-    const initialization = await assertClassicLayoutInitializationSafe(tmpDir, 'docs');
-    const owned = await beginClassicLayoutInitialization(tmpDir, initialization);
+  it('reports an owned Pipeline initialization and atomically quarantines it on rollback', async () => {
+    const initialization = await assertPipelineLayoutInitializationSafe(tmpDir, 'docs');
+    const owned = await beginPipelineLayoutInitialization(tmpDir, initialization);
     await fs.mkdir(path.join(owned.openSpecRoot, 'changes', 'archive'), {
       recursive: true,
     });
     await fs.mkdir(path.join(owned.openSpecRoot, 'specs'), { recursive: true });
     await fs.writeFile(path.join(owned.openSpecRoot, 'config.yaml'), 'schema: spec-driven\n');
-    await checkpointClassicLayoutInitialization(tmpDir, owned.initializationPermit);
+    await checkpointPipelineLayoutInitialization(tmpDir, owned.initializationPermit);
 
     const before = await collectDoctorPayload(tmpDir);
     expect(
-      before.results.find((result) => result.check === 'Classic initialization'),
+      before.results.find((result) => result.check === 'Pipeline initialization'),
     ).toMatchObject({
       status: 'warn',
       message: expect.stringMatching(/initializing.*continue, rollback/iu),
@@ -606,10 +603,10 @@ describe('doctor command', () => {
     } finally {
       log.mockRestore();
     }
-    expect(repaired!.repaired).toContain('Classic initialization');
+    expect(repaired!.repaired).toContain('Pipeline initialization');
     await expect(fs.access(owned.openSpecRoot)).rejects.toMatchObject({ code: 'ENOENT' });
     const journal = JSON.parse(
-      await fs.readFile(path.join(tmpDir, '.owner', 'classic-init-ownership.json'), 'utf8'),
+      await fs.readFile(path.join(tmpDir, '.owner', 'pipeline-init-ownership.json'), 'utf8'),
     ) as { stage: string; quarantine: string };
     expect(journal.stage).toBe('quarantined');
     await expect(
@@ -617,7 +614,7 @@ describe('doctor command', () => {
     ).resolves.toBe('schema: spec-driven\n');
   });
 
-  it('reports an invalid project config without guessing Classic working directories', async () => {
+  it('reports an invalid project config without guessing Pipeline working directories', async () => {
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), 'schema: [broken\n');
     await fs.mkdir(path.join(tmpDir, 'openspec', 'changes', 'must-not-be-scanned'), {
@@ -626,7 +623,7 @@ describe('doctor command', () => {
 
     const results = await collectDoctorResults(tmpDir);
 
-    expect(results.find((result) => result.check === 'Classic artifact layout')).toMatchObject({
+    expect(results.find((result) => result.check === 'Pipeline artifact layout')).toMatchObject({
       status: 'fail',
       message: expect.stringContaining('Invalid .owner/config.yaml'),
     });
@@ -636,15 +633,15 @@ describe('doctor command', () => {
     });
   });
 
-  it('reports both Classic root states and a repair command when the configured root is missing', async () => {
+  it('reports both Pipeline root states and a repair command when the configured root is missing', async () => {
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
-        'workflows: [classic]',
-        'classic:',
+        'default_workflow: pipeline',
+        'workflows: [pipeline]',
+        'pipeline:',
         '  artifact_layout: docs',
         '',
       ].join('\n'),
@@ -654,10 +651,10 @@ describe('doctor command', () => {
 
     const results = await collectDoctorResults(tmpDir);
 
-    expect(results.find((result) => result.check === 'Classic artifact layout')).toMatchObject({
+    expect(results.find((result) => result.check === 'Pipeline artifact layout')).toMatchObject({
       status: 'fail',
       message: expect.stringMatching(
-        /configured docs\/openspec\/ missing; alternate openspec\/ present.*owner classic root show/iu,
+        /configured docs\/openspec\/ missing; alternate openspec\/ present.*owner pipeline root show/iu,
       ),
     });
   });
@@ -668,9 +665,9 @@ describe('doctor command', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
-        'workflows: [classic]',
-        'classic:',
+        'default_workflow: pipeline',
+        'workflows: [pipeline]',
+        'pipeline:',
         '  artifact_layout: docs',
         '',
       ].join('\n'),
@@ -685,7 +682,7 @@ describe('doctor command', () => {
     await fs.mkdir(path.join(tmpDir, 'docs', 'superpowers', 'reports'), { recursive: true });
 
     let results = await collectDoctorResults(tmpDir);
-    expect(results.find((result) => result.check === 'Classic OpenSpec root')).toMatchObject({
+    expect(results.find((result) => result.check === 'Pipeline OpenSpec root')).toMatchObject({
       status: 'fail',
       message: expect.stringContaining('config.yaml is missing'),
     });
@@ -696,14 +693,14 @@ describe('doctor command', () => {
       'utf8',
     );
     results = await collectDoctorResults(tmpDir);
-    expect(results.find((result) => result.check === 'Classic OpenSpec root')).toMatchObject({
+    expect(results.find((result) => result.check === 'Pipeline OpenSpec root')).toMatchObject({
       status: 'fail',
       message: expect.stringContaining('invalid YAML'),
     });
   });
 
   it('does not confuse normal docs artifacts or project-level OpenSpec tools with coupled assets', async () => {
-    await writeHealthyDocsClassicProject(tmpDir);
+    await writeHealthyDocsPipelineProject(tmpDir);
     await fs.mkdir(path.join(tmpDir, 'docs', 'openspec', 'specs', 'openspec-notes'), {
       recursive: true,
     });
@@ -718,19 +715,19 @@ describe('doctor command', () => {
 
     const results = await collectDoctorResults(tmpDir);
 
-    expect(results.find((result) => result.check === 'Classic platform tool assets')).toMatchObject(
-      {
-        status: 'pass',
-        message: expect.stringContaining('no OpenSpec platform tool assets under docs/'),
-      },
-    );
+    expect(
+      results.find((result) => result.check === 'Pipeline platform tool assets'),
+    ).toMatchObject({
+      status: 'pass',
+      message: expect.stringContaining('no OpenSpec platform tool assets under docs/'),
+    });
   });
 
-  it('does not run the docs coupling check for a legacy Classic layout', async () => {
+  it('does not run the docs coupling check for a legacy Pipeline layout', async () => {
     const config = defaultProjectConfig('docs', 'en');
-    config.default_workflow = 'classic';
-    config.workflows = ['classic'];
-    config.classic = {
+    config.default_workflow = 'pipeline';
+    config.workflows = ['pipeline'];
+    config.pipeline = {
       artifact_layout: 'legacy',
       language: 'en',
       context_compression: 'off',
@@ -755,12 +752,12 @@ describe('doctor command', () => {
     const results = await collectDoctorResults(tmpDir);
 
     expect(
-      results.find((result) => result.check === 'Classic platform tool assets'),
+      results.find((result) => result.check === 'Pipeline platform tool assets'),
     ).toBeUndefined();
   });
 
   it('reports OpenSpec skills and command files nested under docs for Claude and Codex roots', async () => {
-    await writeHealthyDocsClassicProject(tmpDir);
+    await writeHealthyDocsPipelineProject(tmpDir);
     const platformRoots = [
       ...new Set(
         PLATFORMS.flatMap((platform) => [platform.skillsDir, ...(platform.legacySkillsDirs ?? [])]),
@@ -779,7 +776,7 @@ describe('doctor command', () => {
 
     const results = await collectDoctorResults(tmpDir);
     const platformAssets = results.find(
-      (result) => result.check === 'Classic platform tool assets',
+      (result) => result.check === 'Pipeline platform tool assets',
     );
 
     expect(platformAssets).toMatchObject({
@@ -814,7 +811,7 @@ describe('doctor command', () => {
   });
 
   it('fails closed without following a linked platform directory under docs', async () => {
-    await writeHealthyDocsClassicProject(tmpDir);
+    await writeHealthyDocsPipelineProject(tmpDir);
     const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-doctor-tools-link-'));
     const outsideMarker = path.join(outsideRoot, 'skills', 'openspec-propose', 'SKILL.md');
     try {
@@ -833,7 +830,7 @@ describe('doctor command', () => {
 
       const results = await collectDoctorResults(tmpDir);
       const platformAssets = results.find(
-        (result) => result.check === 'Classic platform tool assets',
+        (result) => result.check === 'Pipeline platform tool assets',
       );
 
       expect(platformAssets).toMatchObject({
@@ -848,7 +845,7 @@ describe('doctor command', () => {
   });
 
   it.each(['configured', 'alternate'] as const)(
-    'handles the Classic layout check when the %s root is a directory link',
+    'handles the Pipeline layout check when the %s root is a directory link',
     async (kind) => {
       const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-doctor-root-link-'));
       try {
@@ -865,9 +862,9 @@ describe('doctor command', () => {
           path.join(tmpDir, '.owner', 'config.yaml'),
           [
             'schema: owner.project.v1',
-            'default_workflow: classic',
-            'workflows: [classic]',
-            'classic:',
+            'default_workflow: pipeline',
+            'workflows: [pipeline]',
+            'pipeline:',
             '  artifact_layout: docs',
             '',
           ].join('\n'),
@@ -901,7 +898,7 @@ describe('doctor command', () => {
 
         const results = await collectDoctorResults(tmpDir);
 
-        const layoutResult = results.find((result) => result.check === 'Classic artifact layout');
+        const layoutResult = results.find((result) => result.check === 'Pipeline artifact layout');
         if (kind === 'configured') {
           expect(layoutResult).toMatchObject({
             status: 'fail',
@@ -928,9 +925,9 @@ describe('doctor command', () => {
         path.join(tmpDir, '.owner', 'config.yaml'),
         [
           'schema: owner.project.v1',
-          'default_workflow: classic',
-          'workflows: [classic]',
-          'classic:',
+          'default_workflow: pipeline',
+          'workflows: [pipeline]',
+          'pipeline:',
           '  artifact_layout: legacy',
           '',
         ].join('\n'),
@@ -960,7 +957,7 @@ describe('doctor command', () => {
     }
   });
 
-  it('fails a Classic change check without reading through its runtime directory link', async () => {
+  it('fails a Pipeline change check without reading through its runtime directory link', async () => {
     const initialized = await state(tmpDir, 'init', 'runtime-link', 'full');
     expect(initialized.status, initialized.stderr).toBe(0);
     const changeDir = path.join(tmpDir, 'openspec', 'changes', 'runtime-link');
@@ -1011,7 +1008,7 @@ describe('doctor command', () => {
       status: string;
       message: string;
     }>;
-    const layoutResult = results.find((result) => result.check === 'Classic artifact layout');
+    const layoutResult = results.find((result) => result.check === 'Pipeline artifact layout');
     expect(layoutResult).toMatchObject({ status: 'pass' });
     expect(layoutResult?.message).toContain('openspec/');
     expect(layoutResult?.message).toContain('docs/openspec/');
@@ -1155,9 +1152,9 @@ describe('doctor command', () => {
     expect(output).not.toContain('missing 31:');
   });
 
-  it('treats a workflow-scoped Native Skill install as complete without Classic assets', async () => {
+  it('treats a workflow-scoped Loop Skill install as complete without Pipeline assets', async () => {
     const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
-    await copyOwnerSkillsForPlatform(tmpDir, claude, true, 'skills', 'project', 'copy', 'native');
+    await copyOwnerSkillsForPlatform(tmpDir, claude, true, 'skills', 'project', 'copy', 'loop');
     await writeProjectConfig(tmpDir, defaultProjectConfig('docs'));
 
     const payload = await collectDoctorPayload(tmpDir);
@@ -1174,7 +1171,7 @@ describe('doctor command', () => {
       expect.arrayContaining(['openspec CLI', 'Superpowers', 'working directories']),
     );
     await expect(
-      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -1285,16 +1282,16 @@ describe('doctor command', () => {
     ).toMatchObject({ status: 'pass', message: 'current' });
   });
 
-  it('uses the Classic-only project language when repairing managed Rules', async () => {
+  it('uses the Pipeline-only project language when repairing managed Rules', async () => {
     await installManagedOwnerSkills(tmpDir);
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
-        'workflows: [classic]',
-        'classic:',
+        'default_workflow: pipeline',
+        'workflows: [pipeline]',
+        'pipeline:',
         '  artifact_layout: legacy',
         '  language: zh-CN',
         '',
@@ -1366,7 +1363,7 @@ describe('doctor command', () => {
     await expect(fs.access(legacyRule)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('migrates Classic v1 selection only after a project Router is ready', async () => {
+  it('migrates Pipeline v1 selection only after a project Router is ready', async () => {
     await installManagedOwnerSkills(tmpDir);
     const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
     await fs.mkdir(path.dirname(selectionPath), { recursive: true });
@@ -1402,14 +1399,14 @@ describe('doctor command', () => {
     await expect(readOwnerCurrentSelection(tmpDir)).resolves.toMatchObject({
       status: 'selected',
       legacy: false,
-      selection: { workflow: 'classic', change: 'legacy-change' },
+      selection: { workflow: 'pipeline', change: 'legacy-change' },
     });
     await expect(
       fs.access(path.join(tmpDir, '.claude', 'settings.local.json')),
     ).resolves.toBeUndefined();
   });
 
-  it('keeps Classic v1 selection when doctor cannot establish a project Router', async () => {
+  it('keeps Pipeline v1 selection when doctor cannot establish a project Router', async () => {
     const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
     const legacy = `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`;
     await fs.mkdir(path.dirname(selectionPath), { recursive: true });
@@ -1425,11 +1422,11 @@ describe('doctor command', () => {
     await expect(fs.readFile(selectionPath, 'utf8')).resolves.toBe(legacy);
   });
 
-  it('keeps Classic v1 selection when the repaired project is Native-only', async () => {
+  it('keeps Pipeline v1 selection when the repaired project is Loop-only', async () => {
     await installManagedOwnerSkills(tmpDir);
     const config = defaultProjectConfig('.');
-    config.workflows = ['native'];
-    config.default_workflow = 'native';
+    config.workflows = ['loop'];
+    config.default_workflow = 'loop';
     await writeProjectConfig(tmpDir, config);
     const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
     const legacy = `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`;
@@ -1448,12 +1445,12 @@ describe('doctor command', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('clears a missing Native selection after the repaired Router is ready', async () => {
+  it('clears a missing Loop selection after the repaired Router is ready', async () => {
     await installManagedOwnerSkills(tmpDir);
     await writeProjectConfig(tmpDir, defaultProjectConfig('.'));
     await writeOwnerCurrentSelection(tmpDir, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
@@ -1746,7 +1743,7 @@ describe('doctor command', () => {
     expect(await fs.readFile(path.join(invalidChangeDir, '.owner.yaml'), 'utf8')).toBe(before);
   });
 
-  it('uses Classic diagnostics for owner yaml validity messages', async () => {
+  it('uses Pipeline diagnostics for owner yaml validity messages', async () => {
     await state(tmpDir, 'init', 'demo', 'full');
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -1800,7 +1797,7 @@ describe('doctor command', () => {
     }
 
     expect(output).toContain(
-      '.owner.yaml: top-level-invalid: Invalid Classic state: unknown field(s): unknown_root_field',
+      '.owner.yaml: top-level-invalid: Invalid Pipeline state: unknown field(s): unknown_root_field',
     );
     expect(output).toContain('next: top-level-invalid: inspect .owner.yaml and rerun owner doctor');
   });

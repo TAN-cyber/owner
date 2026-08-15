@@ -35,7 +35,7 @@ Design 阶段                                    Build 阶段
 
 ### 压缩产物
 
-handoff context 是一个 JSON 文件，存储在 `<classic-change-dir>/.owner/handoff/design-context.json`，其中 `<classic-change-dir>` 由项目的 `classic.artifact_layout` 解析；可用 `owner classic root show` 查看当前 OpenSpec 根。该文件包含：
+handoff context 是一个 JSON 文件，存储在 `<pipeline-change-dir>/.owner/handoff/design-context.json`，其中 `<pipeline-change-dir>` 由项目的 `pipeline.artifact_layout` 解析；可用 `owner pipeline root show` 查看当前 OpenSpec 根。该文件包含：
 
 - Design Doc 的完整内容
 - Spec 内容（off 模式为全文，beta 模式为 hash 引用）

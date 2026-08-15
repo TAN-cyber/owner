@@ -1,5 +1,5 @@
 import { memoizedHookRead } from '../../platform/process/hook-read-cache.js';
-import { discoverNativeProject } from '../owner-native/native-paths.js';
+import { discoverLoopProject } from '../owner-loop/loop-paths.js';
 import { readWorkflowProjectConfig } from '../workflow-contract/project-config-reader.js';
 
 /**
@@ -10,7 +10,7 @@ import { readWorkflowProjectConfig } from '../workflow-contract/project-config-r
  * resume-probe entry) consult these wrappers. When no cache scope is active
  * (CLI commands that bypass the entry point), they degrade to the raw reads.
  *
- * `discoverNativeProject` walks the directory tree upward with an lstat per
+ * `discoverLoopProject` walks the directory tree upward with an lstat per
  * level; `readWorkflowProjectConfig` opens, parses, and hashes
  * `.owner/config.yaml`. Within a single decision both are immutable, so
  * memoizing them removes the 2-3x repeat reads the entry resolution used to
@@ -21,7 +21,7 @@ export const readCachedProjectConfig = memoizedHookRead(
   (projectRoot: string) => readWorkflowProjectConfig(projectRoot),
 );
 
-export const discoverCachedNativeProject = memoizedHookRead(
-  'discoverNativeProject',
-  (startPath: string) => discoverNativeProject(startPath),
+export const discoverCachedLoopProject = memoizedHookRead(
+  'discoverLoopProject',
+  (startPath: string) => discoverLoopProject(startPath),
 );

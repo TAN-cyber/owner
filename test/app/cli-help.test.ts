@@ -24,15 +24,15 @@ describe('CLI help text', () => {
     const packageJson = JSON.parse(
       readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'),
     ) as { description: string; version: string };
-    const tagline = 'Resumable Native and Classic vibe coding for Claude Code and Codex';
+    const tagline = 'Resumable Loop and Pipeline vibe coding for Claude Code and Codex';
 
     expect(help.status, help.stderr).toBe(0);
     expect(help.stdout).toContain(tagline);
     expect(packageJson.description).toBe(tagline);
-    expect(packageJson.version).toBe('0.1.0');
+    expect(packageJson.version).toBe('0.1.1');
   });
 
-  it('exposes only lifecycle, Native, and Classic command surfaces', () => {
+  it('exposes only lifecycle, Loop, and Pipeline command surfaces', () => {
     const help = runCli('--help');
 
     expect(help.status, help.stderr).toBe(0);
@@ -44,8 +44,8 @@ describe('CLI help text', () => {
       'doctor',
       'update',
       'uninstall',
-      'native',
-      'classic',
+      'loop',
+      'pipeline',
       'state',
       'guard',
       'handoff',
@@ -65,37 +65,37 @@ describe('CLI help text', () => {
     },
   );
 
-  it('exposes only the four stable Classic facade commands at the root', () => {
+  it('exposes only the four stable Pipeline facade commands at the root', () => {
     const help = runCli('--help');
 
     expect(help.status, help.stderr).toBe(0);
-    expect(help.stdout).toContain('Read and update Classic workflow state');
-    expect(help.stdout).toContain('Check Classic workflow phase guards');
-    expect(help.stdout).toContain('Create and inspect Classic workflow handoffs');
-    expect(help.stdout).toContain('Archive completed Classic workflow changes');
+    expect(help.stdout).toContain('Read and update Pipeline workflow state');
+    expect(help.stdout).toContain('Check Pipeline workflow phase guards');
+    expect(help.stdout).toContain('Create and inspect Pipeline workflow handoffs');
+    expect(help.stdout).toContain('Archive completed Pipeline workflow changes');
     expect(help.stdout).not.toMatch(/^\s+(validate|intent|hook-guard)\b/mu);
   });
 
-  it('documents the layout-aware Classic command group', () => {
-    const help = runCli('classic', '--help');
+  it('documents the layout-aware Pipeline command group', () => {
+    const help = runCli('pipeline', '--help');
 
     expect(help.status, help.stderr).toBe(0);
-    expect(help.stdout).toContain('Usage: owner classic <command> [args]');
+    expect(help.stdout).toContain('Usage: owner pipeline <command> [args]');
     expect(help.stdout).toContain('openspec -- <openspec-args...>');
     expect(help.stdout).toContain('root move docs --dry-run');
     expect(help.stdout).toContain('root move docs --apply');
   });
 
-  it('keeps Native behind one isolated root command', () => {
+  it('keeps Loop behind one isolated root command', () => {
     const rootHelp = runCli('--help');
-    const nativeHelp = runCli('native', '--help');
+    const loopHelp = runCli('loop', '--help');
 
     expect(rootHelp.status, rootHelp.stderr).toBe(0);
-    expect(nativeHelp.status, nativeHelp.stderr).toBe(0);
-    expect(rootHelp.stdout).toMatch(/^\s+native \[args\.\.\.\]\s+Manage the self-contained/mu);
-    expect(nativeHelp.stdout).toContain('Usage: owner native <command> [options]');
-    expect(nativeHelp.stdout).toContain('root move <artifact-root>');
-    expect(nativeHelp.stdout).toContain('doctor [<change-name>]');
+    expect(loopHelp.status, loopHelp.stderr).toBe(0);
+    expect(rootHelp.stdout).toMatch(/^\s+loop \[args\.\.\.\]\s+Manage the self-contained/mu);
+    expect(loopHelp.stdout).toContain('Usage: owner loop <command> [options]');
+    expect(loopHelp.stdout).toContain('root move <artifact-root>');
+    expect(loopHelp.stdout).toContain('doctor [<change-name>]');
   });
 
   it('exposes Claude/Codex target controls without removed integration flags', () => {

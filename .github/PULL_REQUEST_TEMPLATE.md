@@ -23,7 +23,7 @@
 - [ ] `pnpm run lint:architecture`
 - [ ] `pnpm format:check`
 - [ ] `pnpm test`
-- [ ] `pnpm test -- test/domains/owner-classic/owner-scripts.test.ts`
+- [ ] `pnpm test -- test/domains/owner-pipeline/owner-scripts.test.ts`
 - [ ] Not run:
 
 ## ✅ Checklist

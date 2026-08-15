@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { spawnSync } from 'child_process';
 import os from 'os';
 import path from 'path';
-import { prepareClassicLegacyProject } from '../../helpers/classic-project.js';
+import { preparePipelineLegacyProject } from '../../helpers/pipeline-project.js';
 
 const sourceScripts = path.resolve('assets', 'skills', 'owner', 'scripts');
 
@@ -14,7 +14,7 @@ describe('Skill Engine schema compatibility', () => {
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-engine-'));
-    await prepareClassicLegacyProject(root);
+    await preparePipelineLegacyProject(root);
     await fs.mkdir(path.join(root, 'assets'), { recursive: true });
     for (const name of [
       'owner-runtime.mjs',
@@ -42,7 +42,7 @@ describe('Skill Engine schema compatibility', () => {
     });
   }
 
-  it('validates every Classic projection field written as the engine would', async () => {
+  it('validates every Pipeline projection field written as the engine would', async () => {
     expect(run(stateScript, ['init', 'demo', 'full']).status).toBe(0);
     const result = run(validateScript, ['demo']);
     expect(result.status).toBe(0);

@@ -80,7 +80,7 @@ export function gitBranchRemote(cwd: string, branch: string): string {
   if (remotes.length === 1) return remotes[0];
   throw new Error(
     remotes.length === 0
-      ? 'Native workspace finish requires a configured Git remote'
-      : `Native workspace finish requires an unambiguous Git remote: ${remotes.join(', ')}`,
+      ? 'Loop workspace finish requires a configured Git remote'
+      : `Loop workspace finish requires an unambiguous Git remote: ${remotes.join(', ')}`,
   );
 }

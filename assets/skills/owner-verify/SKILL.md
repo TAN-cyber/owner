@@ -1,11 +1,11 @@
 ---
 name: owner-verify
-description: "Phase 4 of Owner Classic — verify a change, record evidence, and drive repair loops."
+description: "Phase 4 of Owner Pipeline — verify a change, record evidence, and drive repair loops."
 ---
 
 # Owner Phase 4: Verify
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Verification reports must use the configured Owner artifact language from `owner
 
 ### 0b. Entry State Verification (Entry Check)
 
-Use the stable `owner` CLI described in `owner-classic/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-classic/reference/context-recovery.md`:
+Use the stable `owner` CLI described in `owner-pipeline/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-pipeline/reference/context-recovery.md`:
 
 ```bash
 owner state select <change-name>
@@ -29,7 +29,7 @@ owner state check <change-name> verify
 
 Proceed to Step 1 after verification passes. The script outputs specific failure reasons when verification fails.
 
-If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-classic/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
+If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-pipeline/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
 
 **Idempotency**: All verify checks are safe to repeat. If `verify_result` is already `pass`, verification is complete and archive should continue; keep `branch_status: pending` until archive changes are committed and final branch handling finishes. If `verify_result` is `pending`, start verification from the beginning.
 
@@ -43,7 +43,7 @@ owner state scale <change-name>
 
 The script automatically counts tasks, delta spec count, changed file count, determines light or full verification mode, and sets the verify_mode field. Decision rule (any condition triggers full): tasks > 3, delta spec capabilities > 1, changed files > 8.
 
-Before verification begins, handle uncommitted changes through `owner-classic/reference/dirty-worktree.md` protocol. Verify phase special handling:
+Before verification begins, handle uncommitted changes through `owner-pipeline/reference/dirty-worktree.md` protocol. Verify phase special handling:
 
 1. If dirty diff clearly belongs to the current change, it is verification input. Continue verification, but do not modify or commit implementation, tests, tasks, delta specs, or the Design Doc in verify
 2. If dirty diff is only a verify phase artifact such as a verification report draft, may continue and record state in verify phase
@@ -86,7 +86,7 @@ The report must list:
 
 Handle failures as follows:
 - **CRITICAL/IMPORTANT or objectively repairable in-scope issues**: automatically return to build below the retry limit. Do not manufacture a "whether to fix" decision, and never accept these as deviations
-- **WARNING/SUGGESTION whose fix introduces a behavior, scope, or risk tradeoff**: use `owner-classic/reference/decision-point.md` to ask whether to fix or accept. Record the reason and impact scope when accepted
+- **WARNING/SUGGESTION whose fix introduces a behavior, scope, or risk tradeoff**: use `owner-pipeline/reference/decision-point.md` to ask whether to fix or accept. Record the reason and impact scope when accepted
 - **WARNING/SUGGESTION with a safe, local, tradeoff-free fix**: repair automatically below the retry limit; low severity alone does not justify a pause
 
 Only accepting WARNING/SUGGESTION deviations or choosing a strategy after the 4th failure is a user decision point. When `verify_failures >= 3`, do not automatically execute another `verify-fail`. Offer only "Continue fixing" or "Stop this workflow and seek an external decision" under the decision protocol. Record the next failure and return to build only after the user chooses continue. CRITICAL/IMPORTANT findings are never waivable.
@@ -155,11 +155,11 @@ When scale assessment result is "large":
 **Immediately execute:** Use the Skill tool to load the `openspec-verify-change` skill. Skipping this step is prohibited.
 
 <!-- external-openspec-skill-override -->
-**External OpenSpec Skill override:** Use only its verification semantics. Replace every direct official CLI, fixed-cwd, or fixed physical OpenSpec path instruction with `owner classic openspec -- <args...>` and the resolver-returned `<classic-*>` logical roots.
+**External OpenSpec Skill override:** Use only its verification semantics. Replace every direct official CLI, fixed-cwd, or fixed physical OpenSpec path instruction with `owner pipeline openspec -- <args...>` and the resolver-returned `<pipeline-*>` logical roots.
 
 After the skill loads, follow its guidance to verify. Check items:
 1. All tasks.md tasks completed (`[x]`)
-2. Implementation matches `<classic-change-dir>/design.md` high-level design decisions
+2. Implementation matches `<pipeline-change-dir>/design.md` high-level design decisions
 3. Implementation matches Design Doc (technical design documents under `docs/superpowers/specs/`)
 4. All capability spec scenarios pass
 5. proposal.md goals are satisfied
@@ -205,11 +205,11 @@ State file auto-updates to `phase: archive`, `verify_result: pass`, `verified_at
 
 ## Context Compression Recovery
 
-Follow `owner-classic/reference/context-recovery.md` with phase set to `verify`.
+Follow `owner-pipeline/reference/context-recovery.md` with phase set to `verify`.
 
 ## Automatic Handoff to Next Phase
 
-Follow `owner-classic/reference/auto-transition.md`. Key command:
+Follow `owner-pipeline/reference/auto-transition.md`. Key command:
 
 ```bash
 owner state next <change-name>

@@ -66,7 +66,7 @@ type TargetWorkflowSelection = {
   companionSkills: Array<'openspec' | 'superpowers'>;
 };
 
-const ALL_WORKFLOWS: OwnerWorkflow[] = ['native', 'classic'];
+const ALL_WORKFLOWS: OwnerWorkflow[] = ['loop', 'pipeline'];
 
 function formatMessage(
   lang: Language,
@@ -88,8 +88,8 @@ async function resolveUninstallLanguage(
       allowPartialProject: true,
     });
     const configuredLanguages = [
-      snapshot.document?.native?.language,
-      snapshot.document?.classic?.language,
+      snapshot.document?.loop?.language,
+      snapshot.document?.pipeline?.language,
     ];
     if (configuredLanguages.includes('zh-CN')) return 'zh';
   } catch {
@@ -150,8 +150,8 @@ async function resolveWorkflowSelection(
   const selected = await checkbox({
     message: t(lang, 'selectWorkflowsToUninstall'),
     choices: [
-      { name: t(lang, 'nativeWorkflow'), value: 'native' as const, checked: true },
-      { name: t(lang, 'classicWorkflow'), value: 'classic' as const, checked: true },
+      { name: t(lang, 'loopWorkflow'), value: 'loop' as const, checked: true },
+      { name: t(lang, 'pipelineWorkflow'), value: 'pipeline' as const, checked: true },
     ],
     required: true,
   });
@@ -159,13 +159,13 @@ async function resolveWorkflowSelection(
     ALL_WORKFLOWS.includes(workflow),
   );
   const resolvedWorkflows = workflows && workflows.length > 0 ? workflows : [...ALL_WORKFLOWS];
-  if (!resolvedWorkflows.includes('classic')) {
+  if (!resolvedWorkflows.includes('pipeline')) {
     return { workflows: resolvedWorkflows, companionSkills: [] };
   }
 
   const companionSkills =
     ((await checkbox({
-      message: t(lang, 'removeClassicCompanionSkills'),
+      message: t(lang, 'removePipelineCompanionSkills'),
       choices: [
         { name: t(lang, 'openSpecSkills'), value: 'openspec', checked: false },
         { name: t(lang, 'superpowersSkills'), value: 'superpowers', checked: false },
@@ -178,8 +178,8 @@ async function resolveWorkflowSelection(
 async function detectInstalledWorkflows(target: InstalledOwnerTarget, projectPath: string) {
   const baseDir = getBaseDir(target.scope, projectPath);
   const workflows: OwnerWorkflow[] = [];
-  for (const workflow of ['native', 'classic'] as const) {
-    const skill = workflow === 'native' ? 'owner-native' : 'owner-classic';
+  for (const workflow of ['loop', 'pipeline'] as const) {
+    const skill = workflow === 'loop' ? 'owner-loop' : 'owner-pipeline';
     if (
       await Promise.all(
         getPlatformSkillsDirs(target.platform, target.scope).map((skillsDir) =>
@@ -213,8 +213,8 @@ async function removeSelectedWorkflowsFromProjectConfig(
     : remaining[0];
   for (const workflow of workflowsToRemove) delete document[workflow];
   const language =
-    (document.native as { language?: unknown } | undefined)?.language === 'zh-CN' ||
-    (document.classic as { language?: unknown } | undefined)?.language === 'zh-CN'
+    (document.loop as { language?: unknown } | undefined)?.language === 'zh-CN' ||
+    (document.pipeline as { language?: unknown } | undefined)?.language === 'zh-CN'
       ? 'zh-CN'
       : 'en';
   await writeWorkflowProjectConfigDocument(projectPath, document, language, {

@@ -3,11 +3,11 @@ import { realpathSync } from 'fs';
 import { promises as fs } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 
-import { discoverNativeProject } from '../owner-native/native-paths.js';
+import { discoverLoopProject } from '../owner-loop/loop-paths.js';
 import {
-  assertClassicLayoutReadable,
-  discoverClassicProject,
-} from '../owner-classic/classic-layout.js';
+  assertPipelineLayoutReadable,
+  discoverPipelineProject,
+} from '../owner-pipeline/pipeline-layout.js';
 import {
   OWNER_HOOK_PLATFORM_IDS,
   readOwnerHookRequest,
@@ -64,7 +64,7 @@ export async function projectRootFrom(
   if (!request?.cwd) return null;
 
   const discoveryStart = request.cwd;
-  const discovered = await discoverNativeProject(discoveryStart);
+  const discovered = await discoverLoopProject(discoveryStart);
   for (const marker of [['.owner', 'config.yaml'], ['.git']]) {
     try {
       await fs.lstat(path.join(discovered, ...marker));
@@ -73,11 +73,11 @@ export async function projectRootFrom(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
-  const classic = await discoverClassicProject(discoveryStart);
-  const layout = await assertClassicLayoutReadable(classic);
+  const pipeline = await discoverPipelineProject(discoveryStart);
+  const layout = await assertPipelineLayoutReadable(pipeline);
   try {
     await fs.lstat(layout.changesDir);
-    return classic;
+    return pipeline;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

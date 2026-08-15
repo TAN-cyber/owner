@@ -7,40 +7,40 @@ import {
 } from '../../platform/paths/repository-layout.js';
 
 describe('repository layout registry', () => {
-  it('resolves the manifest and classic script output paths', () => {
+  it('resolves the manifest and pipeline script output paths', () => {
     const layout = readRepositoryLayout();
 
     expect(layout.assetsRoot).toBe('assets');
     expect(layout.manifestPath).toBe('assets/manifest.json');
-    expect(layout.classicRuntime.outputs).toMatchObject({
+    expect(layout.pipelineRuntime.outputs).toMatchObject({
       runtime: 'assets/skills/owner/scripts/owner-runtime.mjs',
       state: 'assets/skills/owner/scripts/owner-state.mjs',
       guard: 'assets/skills/owner/scripts/owner-guard.mjs',
       archive: 'assets/skills/owner/scripts/owner-archive.mjs',
       intent: 'assets/skills/owner/scripts/owner-intent.mjs',
     });
-    expect(Object.values(layout.classicRuntime.outputs)).toContain(
+    expect(Object.values(layout.pipelineRuntime.outputs)).toContain(
       'assets/skills/owner/scripts/owner-runtime.mjs',
     );
-    expect(resolveRepositoryPath(layout.classicRuntime.outputs.state)).toBe(
+    expect(resolveRepositoryPath(layout.pipelineRuntime.outputs.state)).toBe(
       path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs'),
     );
-    expect(layout.nativeRuntime).toMatchObject({
+    expect(layout.loopRuntime).toMatchObject({
       entries: {
-        runtime: 'domains/owner-native/native-cli-entry.ts',
-        hookGuard: 'domains/owner-native/native-hook-guard-entry.ts',
+        runtime: 'domains/owner-loop/loop-cli-entry.ts',
+        hookGuard: 'domains/owner-loop/loop-hook-guard-entry.ts',
       },
       outputs: {
-        runtime: 'assets/skills/owner-native/scripts/owner-native-runtime.mjs',
-        hookGuard: 'assets/skills/owner-native/scripts/owner-native-hook-guard.mjs',
+        runtime: 'assets/skills/owner-loop/scripts/owner-loop-runtime.mjs',
+        hookGuard: 'assets/skills/owner-loop/scripts/owner-loop-hook-guard.mjs',
       },
     });
-    expect(resolveRepositoryPath(layout.nativeRuntime.outputs.runtime)).toBe(
-      path.resolve('assets', 'skills', 'owner-native', 'scripts', 'owner-native-runtime.mjs'),
+    expect(resolveRepositoryPath(layout.loopRuntime.outputs.runtime)).toBe(
+      path.resolve('assets', 'skills', 'owner-loop', 'scripts', 'owner-loop-runtime.mjs'),
     );
     for (const retired of ['checkpoint', 'check', 'evidence', 'receipt']) {
-      expect(layout.nativeRuntime.entries).not.toHaveProperty(retired);
-      expect(layout.nativeRuntime.outputs).not.toHaveProperty(retired);
+      expect(layout.loopRuntime.entries).not.toHaveProperty(retired);
+      expect(layout.loopRuntime.outputs).not.toHaveProperty(retired);
     }
     expect(layout.entryRuntime).toEqual({
       entries: {
@@ -65,9 +65,9 @@ describe('repository layout registry', () => {
     expect(layout.domainModules).toEqual([
       'engine',
       'integrations',
-      'owner-classic',
       'owner-entry',
-      'owner-native',
+      'owner-loop',
+      'owner-pipeline',
       'skill',
       'workflow-contract',
     ]);

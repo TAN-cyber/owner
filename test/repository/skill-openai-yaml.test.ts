@@ -14,7 +14,7 @@ const languageRoots = ['assets/skills', 'assets/skills-zh'] as const;
 
 // Skills that must stay model-invocable: the ambient resume probe and the
 // /owner CLI resolver rely on the model being able to load these entries.
-const modelInvocableSkills = new Set(['owner', 'owner-classic', 'owner-native']);
+const modelInvocableSkills = new Set(['owner', 'owner-pipeline', 'owner-loop']);
 
 function userFacingSkillNames(manifest: { skills: string[] }): string[] {
   return manifest.skills

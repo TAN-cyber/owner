@@ -28,7 +28,7 @@ describe('Owner Skill distribution', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it('ships only the Native, Classic, shared entry, and Classic phase Skills', async () => {
+  it('ships only the Loop, Pipeline, shared entry, and Pipeline phase Skills', async () => {
     expect(path.basename(getAssetsDir())).toBe('assets');
     const manifest = await readManifest();
     const skillNames = manifest.skills.flatMap((relativePath) => {
@@ -38,8 +38,8 @@ describe('Owner Skill distribution', () => {
 
     expect(skillNames).toEqual([
       'owner',
-      'owner-classic',
-      'owner-native',
+      'owner-pipeline',
+      'owner-loop',
       'owner-open',
       'owner-design',
       'owner-build',
@@ -55,17 +55,17 @@ describe('Owner Skill distribution', () => {
 
   it('selects exactly the files required by each workflow', async () => {
     const manifest = await readManifest();
-    const native = getManagedSkillPathsForSelection(manifest, 'native');
-    const classic = getManagedSkillPathsForSelection(manifest, 'classic');
+    const loop = getManagedSkillPathsForSelection(manifest, 'loop');
+    const pipeline = getManagedSkillPathsForSelection(manifest, 'pipeline');
     const both = getManagedSkillPathsForSelection(manifest, 'both');
 
-    expect(native).toContain('owner/SKILL.md');
-    expect(native).toContain('owner-native/SKILL.md');
-    expect(native).not.toContain('owner-classic/SKILL.md');
-    expect(classic).toContain('owner/SKILL.md');
-    expect(classic).toContain('owner-classic/SKILL.md');
-    expect(classic).not.toContain('owner-native/SKILL.md');
-    expect(new Set(both)).toEqual(new Set([...native, ...classic]));
+    expect(loop).toContain('owner/SKILL.md');
+    expect(loop).toContain('owner-loop/SKILL.md');
+    expect(loop).not.toContain('owner-pipeline/SKILL.md');
+    expect(pipeline).toContain('owner/SKILL.md');
+    expect(pipeline).toContain('owner-pipeline/SKILL.md');
+    expect(pipeline).not.toContain('owner-loop/SKILL.md');
+    expect(new Set(both)).toEqual(new Set([...loop, ...pipeline]));
   });
 
   it.each(PLATFORMS)('copies both workflows to $name', async (platform) => {
@@ -84,15 +84,15 @@ describe('Owner Skill distribution', () => {
     expect(result.copied).toBeGreaterThan(0);
     await expect(fs.access(path.join(skillsRoot, 'owner', 'SKILL.md'))).resolves.toBeUndefined();
     await expect(
-      fs.access(path.join(skillsRoot, 'owner-native', 'SKILL.md')),
+      fs.access(path.join(skillsRoot, 'owner-loop', 'SKILL.md')),
     ).resolves.toBeUndefined();
     await expect(
-      fs.access(path.join(skillsRoot, 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(skillsRoot, 'owner-pipeline', 'SKILL.md')),
     ).resolves.toBeUndefined();
     await expect(detectInstalledWorkflowSelection(skillsRoot)).resolves.toBe('both');
   });
 
-  it('copies the Chinese Native workflow without adding Classic', async () => {
+  it('copies the Chinese Loop workflow without adding Pipeline', async () => {
     const claude = PLATFORMS.find((platform) => platform.id === 'claude')!;
     const result = await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -101,18 +101,18 @@ describe('Owner Skill distribution', () => {
       'skills-zh',
       'project',
       'copy',
-      'native',
+      'loop',
     );
     const skillsRoot = path.join(tmpDir, '.claude', 'skills');
 
     expect(result.failed).toBe(0);
     await expect(
-      fs.readFile(path.join(skillsRoot, 'owner-native', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('Native');
+      fs.readFile(path.join(skillsRoot, 'owner-loop', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('Loop');
     await expect(
-      fs.access(path.join(skillsRoot, 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(skillsRoot, 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
-    await expect(detectInstalledWorkflowSelection(skillsRoot)).resolves.toBe('native');
+    await expect(detectInstalledWorkflowSelection(skillsRoot)).resolves.toBe('loop');
   });
 
   it.each(PLATFORMS)('installs one plain Markdown workflow Rule for $name', async (platform) => {
@@ -156,7 +156,7 @@ describe('Owner Skill distribution', () => {
     }
   });
 
-  it('creates Classic artifact directories without activating a workflow', async () => {
+  it('creates Pipeline artifact directories without activating a workflow', async () => {
     await createWorkingDirs(tmpDir);
 
     await expect(
@@ -181,12 +181,12 @@ describe('Owner Skill distribution', () => {
       configPath,
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native, classic]',
-        'native:',
+        'default_workflow: loop',
+        'workflows: [loop, pipeline]',
+        'loop:',
         '  artifact_root: docs',
         '  language: en',
-        'classic:',
+        'pipeline:',
         '  artifact_layout: docs',
         '  language: en',
         'custom_extension: keep',
@@ -199,10 +199,10 @@ describe('Owner Skill distribution', () => {
     const config = parse(await fs.readFile(configPath, 'utf8'));
 
     expect(config).toMatchObject({
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
-      native: { artifact_root: 'docs', language: 'en' },
-      classic: { artifact_layout: 'docs', language: 'zh-CN' },
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
+      loop: { artifact_root: 'docs', language: 'en' },
+      pipeline: { artifact_layout: 'docs', language: 'zh-CN' },
       custom_extension: 'keep',
     });
   });

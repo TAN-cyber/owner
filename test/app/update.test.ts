@@ -25,11 +25,8 @@ import {
   getProjectRegistryPath,
   upsertProjectInstallation,
 } from '../../platform/install/project-registry.js';
-import {
-  defaultProjectConfig,
-  writeProjectConfig,
-} from '../../domains/owner-native/native-config.js';
-import { assertClassicLayoutReadable } from '../../domains/owner-classic/classic-layout.js';
+import { defaultProjectConfig, writeProjectConfig } from '../../domains/owner-loop/loop-config.js';
+import { assertPipelineLayoutReadable } from '../../domains/owner-pipeline/pipeline-layout.js';
 
 // Mock the interactive select prompt so tests don't hang on CI (no TTY).
 vi.mock('@inquirer/prompts', () => ({
@@ -83,11 +80,11 @@ const claudePlatform = PLATFORMS.find((platform) => platform.id === 'claude')!;
 
 const manifestPath = path.resolve('assets', 'manifest.json');
 
-const RETIRED_NATIVE_BUNDLES = [
-  'owner-native/scripts/owner-native-checkpoint.mjs',
-  'owner-native/scripts/owner-native-check.mjs',
-  'owner-native/scripts/owner-native-evidence.mjs',
-  'owner-native/scripts/owner-native-receipt.mjs',
+const RETIRED_LOOP_BUNDLES = [
+  'owner-loop/scripts/owner-loop-checkpoint.mjs',
+  'owner-loop/scripts/owner-loop-check.mjs',
+  'owner-loop/scripts/owner-loop-evidence.mjs',
+  'owner-loop/scripts/owner-loop-receipt.mjs',
 ] as const;
 
 async function readManifest() {
@@ -105,17 +102,17 @@ async function writeFakeOwnerPackage(packageRoot: string, version: string): Prom
   await fs.writeFile(path.join(packageRoot, 'bin', 'owner.js'), '#!/usr/bin/env node\n');
 }
 
-async function arrangeClassicDocsOpenSpecUpdate(projectPath: string): Promise<void> {
+async function arrangePipelineDocsOpenSpecUpdate(projectPath: string): Promise<void> {
   await fs.mkdir(path.join(projectPath, '.owner'), { recursive: true });
   await fs.writeFile(
     path.join(projectPath, '.owner', 'config.yaml'),
     [
       'schema: owner.project.v1',
-      'default_workflow: classic',
+      'default_workflow: pipeline',
       'workflows:',
-      '  - classic',
+      '  - pipeline',
       'ambient_resume: true',
-      'classic:',
+      'pipeline:',
       '  artifact_layout: docs',
       '',
     ].join('\n'),
@@ -313,11 +310,7 @@ describe('update command helpers', () => {
             ) as { version: string };
             const cliArgs = commandArgs.slice(1);
             const label =
-              cliArgs[0] === 'workflow'
-                ? 'workflow'
-                : cliArgs[0] === 'native'
-                  ? 'native'
-                  : 'version';
+              cliArgs[0] === 'workflow' ? 'workflow' : cliArgs[0] === 'loop' ? 'loop' : 'version';
             if (candidateCommandFailure === label) {
               child.stderr.emit('data', Buffer.from(`candidate ${label} command failed\n`));
               child.emit('exit', 1);
@@ -334,7 +327,7 @@ describe('update command helpers', () => {
                 ? `${pkg.version}\n`
                 : label === 'workflow'
                   ? 'Usage: owner workflow resolve [options]\n'
-                  : 'Usage: owner native <command> [options]\n';
+                  : 'Usage: owner loop <command> [options]\n';
             child.stdout.emit('data', Buffer.from(output));
           } else if (npmArgs[0] === 'install') {
             const packageSpec = npmArgs.find((arg) => arg.startsWith('owner@'))!;
@@ -1109,7 +1102,7 @@ describe('update command helpers', () => {
   it('does not mutate the installation when candidate command validation fails', async () => {
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
-    candidateCommandFailure = 'native';
+    candidateCommandFailure = 'loop';
 
     const fakeHome = path.join(tmpDir, 'fake-home-invalid-candidate');
     const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -1119,7 +1112,7 @@ describe('update command helpers', () => {
       const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
       expect(result.npm).toMatchObject({
         status: 'failed',
-        reason: expect.stringContaining('candidate native command failed'),
+        reason: expect.stringContaining('candidate loop command failed'),
       });
     } finally {
       log.mockRestore();
@@ -1283,7 +1276,7 @@ describe('update command helpers', () => {
   it('retries candidate prefix cleanup without masking the validation error', async () => {
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
-    candidateCommandFailure = 'native';
+    candidateCommandFailure = 'loop';
     const originalRm = fs.rm.bind(fs);
     let cleanupAttempts = 0;
     const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
@@ -1302,7 +1295,7 @@ describe('update command helpers', () => {
     try {
       await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
       const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
-      expect(result.npm.reason).toContain('candidate native command failed');
+      expect(result.npm.reason).toContain('candidate loop command failed');
       expect(result.npm.reason).not.toContain('temporary cleanup failed');
       expect(cleanupAttempts).toBe(3);
     } finally {
@@ -1390,8 +1383,8 @@ describe('update command helpers', () => {
     const rootPackageJson = '{\n  "private": true, "workspaces": ["packages/*"]\n}\n';
     const rootPackageLock = '{"lockfileVersion":3,"name":"workspace-before"}\n';
     const config = defaultProjectConfig('.');
-    config.workflows = ['classic'];
-    config.default_workflow = 'classic';
+    config.workflows = ['pipeline'];
+    config.default_workflow = 'pipeline';
     await fs.mkdir(projectDir, { recursive: true });
     await writeProjectConfig(projectDir, config);
     await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
@@ -1917,8 +1910,8 @@ describe('update command helpers', () => {
     expect(registry.projects[0].lastSource).toBe('update');
   });
 
-  it('updates only the explicit native platform target', async () => {
-    const fakeHome = path.join(tmpDir, 'explicit-native-home');
+  it('updates only the explicit loop platform target', async () => {
+    const fakeHome = path.join(tmpDir, 'explicit-loop-home');
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
@@ -1956,8 +1949,8 @@ describe('update command helpers', () => {
   it('applies the project workflow selection to an explicit Claude update target', async () => {
     const fakeHome = path.join(tmpDir, 'explicit-claude-both-home');
     const config = defaultProjectConfig('docs');
-    config.workflows = ['native', 'classic'];
-    config.default_workflow = 'native';
+    config.workflows = ['loop', 'pipeline'];
+    config.default_workflow = 'loop';
     await writeProjectConfig(tmpDir, config);
 
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -1988,8 +1981,8 @@ describe('update command helpers', () => {
   });
 
   it('updates installed OpenSpec platform assets against the configured docs artifact root', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-update-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-update-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
 
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -2019,9 +2012,9 @@ describe('update command helpers', () => {
     });
   });
 
-  it('does not update Classic dependencies during a regular Owner update', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-dependencies-regular-update-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+  it('does not update Pipeline dependencies during a regular Owner update', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-dependencies-regular-update-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'brainstorming'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.claude', 'skills', 'brainstorming', 'SKILL.md'),
@@ -2054,9 +2047,9 @@ describe('update command helpers', () => {
     });
   });
 
-  it('updates installed Classic dependencies with explicit self-update', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-dependencies-self-update-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+  it('updates installed Pipeline dependencies with explicit self-update', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-dependencies-self-update-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'brainstorming'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.claude', 'skills', 'brainstorming', 'SKILL.md'),
@@ -2093,8 +2086,8 @@ describe('update command helpers', () => {
   it.each(['missing', 'corrupt'] as const)(
     'leaves project config unchanged when OpenSpec reports installed with a %s config',
     async (openSpecConfig) => {
-      const fakeHome = path.join(tmpDir, `classic-docs-${openSpecConfig}-home`);
-      await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+      const fakeHome = path.join(tmpDir, `pipeline-docs-${openSpecConfig}-home`);
+      await arrangePipelineDocsOpenSpecUpdate(tmpDir);
       const configPath = path.join(tmpDir, '.owner', 'config.yaml');
       const configBefore = await fs.readFile(configPath, 'utf8');
       mockedInstallOpenSpec.mockImplementationOnce(
@@ -2134,14 +2127,14 @@ describe('update command helpers', () => {
     },
   );
 
-  it('upgrades a legacy partial Native and Classic project config without moving its root', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-legacy-partial-home');
+  it('upgrades a legacy partial Loop and Pipeline project config without moving its root', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-legacy-partial-home');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: docs',
         '  language: en',
         'language: zh-CN',
@@ -2190,13 +2183,13 @@ describe('update command helpers', () => {
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'));
     expect(config).toMatchObject({
       schema: 'owner.project.v1',
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
-      native: {
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
+      loop: {
         artifact_root: 'docs',
         language: 'en',
       },
-      classic: {
+      pipeline: {
         artifact_layout: 'legacy',
         language: 'zh-CN',
         context_compression: 'beta',
@@ -2205,7 +2198,7 @@ describe('update command helpers', () => {
       },
       custom_top: 'keep',
     });
-    await expect(assertClassicLayoutReadable(tmpDir)).resolves.toMatchObject({
+    await expect(assertPipelineLayoutReadable(tmpDir)).resolves.toMatchObject({
       artifactLayout: 'legacy',
       openSpecRoot: path.join(tmpDir, 'openspec'),
     });
@@ -2223,14 +2216,12 @@ describe('update command helpers', () => {
     });
   });
 
-  it('backfills every managed Native and Classic default with the docs layout', async () => {
+  it('backfills every managed Loop and Pipeline default with the docs layout', async () => {
     const fakeHome = path.join(tmpDir, 'partial-config-defaults-home');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
-      ['default_workflow: native', 'native:', '  custom_native: keep', 'custom_top: keep', ''].join(
-        '\n',
-      ),
+      ['default_workflow: loop', 'loop:', '  custom_loop: keep', 'custom_top: keep', ''].join('\n'),
       'utf8',
     );
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
@@ -2269,17 +2260,17 @@ describe('update command helpers', () => {
     const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'));
     expect(config).toMatchObject({
       schema: 'owner.project.v1',
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
       ambient_resume: true,
-      native: {
+      loop: {
         artifact_root: 'docs',
         language: 'en',
         clarification_mode: 'batch',
         archive_confirmation: 'automatic',
         max_verify_failures: 5,
       },
-      classic: {
+      pipeline: {
         artifact_layout: 'docs',
         language: 'en',
         context_compression: 'off',
@@ -2288,7 +2279,7 @@ describe('update command helpers', () => {
       },
       custom_top: 'keep',
     });
-    await expect(assertClassicLayoutReadable(tmpDir)).resolves.toMatchObject({
+    await expect(assertPipelineLayoutReadable(tmpDir)).resolves.toMatchObject({
       artifactLayout: 'docs',
       openSpecRoot: path.join(tmpDir, 'docs', 'openspec'),
     });
@@ -2303,9 +2294,9 @@ describe('update command helpers', () => {
     );
   });
 
-  it('updates the configured Classic root when both roots exist', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-dual-root-update-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+  it('updates the configured Pipeline root when both roots exist', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-dual-root-update-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, 'openspec', 'legacy-marker.txt'), 'legacy\n', 'utf8');
     await fs.writeFile(path.join(tmpDir, 'docs', 'openspec', 'docs-marker.txt'), 'docs\n', 'utf8');
@@ -2348,7 +2339,7 @@ describe('update command helpers', () => {
       fs.readFile(path.join(tmpDir, 'docs', 'openspec', 'docs-marker.txt'), 'utf8'),
     ).resolves.toBe('docs\n');
     expect(parse(await fs.readFile(configPath, 'utf8'))).toMatchObject({
-      classic: { artifact_layout: 'docs' },
+      pipeline: { artifact_layout: 'docs' },
     });
     await expect(fs.readFile(managedSkillPath, 'utf8')).resolves.toContain('# Owner');
   });
@@ -2357,9 +2348,9 @@ describe('update command helpers', () => {
     const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-update-config-outside-'));
     const source = [
       'schema: owner.project.v1',
-      'default_workflow: classic',
-      'workflows: [classic]',
-      'classic:',
+      'default_workflow: pipeline',
+      'workflows: [pipeline]',
+      'pipeline:',
       '  artifact_layout: docs',
       '',
     ].join('\n');
@@ -2402,9 +2393,9 @@ describe('update command helpers', () => {
     const outsideConfig = path.join(outsideRoot, 'config.yaml');
     const source = [
       'schema: owner.project.v1',
-      'default_workflow: classic',
-      'workflows: [classic]',
-      'classic:',
+      'default_workflow: pipeline',
+      'workflows: [pipeline]',
+      'pipeline:',
       '  artifact_layout: docs',
       '',
     ].join('\n');
@@ -2433,9 +2424,9 @@ describe('update command helpers', () => {
     }
   });
 
-  it('refreshes only the Classic artifact root when no OpenSpec tool assets are installed', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-no-openspec-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+  it('refreshes only the Pipeline artifact root when no OpenSpec tool assets are installed', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-no-openspec-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     await fs.rm(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
       recursive: true,
       force: true,
@@ -2467,8 +2458,8 @@ describe('update command helpers', () => {
   });
 
   it('keeps config unchanged when an artifact-only OpenSpec refresh cannot run', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-artifact-only-missing-cli-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-artifact-only-missing-cli-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     await fs.rm(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
       recursive: true,
       force: true,
@@ -2514,8 +2505,8 @@ describe('update command helpers', () => {
   });
 
   it('fails closed when installed OpenSpec assets cannot be refreshed because the CLI is missing', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-missing-openspec-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-missing-openspec-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     mockedInstallOpenSpec.mockResolvedValue('skipped');
 
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -2545,8 +2536,8 @@ describe('update command helpers', () => {
   });
 
   it('reports an OpenSpec integration failure as an incomplete update', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-failed-openspec-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-failed-openspec-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     mockedInstallOpenSpec.mockResolvedValue('failed');
 
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -2573,8 +2564,8 @@ describe('update command helpers', () => {
   });
 
   it('reports a thrown OpenSpec adapter error without falling back to the legacy root', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-docs-throwing-openspec-home');
-    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    const fakeHome = path.join(tmpDir, 'pipeline-docs-throwing-openspec-home');
+    await arrangePipelineDocsOpenSpecUpdate(tmpDir);
     mockedInstallOpenSpec.mockRejectedValue(new Error('adapter exploded'));
 
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -2607,7 +2598,7 @@ describe('update command helpers', () => {
   });
 
   it('updates installed OpenSpec assets at global scope without initializing a project root', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-global-openspec-home');
+    const fakeHome = path.join(tmpDir, 'pipeline-global-openspec-home');
     await fs.mkdir(path.join(fakeHome, '.claude', 'skills', 'openspec-propose'), {
       recursive: true,
     });
@@ -2681,7 +2672,7 @@ describe('update command helpers', () => {
     );
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     const originalConfig = [
-      'default_workflow: classic',
+      'default_workflow: pipeline',
       'language: zh-CN',
       'context_compression: beta',
       '',
@@ -2742,19 +2733,19 @@ describe('update command helpers', () => {
     expect(claude).not.toContain('<owner-ambient-resume>');
   });
 
-  it('updates Native project Skills and shared config comments without rewriting Classic state', async () => {
-    const fakeHome = path.join(tmpDir, 'native-update-home');
-    const nativeConfig = [
+  it('updates Loop project Skills and shared config comments without rewriting Pipeline state', async () => {
+    const fakeHome = path.join(tmpDir, 'loop-update-home');
+    const loopConfig = [
       'schema: owner.project.v1',
-      'default_workflow: native',
-      'native:',
+      'default_workflow: loop',
+      'loop:',
       '  artifact_root: docs',
       'language: legacy',
       'keep: true',
       '',
     ].join('\n');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
-    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), nativeConfig, 'utf8');
+    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), loopConfig, 'utf8');
     const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
     const legacySelection = `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`;
     await fs.writeFile(selectionPath, legacySelection, 'utf8');
@@ -2765,30 +2756,30 @@ describe('update command helpers', () => {
       '# Stale Owner\n',
       'utf8',
     );
-    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner-classic'), {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline'), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'keep.md'),
-      'keep classic history\n',
+      path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'keep.md'),
+      'keep pipeline history\n',
       'utf8',
     );
 
     await fs.mkdir(path.join(tmpDir, 'docs', 'superpowers'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, 'docs', 'superpowers', 'keep.md'),
-      'keep classic working files\n',
+      'keep pipeline working files\n',
       'utf8',
     );
     await fs.mkdir(path.join(tmpDir, '.claude', 'rules'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.claude', 'rules', 'owner-phase-guard.md'),
-      'keep classic rule\n',
+      'keep pipeline rule\n',
       'utf8',
     );
     await fs.writeFile(
       path.join(tmpDir, '.claude', 'settings.local.json'),
-      '{"keep":"classic hook"}\n',
+      '{"keep":"pipeline hook"}\n',
       'utf8',
     );
     await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# User\nKeep this.\n', 'utf8');
@@ -2810,14 +2801,14 @@ describe('update command helpers', () => {
       fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), 'utf8'),
     ).resolves.toContain('owner workflow resolve . --activate --json');
     await expect(
-      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('name: owner-native');
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-loop', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('name: owner-loop');
     await expect(
-      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(
-      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'keep.md'), 'utf8'),
-    ).resolves.toBe('keep classic history\n');
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'keep.md'), 'utf8'),
+    ).resolves.toBe('keep pipeline history\n');
     await expect(fs.access(path.join(tmpDir, '.owner', 'skills'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -2829,16 +2820,16 @@ describe('update command helpers', () => {
     expect(updatedConfig).toContain('keep: true');
     expect(updatedConfig).toContain('artifact_root: docs');
     expect(updatedConfig).toContain('clarification_mode: batch');
-    expect(updatedConfig).not.toContain('classic:');
+    expect(updatedConfig).not.toContain('pipeline:');
     expect(updatedConfig).toContain('language: legacy');
     await expect(
       fs.readFile(path.join(tmpDir, 'docs', 'superpowers', 'keep.md'), 'utf8'),
-    ).resolves.toBe('keep classic working files\n');
+    ).resolves.toBe('keep pipeline working files\n');
     await expect(
       fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-phase-guard.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(
-      fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-native-phase-guard.md')),
+      fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-loop-phase-guard.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(
       fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-workflow-guard.md')),
@@ -2846,9 +2837,9 @@ describe('update command helpers', () => {
     const settings = JSON.parse(
       await fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
     ) as { keep: string; hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> } };
-    expect(settings.keep).toBe('classic hook');
+    expect(settings.keep).toBe('pipeline hook');
     expect(JSON.stringify(settings.hooks)).toContain('owner-hook-router.mjs');
-    expect(JSON.stringify(settings.hooks)).not.toContain('owner-native-hook-guard.mjs');
+    expect(JSON.stringify(settings.hooks)).not.toContain('owner-loop-hook-guard.mjs');
     const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8');
     const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf8');
     for (const content of [agents, claude]) {
@@ -2864,16 +2855,16 @@ describe('update command helpers', () => {
     await expect(fs.readFile(selectionPath, 'utf8')).resolves.toBe(legacySelection);
   });
 
-  it('upgrades a beta17 Native project without leaving retired bundles or hiding config', async () => {
+  it('upgrades a beta17 Loop project without leaving retired bundles or hiding config', async () => {
     expect(spawnSync('git', ['init'], { cwd: tmpDir }).status).toBe(0);
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native]',
-        'native:',
+        'default_workflow: loop',
+        'workflows: [loop]',
+        'loop:',
         '  artifact_root: .',
         '  snapshot:',
         '    include: ["**/*"]',
@@ -2885,9 +2876,9 @@ describe('update command helpers', () => {
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner\n');
     const installedSkillsRoot = path.join(tmpDir, '.claude', 'skills');
-    const userBundle = path.join(installedSkillsRoot, 'owner-native', 'scripts', 'user-helper.mjs');
+    const userBundle = path.join(installedSkillsRoot, 'owner-loop', 'scripts', 'user-helper.mjs');
     await fs.mkdir(path.dirname(userBundle), { recursive: true });
-    for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+    for (const relativePath of RETIRED_LOOP_BUNDLES) {
       await fs.writeFile(
         path.join(installedSkillsRoot, ...relativePath.split('/')),
         'legacy bundle\n',
@@ -2901,15 +2892,15 @@ describe('update command helpers', () => {
       'utf8',
     );
     for (const relativePath of [
-      '.owner/runtime/native/locks/demo.lock',
-      '.owner/runtime/native/logs/demo.log',
+      '.owner/runtime/loop/locks/demo.lock',
+      '.owner/runtime/loop/logs/demo.log',
     ]) {
       const target = path.join(tmpDir, ...relativePath.split('/'));
       await fs.mkdir(path.dirname(target), { recursive: true });
       await fs.writeFile(target, `${relativePath}\n`, 'utf8');
     }
 
-    const fakeHome = path.join(tmpDir, 'native-snapshot-update-home');
+    const fakeHome = path.join(tmpDir, 'loop-snapshot-update-home');
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2926,10 +2917,10 @@ describe('update command helpers', () => {
     const updated = parse(
       await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'),
     ) as {
-      native: { snapshot?: unknown };
+      loop: { snapshot?: unknown };
     };
-    expect(updated.native.snapshot).toBeUndefined();
-    for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+    expect(updated.loop.snapshot).toBeUndefined();
+    for (const relativePath of RETIRED_LOOP_BUNDLES) {
       await expect(
         fs.access(path.join(installedSkillsRoot, ...relativePath.split('/'))),
       ).rejects.toMatchObject({ code: 'ENOENT' });
@@ -2944,8 +2935,8 @@ describe('update command helpers', () => {
       spawnSync('git', ['check-ignore', '--quiet', '.owner/config.yaml'], { cwd: tmpDir }).status,
     ).toBe(1);
     for (const relativePath of [
-      '.owner/runtime/native/locks/demo.lock',
-      '.owner/runtime/native/logs/demo.log',
+      '.owner/runtime/loop/locks/demo.lock',
+      '.owner/runtime/loop/logs/demo.log',
     ]) {
       expect(
         spawnSync('git', ['check-ignore', '--quiet', relativePath], { cwd: tmpDir }).status,
@@ -2954,11 +2945,11 @@ describe('update command helpers', () => {
     }
   });
 
-  it('migrates Classic v1 selection after update installs the project Router', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-update-home');
+  it('migrates Pipeline v1 selection after update installs the project Router', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-update-home');
     const config = defaultProjectConfig('.');
-    config.workflows = ['classic'];
-    config.default_workflow = 'classic';
+    config.workflows = ['pipeline'];
+    config.default_workflow = 'pipeline';
     await writeProjectConfig(tmpDir, config);
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(
@@ -2982,7 +2973,7 @@ describe('update command helpers', () => {
 
     expect(JSON.parse(await fs.readFile(selectionPath, 'utf8'))).toEqual({
       schema: 'owner.selection.v2',
-      workflow: 'classic',
+      workflow: 'pipeline',
       change: 'legacy-change',
       branch: null,
     });
@@ -2991,11 +2982,11 @@ describe('update command helpers', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('keeps Classic v1 selection when historical global Hook cleanup fails', async () => {
-    const fakeHome = path.join(tmpDir, 'classic-hook-cleanup-failure-home');
+  it('keeps Pipeline v1 selection when historical global Hook cleanup fails', async () => {
+    const fakeHome = path.join(tmpDir, 'pipeline-hook-cleanup-failure-home');
     const config = defaultProjectConfig('.');
-    config.workflows = ['classic'];
-    config.default_workflow = 'classic';
+    config.workflows = ['pipeline'];
+    config.default_workflow = 'pipeline';
     await writeProjectConfig(tmpDir, config);
     await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'owner'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
@@ -3030,17 +3021,17 @@ describe('update command helpers', () => {
     await expect(fs.access(path.join(tmpDir, '.codex', 'hooks.json'))).resolves.toBeUndefined();
   });
 
-  it('migrates manifest-managed legacy Codex Skills for Native without touching unrelated state', async () => {
-    const fakeHome = path.join(tmpDir, 'native-codex-migration-home');
+  it('migrates manifest-managed legacy Codex Skills for Loop without touching unrelated state', async () => {
+    const fakeHome = path.join(tmpDir, 'loop-codex-migration-home');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: docs',
-        'keep: classic',
+        'keep: pipeline',
         '',
       ].join('\n'),
       'utf8',
@@ -3057,7 +3048,7 @@ describe('update command helpers', () => {
     await fs.mkdir(path.join(tmpDir, 'docs', 'superpowers'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, 'docs', 'superpowers', 'keep.md'),
-      'keep classic state\n',
+      'keep pipeline state\n',
       'utf8',
     );
 
@@ -3087,23 +3078,23 @@ describe('update command helpers', () => {
     );
     await expect(
       fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'),
-    ).resolves.toContain('keep: classic');
+    ).resolves.toContain('keep: pipeline');
     await expect(
       fs.readFile(path.join(tmpDir, 'docs', 'superpowers', 'keep.md'), 'utf8'),
-    ).resolves.toBe('keep classic state\n');
+    ).resolves.toBe('keep pipeline state\n');
   });
 
   it.each(['skills-root', 'managed-entry'] as const)(
-    'converts an old %s symlink installation to Native copies without writing through it',
+    'converts an old %s symlink installation to Loop copies without writing through it',
     async (layout) => {
-      const fakeHome = path.join(tmpDir, `native-symlink-${layout}-home`);
+      const fakeHome = path.join(tmpDir, `loop-symlink-${layout}-home`);
       await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
       await fs.writeFile(
         path.join(tmpDir, '.owner', 'config.yaml'),
         [
           'schema: owner.project.v1',
-          'default_workflow: native',
-          'native:',
+          'default_workflow: loop',
+          'loop:',
           '  artifact_root: docs',
           '',
         ].join('\n'),
@@ -3162,7 +3153,7 @@ describe('update command helpers', () => {
         '# Central stale Owner\n',
       );
       await expect(
-        fs.access(path.join(centralSkills, 'owner-native', 'SKILL.md')),
+        fs.access(path.join(centralSkills, 'owner-loop', 'SKILL.md')),
       ).rejects.toMatchObject({ code: 'ENOENT' });
       if (layout === 'managed-entry') {
         await expect(
@@ -3173,14 +3164,14 @@ describe('update command helpers', () => {
   );
 
   it('refuses to detach a shared Skill-root symlink that contains unmanaged Skills', async () => {
-    const fakeHome = path.join(tmpDir, 'native-shared-symlink-home');
+    const fakeHome = path.join(tmpDir, 'loop-shared-symlink-home');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: docs',
         '',
       ].join('\n'),
@@ -3232,8 +3223,8 @@ describe('update command helpers', () => {
     );
   });
 
-  it('updates a Native project at its root when invoked from a nested directory', async () => {
-    const fakeHome = path.join(tmpDir, 'nested-native-update-home');
+  it('updates a Loop project at its root when invoked from a nested directory', async () => {
+    const fakeHome = path.join(tmpDir, 'nested-loop-update-home');
     const nestedDir = path.join(tmpDir, 'src', 'features', 'nested');
     await fs.mkdir(nestedDir, { recursive: true });
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
@@ -3241,8 +3232,8 @@ describe('update command helpers', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: docs',
         '',
       ].join('\n'),
@@ -3274,8 +3265,8 @@ describe('update command helpers', () => {
     const result = JSON.parse(json);
     expect(result.skills.targets).toHaveLength(1);
     await expect(
-      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md'), 'utf8'),
-    ).resolves.toContain('name: owner-native');
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-loop', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('name: owner-loop');
     await expect(fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8')).resolves.toContain(
       '<owner-ambient-resume>',
     );
@@ -3292,7 +3283,7 @@ describe('update command helpers', () => {
   });
 
   it('fails a project update before npm or file writes when entry resolution fails', async () => {
-    const fakeHome = path.join(tmpDir, 'invalid-native-update-home');
+    const fakeHome = path.join(tmpDir, 'invalid-loop-update-home');
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), 'schema: [', 'utf8');
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
@@ -3323,10 +3314,10 @@ describe('update command helpers', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native]',
+        'default_workflow: loop',
+        'workflows: [loop]',
         'ambient_resume: true',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '',
       ].join('\n'),
@@ -3370,11 +3361,11 @@ describe('update command helpers', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
+        '  - loop',
         'ambient_resume: false',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '',
       ].join('\n'),
@@ -3441,36 +3432,36 @@ describe('update command helpers', () => {
     await expect(fs.stat(path.join(fakeHome, 'docs', 'superpowers'))).rejects.toThrow();
   });
 
-  it('syncs Native Skills during a global update of a Native+Classic install', async () => {
+  it('syncs Loop Skills during a global update of a Loop+Pipeline install', async () => {
     // Regression for #262: global scope used to hardcode the Skill
-    // workflowSelection to 'classic', which filtered out owner-native/* and
-    // left global Native installs frozen at their first-install version. With
-    // both owner-native and owner-classic on disk the selection is 'both', so
-    // Native Skills stay current.
-    const fakeHome = path.join(tmpDir, 'fake-home-global-native-sync');
+    // workflowSelection to 'pipeline', which filtered out owner-loop/* and
+    // left global Loop installs frozen at their first-install version. With
+    // both owner-loop and owner-pipeline on disk the selection is 'both', so
+    // Loop Skills stay current.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-loop-sync');
     await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(
       path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
       '# Owner\n',
       'utf-8',
     );
-    // Seed a both-workflow install: stale owner-native plus owner-classic so
-    // the derived selection is 'both', and prove the stale Native Skill is
+    // Seed a both-workflow install: stale owner-loop plus owner-pipeline so
+    // the derived selection is 'both', and prove the stale Loop Skill is
     // overwritten rather than merely created.
-    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-native'), {
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-loop'), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
-      '---\nname: owner-native\n---\n# STALE\n',
+      path.join(fakeHome, '.agents', 'skills', 'owner-loop', 'SKILL.md'),
+      '---\nname: owner-loop\n---\n# STALE\n',
       'utf-8',
     );
-    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-classic'), {
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-pipeline'), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(fakeHome, '.agents', 'skills', 'owner-classic', 'SKILL.md'),
-      '# stale classic\n',
+      path.join(fakeHome, '.agents', 'skills', 'owner-pipeline', 'SKILL.md'),
+      '# stale pipeline\n',
       'utf-8',
     );
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -3490,15 +3481,15 @@ describe('update command helpers', () => {
       homeSpy.mockRestore();
     }
 
-    // Native Skills must be copied alongside Classic ones for global installs.
+    // Loop Skills must be copied alongside Pipeline ones for global installs.
     // Codex installs land in the canonical `.agents/skills/` directory, and a
-    // previously stale Native Skill must be replaced with the current asset.
-    const nativeSkill = await fs.readFile(
-      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+    // previously stale Loop Skill must be replaced with the current asset.
+    const loopSkill = await fs.readFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-loop', 'SKILL.md'),
       'utf8',
     );
-    expect(nativeSkill).toContain('name: owner-native');
-    expect(nativeSkill).not.toContain('# STALE');
+    expect(loopSkill).toContain('name: owner-loop');
+    expect(loopSkill).not.toContain('# STALE');
     await expect(
       fs.readFile(path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
     ).resolves.toContain('owner workflow resolve');
@@ -3512,17 +3503,17 @@ describe('update command helpers', () => {
     expect(codexSkills?.skipped).toBe(0);
   });
 
-  it('does not add Native Skills to a Classic-only global install during update', async () => {
+  it('does not add Loop Skills to a Pipeline-only global install during update', async () => {
     // A global install created with `owner init --scope global --workflow
-    // classic` must not gain owner-native after `owner update --scope global`.
-    const fakeHome = path.join(tmpDir, 'fake-home-global-classic-only');
+    // pipeline` must not gain owner-loop after `owner update --scope global`.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-pipeline-only');
     await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(
       path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
       '# Owner\n',
       'utf-8',
     );
-    // No owner-native directory: this is a Classic-only install.
+    // No owner-loop directory: this is a Pipeline-only install.
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     let json: string | undefined;
@@ -3539,15 +3530,15 @@ describe('update command helpers', () => {
       homeSpy.mockRestore();
     }
 
-    // Classic Skills update, but owner-native must NOT be introduced.
+    // Pipeline Skills update, but owner-loop must NOT be introduced.
     await expect(
       fs.readFile(path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
     ).resolves.toContain('owner workflow resolve');
     await expect(
-      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md')),
+      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-loop', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
 
-    // The Native manifest entries filtered out by the Classic selection are
+    // The Loop manifest entries filtered out by the Pipeline selection are
     // reported as skipped rather than hidden.
     const result = json ? JSON.parse(json) : {};
     const codexSkills = (result.skills?.targets ?? []).find(
@@ -3556,23 +3547,23 @@ describe('update command helpers', () => {
     expect(codexSkills?.skipped).toBeGreaterThan(0);
   });
 
-  it('does not add Classic Skills to a Native-only global install during update', async () => {
+  it('does not add Pipeline Skills to a Loop-only global install during update', async () => {
     // A global install created with `owner init --scope global --workflow
-    // native` must not gain owner-classic after `owner update --scope global`.
-    const fakeHome = path.join(tmpDir, 'fake-home-global-native-only');
+    // loop` must not gain owner-pipeline after `owner update --scope global`.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-loop-only');
     await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(
       path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
       '# Owner\n',
       'utf-8',
     );
-    // Native-only install: owner-native present, owner-classic absent.
-    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-native'), {
+    // Loop-only install: owner-loop present, owner-pipeline absent.
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-loop'), {
       recursive: true,
     });
     await fs.writeFile(
-      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
-      '---\nname: owner-native\n---\n# STALE\n',
+      path.join(fakeHome, '.agents', 'skills', 'owner-loop', 'SKILL.md'),
+      '---\nname: owner-loop\n---\n# STALE\n',
       'utf-8',
     );
     const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
@@ -3591,18 +3582,18 @@ describe('update command helpers', () => {
       homeSpy.mockRestore();
     }
 
-    // Native Skills update, but owner-classic must NOT be introduced.
-    const nativeSkill = await fs.readFile(
-      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+    // Loop Skills update, but owner-pipeline must NOT be introduced.
+    const loopSkill = await fs.readFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-loop', 'SKILL.md'),
       'utf8',
     );
-    expect(nativeSkill).toContain('name: owner-native');
-    expect(nativeSkill).not.toContain('# STALE');
+    expect(loopSkill).toContain('name: owner-loop');
+    expect(loopSkill).not.toContain('# STALE');
     await expect(
-      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
 
-    // The Classic manifest entries filtered out by the Native selection are
+    // The Pipeline manifest entries filtered out by the Loop selection are
     // reported as skipped rather than hidden.
     const result = json ? JSON.parse(json) : {};
     const codexSkills = (result.skills?.targets ?? []).find(
@@ -3655,7 +3646,7 @@ describe('update command helpers', () => {
     await fs.mkdir(path.join(fakeHome, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(fakeHome, '.owner', 'config.yaml'),
-      'classic:\n  language: en\n',
+      'pipeline:\n  language: en\n',
       'utf-8',
     );
 
@@ -3696,7 +3687,7 @@ describe('update command helpers', () => {
     await fs.mkdir(path.join(fakeHome, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(fakeHome, '.owner', 'config.yaml'),
-      'classic:\n  language: en\n',
+      'pipeline:\n  language: en\n',
       'utf-8',
     );
 

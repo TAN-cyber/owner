@@ -54,7 +54,7 @@ describe('CI workflows', () => {
     const workflow = await readWorkflow('integration-canary.yml');
 
     expect(workflow).toContain('schedule:');
-    expect(workflow).toContain('--workflow classic --json');
+    expect(workflow).toContain('--workflow pipeline --json');
     expect(workflow).toContain("result[component] === 'failed'");
     expect(workflow).toContain('throw new Error(`External installer failures:');
   });

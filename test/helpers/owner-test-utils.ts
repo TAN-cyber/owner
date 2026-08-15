@@ -3,8 +3,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 export const scriptsDir = path.resolve('assets', 'skills', 'owner', 'scripts');
-export const classicRuntimeRoot = path.resolve('assets', 'skills', 'owner', 'runtime', 'classic');
-export const classicSkillRoot = classicRuntimeRoot;
+export const pipelineRuntimeRoot = path.resolve('assets', 'skills', 'owner', 'runtime', 'pipeline');
+export const pipelineSkillRoot = pipelineRuntimeRoot;
 
 export function posixPath(filePath: string): string {
   return path.resolve(filePath).replace(/\\/g, '/');
@@ -22,8 +22,8 @@ export function runNode(
     encoding: 'utf-8',
     env: {
       ...process.env,
-      OWNER_RUNTIME_CLASSIC_ROOT: classicRuntimeRoot,
-      OWNER_CLASSIC_SKILL_ROOT: classicRuntimeRoot,
+      OWNER_RUNTIME_PIPELINE_ROOT: pipelineRuntimeRoot,
+      OWNER_PIPELINE_SKILL_ROOT: pipelineRuntimeRoot,
       ...env,
     },
     timeout,
@@ -47,8 +47,8 @@ export function runHookGuard(
     input: stdin,
     env: {
       ...process.env,
-      OWNER_RUNTIME_CLASSIC_ROOT: classicRuntimeRoot,
-      OWNER_CLASSIC_SKILL_ROOT: classicRuntimeRoot,
+      OWNER_RUNTIME_PIPELINE_ROOT: pipelineRuntimeRoot,
+      OWNER_PIPELINE_SKILL_ROOT: pipelineRuntimeRoot,
       ...env,
     },
   });

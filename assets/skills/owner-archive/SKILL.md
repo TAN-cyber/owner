@@ -1,17 +1,17 @@
 ---
 name: owner-archive
-description: "Phase 5 of Owner Classic — confirm archive, merge delta specs, and finish the branch."
+description: "Phase 5 of Owner Pipeline — confirm archive, merge delta specs, and finish the branch."
 ---
 
 # Owner Phase 5: Archive (Archive)
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 ## Prerequisites
 
 - Verification passed (Phase 4 complete)
 - Archive commit and branch handling are still pending (`branch_status: pending`)
-- `verify_result: pass` in `<classic-change-dir>/.owner.yaml`
+- `verify_result: pass` in `<pipeline-change-dir>/.owner.yaml`
 
 ## Steps
 
@@ -21,7 +21,7 @@ Archive summaries and lifecycle closure notes must use the configured Owner arti
 
 ### 0. Entry State Verification (Entry Check)
 
-Use the stable `owner` CLI described in `owner-classic/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-classic/reference/context-recovery.md`:
+Use the stable `owner` CLI described in `owner-pipeline/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-pipeline/reference/context-recovery.md`:
 
 ```bash
 owner state select <change-name>
@@ -30,11 +30,11 @@ owner state check <name> archive
 
 Proceed to Step 1 after verification passes. The script outputs specific failure reasons when verification fails.
 
-If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-classic/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
+If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-pipeline/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
 
 ### 1. Final Archive and Delivery Confirmation (Blocking Point)
 
-After entry verification passes, first read `owner state get <change-name> isolation`, then **follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for the user to confirm whether to archive and deliver remotely now**. Must not run `owner state transition <change-name> archive-confirm` or `owner archive "<change-name>"` before user confirmation.
+After entry verification passes, first read `owner state get <change-name> isolation`, then **follow the `owner-pipeline/reference/decision-point.md` protocol to pause and wait for the user to confirm whether to archive and deliver remotely now**. Must not run `owner state transition <change-name> archive-confirm` or `owner archive "<change-name>"` before user confirmation.
 
 Before confirmation, show the user a brief summary:
 - Change name
@@ -92,7 +92,7 @@ brainstorming → delta spec → implementation → verification → main spec m
 ### 4. Commit Archive Changes with Exact Paths
 
 The archive script only moves files and merges the spec; it does not commit. After archiving, the worktree holds these uncommitted changes:
-- The change directory moved from `<classic-change-dir>/` to `<classic-archive-root>/YYYY-MM-DD-<name>/`
+- The change directory moved from `<pipeline-change-dir>/` to `<pipeline-archive-root>/YYYY-MM-DD-<name>/`
 - The main spec content merged via delta semantics
 - Archive metadata annotations on the design doc / plan
 
@@ -126,28 +126,28 @@ After the archive commit succeeds, perform only the remote delivery method the u
 
 If push fails, report the error and retain the current selection record; do not clear selection or report completion. Within the current task, retry only that same push. If PR creation fails, the branch already contains the complete archive commit; report the error and retain the current selection record. Within the current task, retry only PR creation. Do not automatically switch, delete, rebase, or rewrite branches after failure.
 
-Only after every remote delivery operation selected by the user succeeds may you run `owner state clear-selection` and report the Classic workflow complete.
+Only after every remote delivery operation selected by the user succeeds may you run `owner state clear-selection` and report the Pipeline workflow complete.
 
 Archive no longer invokes Superpowers `finishing-a-development-branch`. Local merge, keeping a branch for later, or postponing push does not immediately produce final remote state, so the user must choose "Do not archive yet" in Step 1 rather than choosing it after archive.
 
 ## Exit Conditions
 
 - Archive script executed successfully (exit code 0)
-- Archive directory `<classic-archive-root>/YYYY-MM-DD-<change-name>/` exists
+- Archive directory `<pipeline-archive-root>/YYYY-MM-DD-<change-name>/` exists
 - Archived `.owner.yaml` contains `archived: true`
 - Archived `branch_status: handled` is included in the only archive commit
 - `owner guard <change-name> archive` passes
 - The only archive commit was pushed successfully using the delivery method confirmed before archive; if the user selected PR creation, the PR was created successfully
 - Current selection was cleared after remote delivery succeeded
 
-The archive script moves `<classic-change-dir>/` to `<classic-archive-root>/YYYY-MM-DD-<name>/`.
+The archive script moves `<pipeline-change-dir>/` to `<pipeline-archive-root>/YYYY-MM-DD-<name>/`.
 
 `owner guard <change-name> archive` resolves the actual archive directory from the original change name; do not construct a dated archive path manually.
 
 ## Complete
 
-Owner Classic workflow complete. To start new Classic work, invoke `/owner-classic` or `/owner-open`.
+Owner Pipeline workflow complete. To start new Pipeline work, invoke `/owner-pipeline` or `/owner-open`.
 
 ## Context Compression Recovery
 
-Follow `owner-classic/reference/context-recovery.md` with phase set to `archive`. If `archived: true` and the archive directory exists, do not re-execute archive operations. Retry the same push or PR creation only when the current task context explicitly records the remote delivery method selected in Step 1. This Skill does not promise automatic recovery after the user leaves the flow and changes branch topology independently.
+Follow `owner-pipeline/reference/context-recovery.md` with phase set to `archive`. If `archived: true` and the archive directory exists, do not re-execute archive operations. Retry the same push or PR creation only when the current task context explicitly records the remote delivery method selected in Step 1. This Skill does not promise automatic recovery after the user leaves the flow and changes branch topology independently.

@@ -1,31 +1,31 @@
-export type WorkflowKind = 'owner-five-phase-overlay' | 'owner-native' | 'workflow-kernel';
+export type WorkflowKind = 'owner-five-phase-overlay' | 'owner-loop' | 'workflow-kernel';
 
-export type OwnerProjectWorkflow = 'native' | 'classic';
-export type ClassicArtifactLayout = 'legacy' | 'docs';
+export type OwnerProjectWorkflow = 'loop' | 'pipeline';
+export type PipelineArtifactLayout = 'legacy' | 'docs';
 export type ProjectConfigLanguage = 'en' | 'zh-CN';
-export type WorkflowNativeClarificationMode = 'sequential' | 'batch';
-export type WorkflowNativeArchiveConfirmation = 'automatic' | 'required';
-export type WorkflowNativeRootMoveCleanupKind =
+export type WorkflowLoopClarificationMode = 'sequential' | 'batch';
+export type WorkflowLoopArchiveConfirmation = 'automatic' | 'required';
+export type WorkflowLoopRootMoveCleanupKind =
   | 'forward-source'
   | 'restart-staging'
   | 'rollback-destination'
   | 'rollback-staging';
 
-export interface WorkflowNativeRootMoveCleanup {
-  kind: WorkflowNativeRootMoveCleanupKind;
+export interface WorkflowLoopRootMoveCleanup {
+  kind: WorkflowLoopRootMoveCleanupKind;
   state: 'prepared' | 'quarantined' | 'deleting';
   manifestHash: string;
 }
 
-export interface WorkflowNativePendingRootMove {
+export interface WorkflowLoopPendingRootMove {
   id: string;
   fromArtifactRoot: string;
   toArtifactRoot: string;
   stage: 'copying' | 'ready' | 'switched';
-  cleanup?: WorkflowNativeRootMoveCleanup;
+  cleanup?: WorkflowLoopRootMoveCleanup;
 }
 
-export interface WorkflowNativeSnapshotConfig {
+export interface WorkflowLoopSnapshotConfig {
   include: string[];
   exclude: string[];
   max_files: number;
@@ -37,18 +37,18 @@ export interface WorkflowHookProjectConfig {
   allow_paths: string[];
 }
 
-export interface WorkflowNativeProjectConfig {
+export interface WorkflowLoopProjectConfig {
   artifact_root: string;
   language: ProjectConfigLanguage;
-  clarification_mode: WorkflowNativeClarificationMode;
-  archive_confirmation: WorkflowNativeArchiveConfirmation;
+  clarification_mode: WorkflowLoopClarificationMode;
+  archive_confirmation: WorkflowLoopArchiveConfirmation;
   max_verify_failures: number;
-  snapshot: WorkflowNativeSnapshotConfig;
-  pending_root_move?: WorkflowNativePendingRootMove;
+  snapshot: WorkflowLoopSnapshotConfig;
+  pending_root_move?: WorkflowLoopPendingRootMove;
 }
 
-export interface WorkflowClassicProjectConfig {
-  artifact_layout?: ClassicArtifactLayout;
+export interface WorkflowPipelineProjectConfig {
+  artifact_layout?: PipelineArtifactLayout;
   language?: ProjectConfigLanguage;
   context_compression?: 'off' | 'beta';
   review_mode?: 'off' | 'standard' | 'thorough';
@@ -61,16 +61,16 @@ export interface WorkflowProjectConfig {
   workflows?: OwnerProjectWorkflow[];
   ambient_resume: boolean;
   hook?: WorkflowHookProjectConfig;
-  native?: WorkflowNativeProjectConfig;
-  classic?: WorkflowClassicProjectConfig;
+  loop?: WorkflowLoopProjectConfig;
+  pipeline?: WorkflowPipelineProjectConfig;
 }
 
 export interface WorkflowGlobalConfig extends Omit<WorkflowProjectConfig, 'schema'> {
   schema: 'owner.global.v1';
 }
 
-export interface WorkflowNativeEnabledProjectConfig extends WorkflowProjectConfig {
-  native: WorkflowNativeProjectConfig;
+export interface WorkflowLoopEnabledProjectConfig extends WorkflowProjectConfig {
+  loop: WorkflowLoopProjectConfig;
 }
 
 /**
@@ -81,8 +81,8 @@ export interface ParsedWorkflowProjectConfigDocument {
   value: Record<string, unknown>;
   config: WorkflowProjectConfig | null;
   ambient_resume: boolean;
-  native?: WorkflowNativeProjectConfig;
-  classic?: WorkflowClassicProjectConfig;
+  loop?: WorkflowLoopProjectConfig;
+  pipeline?: WorkflowPipelineProjectConfig;
 }
 
 export type WorkflowNodeKind = 'control' | 'producer' | 'action' | 'handoff' | 'guardrail';
@@ -105,7 +105,7 @@ export interface WorkflowArtifactSchema {
   kind: 'file' | 'directory' | 'state' | 'report';
   required: boolean;
   paths: string[];
-  pathBase?: 'project' | 'native-root' | 'classic-openspec-root' | 'classic-superpowers-root';
+  pathBase?: 'project' | 'loop-root' | 'pipeline-openspec-root' | 'pipeline-superpowers-root';
   validations: OutputValidationKind[];
 }
 
@@ -195,9 +195,9 @@ export interface WorkflowEdge {
 }
 
 export interface WorkflowStateSpec {
-  kind: 'owner-overlay' | 'native-change' | 'workflow-run';
+  kind: 'owner-overlay' | 'loop-change' | 'workflow-run';
   statePath: string;
-  pathBase?: 'project' | 'native-root' | 'classic-openspec-root' | 'classic-superpowers-root';
+  pathBase?: 'project' | 'loop-root' | 'pipeline-openspec-root' | 'pipeline-superpowers-root';
   currentNodeField: string;
   completedNodesField: string;
   evidenceField: string;

@@ -49,16 +49,16 @@ import {
 } from '../../domains/integrations/openspec.js';
 import { installSuperpowersForPlatforms } from '../../domains/integrations/superpowers.js';
 import {
-  assertClassicLayoutInitializationSafe,
-  beginClassicLayoutInitialization,
-  checkpointClassicLayoutInitialization,
-  completeClassicLayoutInitialization,
-  type ClassicLayoutInitializationPermit,
-} from '../../domains/owner-classic/classic-layout-initialization.js';
-import { classicLayoutPaths } from '../../domains/owner-classic/classic-layout.js';
-import { assertClassicOpenSpecRootHealthy } from '../../domains/owner-classic/classic-openspec-root.js';
-import { discoverNativeProject } from '../../domains/owner-native/native-paths.js';
-import { defaultProjectConfig } from '../../domains/owner-native/native-config.js';
+  assertPipelineLayoutInitializationSafe,
+  beginPipelineLayoutInitialization,
+  checkpointPipelineLayoutInitialization,
+  completePipelineLayoutInitialization,
+  type PipelineLayoutInitializationPermit,
+} from '../../domains/owner-pipeline/pipeline-layout-initialization.js';
+import { pipelineLayoutPaths } from '../../domains/owner-pipeline/pipeline-layout.js';
+import { assertPipelineOpenSpecRootHealthy } from '../../domains/owner-pipeline/pipeline-openspec-root.js';
+import { discoverLoopProject } from '../../domains/owner-loop/loop-paths.js';
+import { defaultProjectConfig } from '../../domains/owner-loop/loop-config.js';
 import { readWorkflowProjectConfigSnapshot } from '../../domains/workflow-contract/project-config-reader.js';
 import { ensureOwnerProjectGitignore } from '../../domains/workflow-contract/project-gitignore.js';
 import {
@@ -66,7 +66,7 @@ import {
   writeWorkflowGlobalConfig,
 } from '../../domains/workflow-contract/global-config.js';
 import type { InitWorkflowSelection } from '../../domains/owner-entry/types.js';
-import { migrateLegacyClassicSelection } from '../../domains/owner-entry/current-selection.js';
+import { migrateLegacyPipelineSelection } from '../../domains/owner-entry/current-selection.js';
 import type { InstallScope, InstallMode } from '../../platform/install/types.js';
 import { getLatestVersion, printVersionInfo } from '../../platform/version/version.js';
 import { t, type TranslationKey } from './i18n.js';
@@ -79,7 +79,7 @@ const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
 interface UpdateOptions {
   json?: boolean;
   language?: string;
-  classicLayout?: 'legacy' | 'docs';
+  pipelineLayout?: 'legacy' | 'docs';
   scope?: InstallScope;
   skipNpm?: boolean;
   skipSelfUpdate?: boolean;
@@ -102,10 +102,10 @@ async function refreshGlobalWorkflowConfig(
   const existing = await readWorkflowGlobalConfig(homeDir);
   const defaults = defaultProjectConfig('docs', language ?? 'en');
   const config = existing ?? { ...defaults, schema: 'owner.global.v1' as const };
-  if (config.native) {
-    if (language) config.native.language = language;
+  if (config.loop) {
+    if (language) config.loop.language = language;
   }
-  if (language && config.classic) config.classic.language = language;
+  if (language && config.pipeline) config.pipeline.language = language;
   await writeWorkflowGlobalConfig(homeDir, config);
 }
 
@@ -321,26 +321,26 @@ function languageToArtifactLanguage(languageId: SkillLanguage): 'en' | 'zh-CN' {
   return LANGUAGES.find((entry) => entry.id === languageId)!.artifactLanguage;
 }
 
-async function resolveClassicArtifactLayout(
+async function resolvePipelineArtifactLayout(
   projectPath: string,
   explicitLayout: 'legacy' | 'docs' | null,
   options: UpdateOptions,
   lang: string,
 ): Promise<'legacy' | 'docs'> {
   if (explicitLayout) return explicitLayout;
-  if (options.classicLayout) return options.classicLayout;
+  if (options.pipelineLayout) return options.pipelineLayout;
 
   const hasLegacyRoot = await fileExists(path.join(projectPath, 'openspec'));
   const hasDocsRoot = await fileExists(path.join(projectPath, 'docs', 'openspec'));
   if (hasLegacyRoot && hasDocsRoot) {
     if (options.json) {
-      throw new Error(t(lang, 'classicLayoutChoiceRequired'));
+      throw new Error(t(lang, 'pipelineLayoutChoiceRequired'));
     }
     return select({
-      message: t(lang, 'classicLayoutChoice'),
+      message: t(lang, 'pipelineLayoutChoice'),
       choices: [
-        { name: t(lang, 'classicLayoutLegacy'), value: 'legacy' as const },
-        { name: t(lang, 'classicLayoutDocs'), value: 'docs' as const },
+        { name: t(lang, 'pipelineLayoutLegacy'), value: 'legacy' as const },
+        { name: t(lang, 'pipelineLayoutDocs'), value: 'docs' as const },
       ],
     });
   }
@@ -856,9 +856,9 @@ async function validateOwnerPackageCommands(
       label: 'workflow resolve command',
     },
     {
-      args: ['native', '--help'],
-      accepts: (stdout) => stdout.includes('Usage: owner native'),
-      label: 'native command',
+      args: ['loop', '--help'],
+      accepts: (stdout) => stdout.includes('Usage: owner loop'),
+      label: 'loop command',
     },
   ];
 
@@ -1238,23 +1238,23 @@ async function updateSingleProject(
   const includesProjectScope = options.targetScopes
     ? options.targetScopes.includes('project')
     : options.scope !== 'global';
-  const projectPath = includesProjectScope ? await discoverNativeProject(startPath) : startPath;
+  const projectPath = includesProjectScope ? await discoverLoopProject(startPath) : startPath;
   const projectConfigSnapshot = includesProjectScope
     ? await readWorkflowProjectConfigSnapshot(projectPath, {
         allowPartialProject: true,
-        allowMissingNativeFields: true,
+        allowMissingLoopFields: true,
       })
     : null;
   const projectConfigDocument = projectConfigSnapshot?.document ?? null;
   const projectConfig = projectConfigDocument?.config ?? null;
   const configuredWorkflows =
     projectConfig?.workflows ?? (projectConfig ? [projectConfig.default_workflow] : null);
-  const nativeProject = configuredWorkflows
-    ? configuredWorkflows.includes('native')
-    : projectConfigDocument?.native !== undefined;
-  const classicProject = configuredWorkflows ? configuredWorkflows.includes('classic') : true;
+  const loopProject = configuredWorkflows
+    ? configuredWorkflows.includes('loop')
+    : projectConfigDocument?.loop !== undefined;
+  const pipelineProject = configuredWorkflows ? configuredWorkflows.includes('pipeline') : true;
   const projectWorkflowSelection: InitWorkflowSelection =
-    nativeProject && classicProject ? 'both' : nativeProject ? 'native' : 'classic';
+    loopProject && pipelineProject ? 'both' : loopProject ? 'loop' : 'pipeline';
   const packageScope =
     options.scope && !options.targetScopes
       ? options.scope
@@ -1264,7 +1264,7 @@ async function updateSingleProject(
   let npmReason: string | undefined = options.npmSkipReason;
   let npmCommand: string | null = null;
   const skipPackageSelfUpdate = options.skipPackageSelfUpdate ?? options.skipNpm === true;
-  const updateClassicDependencies = options.selfUpdate === true && !skipPackageSelfUpdate;
+  const updatePipelineDependencies = options.selfUpdate === true && !skipPackageSelfUpdate;
   const skipRepeatedGlobalNpm =
     !skipPackageSelfUpdate && packageScope === 'global' && options.skipGlobalNpmUpdate === true;
   if (skipRepeatedGlobalNpm) {
@@ -1341,10 +1341,10 @@ async function updateSingleProject(
             existing?.language ??
             (scope === 'project'
               ? artifactLanguageToSkillLanguage(
-                  projectConfig?.native?.language ??
-                    projectConfig?.classic?.language ??
-                    projectConfigDocument?.native?.language ??
-                    projectConfigDocument?.classic?.language,
+                  projectConfig?.loop?.language ??
+                    projectConfig?.pipeline?.language ??
+                    projectConfigDocument?.loop?.language ??
+                    projectConfigDocument?.pipeline?.language,
                 )
               : 'en');
           const target = resolvePlatformTarget(options.platform!, scope);
@@ -1360,22 +1360,27 @@ async function updateSingleProject(
         respectDetectionPaths: options.scope === undefined,
       });
 
-  const rawClassic = projectConfigDocument?.value.classic;
-  const explicitClassicArtifactLayout =
-    rawClassic !== null &&
-    typeof rawClassic === 'object' &&
-    !Array.isArray(rawClassic) &&
-    ((rawClassic as Record<string, unknown>).artifact_layout === 'legacy' ||
-      (rawClassic as Record<string, unknown>).artifact_layout === 'docs')
-      ? ((rawClassic as Record<string, unknown>).artifact_layout as 'legacy' | 'docs')
+  const rawPipeline = projectConfigDocument?.value.pipeline;
+  const explicitPipelineArtifactLayout =
+    rawPipeline !== null &&
+    typeof rawPipeline === 'object' &&
+    !Array.isArray(rawPipeline) &&
+    ((rawPipeline as Record<string, unknown>).artifact_layout === 'legacy' ||
+      (rawPipeline as Record<string, unknown>).artifact_layout === 'docs')
+      ? ((rawPipeline as Record<string, unknown>).artifact_layout as 'legacy' | 'docs')
       : null;
   const hasProjectTarget = targets.some((target) => target.scope === 'project');
   const shouldRefreshExistingProjectConfig =
     includesProjectScope && projectConfigDocument !== null && !hasProjectTarget;
-  const needsClassicLayout =
-    includesProjectScope && classicProject && (projectConfigDocument !== null || hasProjectTarget);
-  const classicArtifactLayout = needsClassicLayout
-    ? await resolveClassicArtifactLayout(projectPath, explicitClassicArtifactLayout, options, lang)
+  const needsPipelineLayout =
+    includesProjectScope && pipelineProject && (projectConfigDocument !== null || hasProjectTarget);
+  const pipelineArtifactLayout = needsPipelineLayout
+    ? await resolvePipelineArtifactLayout(
+        projectPath,
+        explicitPipelineArtifactLayout,
+        options,
+        lang,
+      )
     : 'docs';
   const mergeExistingProjectConfig = async (): Promise<void> => {
     if (!shouldRefreshExistingProjectConfig) return;
@@ -1383,11 +1388,11 @@ async function updateSingleProject(
     await mergeProjectConfig(
       projectPath,
       languageId ? languageToArtifactLanguage(languageId) : null,
-      classicArtifactLayout,
+      pipelineArtifactLayout,
       true,
-      classicProject,
+      pipelineProject,
     );
-    if (nativeProject) await ensureOwnerProjectGitignore(projectPath);
+    if (loopProject) await ensureOwnerProjectGitignore(projectPath);
     log(`  ${t(lang, 'configMerged')}`);
   };
 
@@ -1415,9 +1420,9 @@ async function updateSingleProject(
   const openSpecTargets: InstalledOwnerTarget[] = [];
   const superpowersTargets: InstalledOwnerTarget[] = [];
   const pluginManagedSuperpowersTargets: InstalledOwnerTarget[] = [];
-  if (updateClassicDependencies) {
+  if (updatePipelineDependencies) {
     for (const target of targets) {
-      if (target.scope === 'project' && !classicProject) continue;
+      if (target.scope === 'project' && !pipelineProject) continue;
       const baseDir = getBaseDir(target.scope, projectPath);
       if (
         await hasSkills(baseDir, target.platform, 'openspec', targetPlatforms, target.scope, {
@@ -1440,35 +1445,35 @@ async function updateSingleProject(
     }
   }
 
-  const hasClassicCompatibleTarget = targets.some(
-    (target) => target.scope === 'global' || classicProject,
+  const hasPipelineCompatibleTarget = targets.some(
+    (target) => target.scope === 'global' || pipelineProject,
   );
-  const selectedInstallMode = hasClassicCompatibleTarget
+  const selectedInstallMode = hasPipelineCompatibleTarget
     ? await selectInstallMode(options, lang)
     : 'copy';
   const installModeFor = (target: InstalledOwnerTarget): InstallMode =>
-    nativeProject && target.scope === 'project' ? 'copy' : selectedInstallMode;
-  const reportedInstallMode = targets.every((target) => nativeProject && target.scope === 'project')
+    loopProject && target.scope === 'project' ? 'copy' : selectedInstallMode;
+  const reportedInstallMode = targets.every((target) => loopProject && target.scope === 'project')
     ? 'copy'
     : selectedInstallMode;
-  const refreshClassicArtifactRoot =
-    updateClassicDependencies &&
+  const refreshPipelineArtifactRoot =
+    updatePipelineDependencies &&
     includesProjectScope &&
-    classicProject &&
+    pipelineProject &&
     targets.some((target) => target.scope === 'project');
-  let classicLayoutInitializationPermit: ClassicLayoutInitializationPermit | undefined;
-  if (refreshClassicArtifactRoot) {
+  let pipelineLayoutInitializationPermit: PipelineLayoutInitializationPermit | undefined;
+  if (refreshPipelineArtifactRoot) {
     try {
-      let initialization = await assertClassicLayoutInitializationSafe(
+      let initialization = await assertPipelineLayoutInitializationSafe(
         projectPath,
-        classicArtifactLayout,
+        pipelineArtifactLayout,
         undefined,
         projectConfigSnapshot?.identity,
       );
-      initialization = await beginClassicLayoutInitialization(projectPath, initialization);
-      classicLayoutInitializationPermit = initialization.initializationPermit;
+      initialization = await beginPipelineLayoutInitialization(projectPath, initialization);
+      pipelineLayoutInitializationPermit = initialization.initializationPermit;
     } catch (error) {
-      const reason = `Classic layout preflight failed: ${(error as Error).message}`;
+      const reason = `Pipeline layout preflight failed: ${(error as Error).message}`;
       return {
         projectPath,
         npm: {
@@ -1495,7 +1500,7 @@ async function updateSingleProject(
               copied: 0,
               skipped: 0,
               failed: 0,
-              reason: 'skipped because Classic layout preflight failed',
+              reason: 'skipped because Pipeline layout preflight failed',
               cleanupFailed: 0,
               command: formatSkillUpdateCommand(
                 target.scope,
@@ -1514,12 +1519,12 @@ async function updateSingleProject(
       };
     }
   }
-  const assertClassicProjectMutationAllowed = classicLayoutInitializationPermit
+  const assertPipelineProjectMutationAllowed = pipelineLayoutInitializationPermit
     ? async () => {
-        await assertClassicLayoutInitializationSafe(
+        await assertPipelineLayoutInitializationSafe(
           projectPath,
-          classicArtifactLayout,
-          classicLayoutInitializationPermit,
+          pipelineArtifactLayout,
+          pipelineLayoutInitializationPermit,
         );
       }
     : undefined;
@@ -1580,12 +1585,12 @@ async function updateSingleProject(
     const languageId = resolveTargetLanguage(options.language, target.language);
     const languageSkillsDir = languageToSkillsDir(languageId);
     const targetInstallMode = installModeFor(target);
-    const nativeProjectTarget = nativeProject && target.scope === 'project';
+    const loopProjectTarget = loopProject && target.scope === 'project';
     const targetSkillWorkflowSelection = await skillWorkflowSelectionFor(target);
     if (target.scope === 'project') {
-      await assertClassicProjectMutationAllowed?.();
+      await assertPipelineProjectMutationAllowed?.();
     }
-    if (nativeProjectTarget) {
+    if (loopProjectTarget) {
       await prepareManagedSkillCopyTarget(
         baseDir,
         target.platform,
@@ -1671,7 +1676,7 @@ async function updateSingleProject(
         true,
         languageId,
         target.scope,
-        target.scope === 'global' ? 'classic' : projectWorkflowSelection,
+        target.scope === 'global' ? 'pipeline' : projectWorkflowSelection,
       );
       totalRulesCopied += ruleResult.copied;
       totalRulesFailed += ruleResult.failed;
@@ -1727,7 +1732,7 @@ async function updateSingleProject(
             projectWorkflowSelection,
             { globalBaseDir: os.homedir() },
           )
-        : await reconcileOwnerHooksForPlatform(baseDir, target.platform, target.scope, 'classic');
+        : await reconcileOwnerHooksForPlatform(baseDir, target.platform, target.scope, 'pipeline');
       const hookFailed = status === 'failed' ? 1 : cleanupFailed;
       totalHooksFailed += hookFailed;
       hookTargetResults.push({
@@ -1774,10 +1779,10 @@ async function updateSingleProject(
     includesProjectScope &&
     projectRouterInstalled &&
     !projectHookFailed &&
-    (projectWorkflowSelection === 'classic' || projectWorkflowSelection === 'both')
+    (projectWorkflowSelection === 'pipeline' || projectWorkflowSelection === 'both')
   ) {
-    if (await migrateLegacyClassicSelection(projectPath)) {
-      log('  Owner current selection -> migrated Classic v1 to shared v2');
+    if (await migrateLegacyPipelineSelection(projectPath)) {
+      log('  Owner current selection -> migrated Pipeline v1 to shared v2');
     }
   }
 
@@ -1788,16 +1793,16 @@ async function updateSingleProject(
   for (const scope of ['project', 'global'] as const) {
     const scopeTargets = openSpecTargets.filter((target) => target.scope === scope);
     const requiresArtifactOnlyRefresh =
-      updateClassicDependencies &&
+      updatePipelineDependencies &&
       scope === 'project' &&
-      refreshClassicArtifactRoot &&
+      refreshPipelineArtifactRoot &&
       scopeTargets.length === 0;
     if (scopeTargets.length === 0 && !requiresArtifactOnlyRefresh) continue;
     const toolIds = [...new Set(scopeTargets.map((target) => target.platform.openspecToolId))];
-    const artifactLayout = scope === 'project' ? classicArtifactLayout : 'legacy';
+    const artifactLayout = scope === 'project' ? pipelineArtifactLayout : 'legacy';
     try {
       if (scope === 'project') {
-        await assertClassicProjectMutationAllowed?.();
+        await assertPipelineProjectMutationAllowed?.();
       }
       const status = await installOpenSpec(
         projectPath,
@@ -1805,34 +1810,34 @@ async function updateSingleProject(
         scope,
         !skipPackageSelfUpdate,
         artifactLayout,
-        scope === 'project' ? assertClassicProjectMutationAllowed : undefined,
+        scope === 'project' ? assertPipelineProjectMutationAllowed : undefined,
         undefined,
       );
       if (status === 'failed') {
         openSpecStatus = 'failed';
         openSpecReason = `OpenSpec ${scope} asset update failed`;
-        if (scope === 'project' && refreshClassicArtifactRoot) {
+        if (scope === 'project' && refreshPipelineArtifactRoot) {
           projectConfigCommitBlocked = true;
         }
       } else if (status === 'skipped') {
         openSpecStatus = 'failed';
         openSpecReason = `OpenSpec ${scope} asset update skipped because a compatible OpenSpec CLI is unavailable`;
-        if (scope === 'project' && refreshClassicArtifactRoot) {
+        if (scope === 'project' && refreshPipelineArtifactRoot) {
           projectConfigCommitBlocked = true;
         }
       } else if (status === 'installed' && openSpecStatus !== 'failed') {
         if (scope === 'project') {
           try {
-            await assertClassicProjectMutationAllowed?.();
-            await assertClassicOpenSpecRootHealthy(
+            await assertPipelineProjectMutationAllowed?.();
+            await assertPipelineOpenSpecRootHealthy(
               projectPath,
-              classicLayoutPaths(projectPath, classicArtifactLayout),
+              pipelineLayoutPaths(projectPath, pipelineArtifactLayout),
             );
-            await assertClassicProjectMutationAllowed?.();
-            if (classicLayoutInitializationPermit) {
-              await checkpointClassicLayoutInitialization(
+            await assertPipelineProjectMutationAllowed?.();
+            if (pipelineLayoutInitializationPermit) {
+              await checkpointPipelineLayoutInitialization(
                 projectPath,
-                classicLayoutInitializationPermit,
+                pipelineLayoutInitializationPermit,
               );
             }
           } catch (error) {
@@ -1849,7 +1854,7 @@ async function updateSingleProject(
       if (scope === 'project' && isProjectMutationGuardError(error)) {
         projectMutationBlocked = true;
       }
-      if (scope === 'project' && refreshClassicArtifactRoot) {
+      if (scope === 'project' && refreshPipelineArtifactRoot) {
         projectConfigCommitBlocked = true;
       }
       log(`  ${openSpecReason}`);
@@ -1932,12 +1937,12 @@ async function updateSingleProject(
   const projectTarget = targets.find((target) => target.scope === 'project');
   if (projectTarget && !projectMutationBlocked) {
     try {
-      await assertClassicProjectMutationAllowed?.();
+      await assertPipelineProjectMutationAllowed?.();
       const projectLanguageId = resolveTargetLanguage(options.language, projectTarget.language);
       const projectInstructionResult = await syncOwnerProjectInstructions(
         projectPath,
         projectLanguageId,
-        nativeProject && (projectConfigDocument?.ambient_resume ?? true),
+        loopProject && (projectConfigDocument?.ambient_resume ?? true),
       );
       projectInstructionsUpdated = projectInstructionResult.changed;
       if (projectInstructionsUpdated > 0) {
@@ -1945,7 +1950,7 @@ async function updateSingleProject(
       }
     } catch (error) {
       openSpecStatus = 'failed';
-      openSpecReason = `Classic layout update failed before project instruction mutation: ${(error as Error).message}`;
+      openSpecReason = `Pipeline layout update failed before project instruction mutation: ${(error as Error).message}`;
       projectMutationBlocked = true;
     }
   }
@@ -1969,10 +1974,10 @@ async function updateSingleProject(
     const configRoot = getBaseDir(scope, projectPath);
     if (scope === 'project') {
       try {
-        await assertClassicProjectMutationAllowed?.();
+        await assertPipelineProjectMutationAllowed?.();
       } catch (error) {
         openSpecStatus = 'failed';
-        openSpecReason = `Classic layout update failed before config mutation: ${(error as Error).message}`;
+        openSpecReason = `Pipeline layout update failed before config mutation: ${(error as Error).message}`;
         projectMutationBlocked = true;
         continue;
       }
@@ -1984,14 +1989,14 @@ async function updateSingleProject(
       await mergeProjectConfig(
         configRoot,
         artifactLanguage,
-        classicArtifactLayout,
+        pipelineArtifactLayout,
         true,
-        classicProject,
+        pipelineProject,
       );
-      if (nativeProject) await ensureOwnerProjectGitignore(configRoot);
+      if (loopProject) await ensureOwnerProjectGitignore(configRoot);
     }
-    if (scope === 'project' && classicLayoutInitializationPermit) {
-      await completeClassicLayoutInitialization(projectPath, classicLayoutInitializationPermit);
+    if (scope === 'project' && pipelineLayoutInitializationPermit) {
+      await completePipelineLayoutInitialization(projectPath, pipelineLayoutInitializationPermit);
     }
     log(`  ${t(lang, 'configMerged')}`);
   }
@@ -2330,7 +2335,7 @@ export async function updateCommand(
     options.platform === undefined &&
     options.targetScopes === undefined;
   if (registryProjects.length === 0 && usesImplicitIndexedProjectUpdate) {
-    const currentProjectPath = await discoverNativeProject(projectPath);
+    const currentProjectPath = await discoverLoopProject(projectPath);
     const currentProjectTargets = await detectInstalledOwnerTargets(currentProjectPath, {
       scopes: ['project'],
       respectDetectionPaths: true,

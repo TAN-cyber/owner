@@ -1,6 +1,6 @@
 import type { Writable } from 'node:stream';
 
-export const OWNER_TAGLINE = 'Resumable Native and Classic vibe coding for Claude Code and Codex';
+export const OWNER_TAGLINE = 'Resumable Loop and Pipeline vibe coding for Claude Code and Codex';
 
 export const OWNER_LOGO = [
   '  ██████╗ ██╗    ██╗███╗   ██╗███████╗██████╗ ',

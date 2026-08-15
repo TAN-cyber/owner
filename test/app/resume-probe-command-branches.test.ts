@@ -30,20 +30,20 @@ describe('resume-probe command branches', () => {
 
   it('formats every optional probe field and derives the workflow context', async () => {
     readWorkflowProjectConfigDocument.mockResolvedValue({
-      config: { default_workflow: 'native' },
-      native: { language: ' zh-CN ' },
-      classic: { language: 'en' },
+      config: { default_workflow: 'loop' },
+      loop: { language: ' zh-CN ' },
+      pipeline: { language: 'en' },
     });
     resolveOwnerEntryResumeProbe.mockResolvedValue({
       action: 'resume',
       confidence: 'high',
       reason: 'active change found',
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       entrySource: 'ambient',
       changeName: 'demo-change',
       phase: 'build',
-      nextCommand: 'owner native next demo-change',
+      nextCommand: 'owner loop next demo-change',
     });
 
     await resumeProbeCommand('project', { utterance: 'continue' });
@@ -63,8 +63,8 @@ describe('resume-probe command branches', () => {
 
   it('supports JSON output, empty utterances, and explicit non-work context', async () => {
     readWorkflowProjectConfigDocument.mockResolvedValue({
-      config: { default_workflow: 'classic' },
-      classic: { language: 'en' },
+      config: { default_workflow: 'pipeline' },
+      pipeline: { language: 'en' },
     });
     resolveOwnerEntryResumeProbe.mockResolvedValue({
       action: 'start',
@@ -91,22 +91,18 @@ describe('resume-probe command branches', () => {
 
   it.each([
     [
-      'native language',
-      { config: { default_workflow: 'native' }, native: { language: 'zh-CN' } },
+      'loop language',
+      { config: { default_workflow: 'loop' }, loop: { language: 'zh-CN' } },
       'zh-CN',
     ],
     [
-      'classic language',
-      { config: { default_workflow: 'classic' }, classic: { language: 'en' } },
+      'pipeline language',
+      { config: { default_workflow: 'pipeline' }, pipeline: { language: 'en' } },
       'en',
     ],
-    [
-      'native fallback',
-      { config: { default_workflow: 'native' }, classic: { language: 'en' } },
-      'en',
-    ],
+    ['loop fallback', { config: { default_workflow: 'loop' }, pipeline: { language: 'en' } }, 'en'],
     ['missing config', null, 'unknown'],
-    ['blank language', { native: { language: '  ' } }, 'unknown'],
+    ['blank language', { loop: { language: '  ' } }, 'unknown'],
   ])('resolves %s', async (_label, document, expected) => {
     readWorkflowProjectConfigDocument.mockResolvedValue(document);
     await expect(resolveProjectLanguage('project')).resolves.toBe(expected);

@@ -45,7 +45,7 @@ function inspectGitWorktree(projectPath: string): GitWorktreeContext {
       currentBranch = runGit(projectPath, ['symbolic-ref', '--quiet', '--short', 'HEAD']) || null;
     } catch {
       // Detached HEAD is a valid Git worktree state, but it cannot satisfy a
-      // Native branch binding.
+      // Loop branch binding.
     }
     return {
       isGitWorktree: true,

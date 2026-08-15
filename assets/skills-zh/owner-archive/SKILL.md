@@ -1,17 +1,17 @@
 ---
 name: owner-archive
-description: "Owner Classic 阶段 5 —— 确认归档、合并 delta spec 并完成分支收尾。"
+description: "Owner Pipeline 阶段 5 —— 确认归档、合并 delta spec 并完成分支收尾。"
 ---
 
 # Owner 阶段 5：归档（Archive）
 
-开始或恢复前必须先读取并执行 `owner-classic/reference/classic-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<classic-*>` 逻辑根。
+开始或恢复前必须先读取并执行 `owner-pipeline/reference/pipeline-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<pipeline-*>` 逻辑根。
 
 ## 前置条件
 
 - 验证已通过（阶段 4 完成）
 - 归档提交和分支处理尚未完成（`branch_status: pending`）
-- `<classic-change-dir>/.owner.yaml` 中 `verify_result: pass`
+- `<pipeline-change-dir>/.owner.yaml` 中 `verify_result: pass`
 
 ## 步骤
 
@@ -21,7 +21,7 @@ description: "Owner Classic 阶段 5 —— 确认归档、合并 delta spec 并
 
 ### 0b. 入口状态验证（Entry Check）
 
-按 `owner-classic/reference/scripts.md` 使用稳定 `owner` CLI，然后执行入口验证；从任意入口恢复时先按 `owner-classic/reference/context-recovery.md` 运行恢复检查：
+按 `owner-pipeline/reference/scripts.md` 使用稳定 `owner` CLI，然后执行入口验证；从任意入口恢复时先按 `owner-pipeline/reference/context-recovery.md` 运行恢复检查：
 
 ```bash
 owner state select <change-name>
@@ -30,11 +30,11 @@ owner state check <name> archive
 
 验证通过后继续 Step 1。验证失败时脚本会输出具体失败原因。
 
-若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-classic/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
+若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-pipeline/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
 
 ### 1. 归档与交付前最终确认（阻塞点）
 
-入口验证通过后，先读取 `owner state get <change-name> isolation`，再**按 `owner-classic/reference/decision-point.md` 的协议暂停并等待用户确认是否立即归档和远端交付**。不得在用户确认前运行 `owner state transition <change-name> archive-confirm` 或 `owner archive "<change-name>"`。
+入口验证通过后，先读取 `owner state get <change-name> isolation`，再**按 `owner-pipeline/reference/decision-point.md` 的协议暂停并等待用户确认是否立即归档和远端交付**。不得在用户确认前运行 `owner state transition <change-name> archive-confirm` 或 `owner archive "<change-name>"`。
 
 确认前必须向用户展示简短摘要：
 - change 名称
@@ -92,7 +92,7 @@ brainstorming → delta spec → 实施 → 验证 → 主 spec 合并 → desig
 ### 4. 精确提交归档改动
 
 归档脚本只移动文件和合并 spec，不会自动提交。归档完成后工作区会有以下未提交改动：
-- change 目录从 `<classic-change-dir>/` 移动到 `<classic-archive-root>/YYYY-MM-DD-<name>/`
+- change 目录从 `<pipeline-change-dir>/` 移动到 `<pipeline-archive-root>/YYYY-MM-DD-<name>/`
 - 主 spec 按 delta 语义合并的内容
 - design doc / plan 的归档元数据标注
 
@@ -126,28 +126,28 @@ git commit -m "chore: archive <change-name>"
 
 push 失败时报告错误，保留 current selection 记录，不得清除选择或宣告完成；当前任务中只重试同一个 push。PR 创建失败时分支已经包含完整归档提交，报告错误并保留 current selection 记录；当前任务中只重试创建 PR。不得在失败后自动切换、删除、变基或改写分支。
 
-只有用户选择的远端交付操作全部成功后，才运行 `owner state clear-selection` 并宣告 Classic workflow 完成。
+只有用户选择的远端交付操作全部成功后，才运行 `owner state clear-selection` 并宣告 Pipeline workflow 完成。
 
 归档阶段不再调用 Superpowers `finishing-a-development-branch`。本地合并、保留分支稍后处理或暂不推送都不会立即形成远端最终状态，必须在 Step 1 选择「暂不归档」，不能在归档后再选择。
 
 ## 退出条件
 
 - 归档脚本执行成功（退出码 0）
-- 归档目录 `<classic-archive-root>/YYYY-MM-DD-<change-name>/` 存在
+- 归档目录 `<pipeline-archive-root>/YYYY-MM-DD-<change-name>/` 存在
 - 归档后的 `.owner.yaml` 中 `archived: true`
 - 归档状态中的 `branch_status: handled` 已包含在唯一归档提交中
 - `owner guard <change-name> archive` 通过
 - 唯一归档提交已按用户在归档前确认的方式成功推送；若用户选择创建 PR，PR 已成功创建
 - current selection 已在远端交付成功后清除
 
-归档脚本会把 `<classic-change-dir>/` 移动到 `<classic-archive-root>/YYYY-MM-DD-<name>/`。
+归档脚本会把 `<pipeline-change-dir>/` 移动到 `<pipeline-archive-root>/YYYY-MM-DD-<name>/`。
 
 `owner guard <change-name> archive` 会按原 change 名解析实际归档目录；不要手工拼接日期目录名。
 
 ## 完成
 
-Owner Classic 流程全部完成。如需开始新的 Classic 工作，调用 `/owner-classic` 或 `/owner-open`。
+Owner Pipeline 流程全部完成。如需开始新的 Pipeline 工作，调用 `/owner-pipeline` 或 `/owner-open`。
 
 ## 上下文压缩恢复
 
-按 `owner-classic/reference/context-recovery.md` 执行，phase 参数为 `archive`。若 `archived: true` 且归档目录存在，不得再次执行归档操作；只有当前任务的上下文已明确记录 Step 1 选择的远端交付方式时，才能重试同一个 push 或 PR 创建操作。本 Skill 不承诺用户脱离流程、自行改变分支拓扑后的自动恢复。
+按 `owner-pipeline/reference/context-recovery.md` 执行，phase 参数为 `archive`。若 `archived: true` 且归档目录存在，不得再次执行归档操作；只有当前任务的上下文已明确记录 Step 1 选择的远端交付方式时，才能重试同一个 push 或 PR 创建操作。本 Skill 不承诺用户脱离流程、自行改变分支拓扑后的自动恢复。

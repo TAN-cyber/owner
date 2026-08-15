@@ -8,11 +8,11 @@ import { vi } from 'vitest';
 import {
   assertProjectConfigDocumentValid,
   builtinOwnerFivePhaseWorkflow,
-  builtinOwnerNativeWorkflow,
+  builtinOwnerLoopWorkflow,
   defaultWorkflowProjectConfig,
   hashWorkflowProtocol,
   mergeWorkflowProjectConfigDocument,
-  normalizeClassicArtifactLayout,
+  normalizePipelineArtifactLayout,
   parseWorkflowProjectConfigDocument,
   readWorkflowProjectConfigIdentity,
   normalizeWorkflowArtifactRoot,
@@ -35,9 +35,9 @@ describe('workflow contract normalization', () => {
     const parsed = parseWorkflowProjectConfigDocument(
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native]',
-        'native:',
+        'default_workflow: loop',
+        'workflows: [loop]',
+        'loop:',
         '  artifact_root: docs',
         'hook:',
         '  allow_paths:',
@@ -52,9 +52,9 @@ describe('workflow contract normalization', () => {
       parseWorkflowProjectConfigDocument(
         [
           'schema: owner.project.v1',
-          'default_workflow: native',
-          'workflows: [native]',
-          'native:',
+          'default_workflow: loop',
+          'workflows: [loop]',
+          'loop:',
           '  artifact_root: docs',
           'hook:',
           '  allow_paths: [../outside]',
@@ -134,13 +134,13 @@ describe('workflow contract normalization', () => {
       [
         '---',
         'schema: "owner.project.v1"',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
-        '  - classic',
+        '  - loop',
+        '  - pipeline',
         'ambient_resume: true',
-        'native:',
-        '  artifact_root: "docs/native" # quoted path',
+        'loop:',
+        '  artifact_root: "docs/loop" # quoted path',
         '  language: en',
         '  clarification_mode: batch',
         '  snapshot:',
@@ -150,7 +150,7 @@ describe('workflow contract normalization', () => {
         '    max_files: 12000',
         '    max_total_bytes: 268435456',
         '    max_duration_ms: 90000',
-        'classic: { artifact_layout: docs, language: zh-CN, review_mode: thorough }',
+        'pipeline: { artifact_layout: docs, language: zh-CN, review_mode: thorough }',
         'extension:',
         '  owners: [platform, workflow]',
         '  note: "value: with # content"',
@@ -161,10 +161,10 @@ describe('workflow contract normalization', () => {
 
     expect(parsed.config).toMatchObject({
       schema: 'owner.project.v1',
-      default_workflow: 'native',
-      workflows: ['native', 'classic'],
-      native: {
-        artifact_root: 'docs/native',
+      default_workflow: 'loop',
+      workflows: ['loop', 'pipeline'],
+      loop: {
+        artifact_root: 'docs/loop',
         clarification_mode: 'batch',
         snapshot: {
           include: ['**/*.ts', 'packages/**'],
@@ -173,7 +173,7 @@ describe('workflow contract normalization', () => {
           max_duration_ms: 90_000,
         },
       },
-      classic: {
+      pipeline: {
         artifact_layout: 'docs',
         language: 'zh-CN',
         review_mode: 'thorough',
@@ -187,16 +187,16 @@ describe('workflow contract normalization', () => {
 
   it('keeps legacy snapshot parsing internal while omitting it from managed writes', () => {
     const config = defaultWorkflowProjectConfig('docs');
-    config.native.snapshot.exclude = ['legacy/generated/**'];
+    config.loop.snapshot.exclude = ['legacy/generated/**'];
 
-    expect(workflowProjectConfigManagedValue(config)).not.toHaveProperty('native.snapshot');
+    expect(workflowProjectConfigManagedValue(config)).not.toHaveProperty('loop.snapshot');
 
     const merged = mergeWorkflowProjectConfigDocument(
       {
         hook: {
           allow_paths: ['docs/team-notes'],
         },
-        native: {
+        loop: {
           artifact_root: 'legacy-root',
           snapshot: {
             include: ['**/*'],
@@ -207,28 +207,28 @@ describe('workflow contract normalization', () => {
       },
       config,
     );
-    expect(merged).not.toHaveProperty('native.snapshot');
-    expect(merged).toHaveProperty('native.custom_extension', 'keep');
+    expect(merged).not.toHaveProperty('loop.snapshot');
+    expect(merged).toHaveProperty('loop.custom_extension', 'keep');
     expect(merged).toHaveProperty('hook.allow_paths', ['docs/team-notes']);
 
     const parsed = parseWorkflowProjectConfigDocument(
-      'schema: owner.project.v1\ndefault_workflow: native\nnative:\n  artifact_root: docs\n',
+      'schema: owner.project.v1\ndefault_workflow: loop\nloop:\n  artifact_root: docs\n',
     );
-    expect(parsed.config?.native?.snapshot).toEqual(defaultWorkflowProjectConfig().native.snapshot);
+    expect(parsed.config?.loop?.snapshot).toEqual(defaultWorkflowProjectConfig().loop.snapshot);
   });
 
   it.each([
     [
       'duplicate keys',
-      'schema: owner.project.v1\nschema: owner.project.v1\ndefault_workflow: classic\n',
+      'schema: owner.project.v1\nschema: owner.project.v1\ndefault_workflow: pipeline\n',
     ],
     [
       'malformed extension YAML',
-      'schema: owner.project.v1\ndefault_workflow: classic\nextension: [unterminated\n',
+      'schema: owner.project.v1\ndefault_workflow: pipeline\nextension: [unterminated\n',
     ],
     [
       'invalid managed fields',
-      'schema: owner.project.v1\ndefault_workflow: classic\nclassic:\n  review_mode: casual\n',
+      'schema: owner.project.v1\ndefault_workflow: pipeline\npipeline:\n  review_mode: casual\n',
     ],
   ])('fails closed for project config with %s', (_label, source) => {
     expect(() => parseWorkflowProjectConfigDocument(source)).toThrow();
@@ -237,9 +237,9 @@ describe('workflow contract normalization', () => {
   it('keeps YAML parsing ownership out of project-config consumers', async () => {
     const consumers = [
       'app/commands/resume-probe.ts',
-      'domains/owner-native/native-config.ts',
-      'domains/owner-classic/classic-layout.ts',
-      'domains/owner-classic/classic-project-config.ts',
+      'domains/owner-loop/loop-config.ts',
+      'domains/owner-pipeline/pipeline-layout.ts',
+      'domains/owner-pipeline/pipeline-project-config.ts',
       'domains/owner-entry/resolve-entry.ts',
       'domains/owner-entry/hook-router.ts',
       'domains/owner-entry/init-workflow.ts',
@@ -255,29 +255,29 @@ describe('workflow contract normalization', () => {
   });
 
   it('normalizes shared project path configuration without allowing root escape', () => {
-    expect(normalizeWorkflowArtifactRoot(' docs\\native ')).toBe('docs/native');
+    expect(normalizeWorkflowArtifactRoot(' docs\\loop ')).toBe('docs/loop');
     expect(normalizeWorkflowArtifactRoot('.')).toBe('.');
     expect(() => normalizeWorkflowArtifactRoot('../outside')).toThrow(
-      'native.artifact_root must stay inside the project root',
+      'loop.artifact_root must stay inside the project root',
     );
     expect(() => normalizeWorkflowArtifactRoot('/outside')).toThrow(
-      'native.artifact_root must be a project-relative path',
+      'loop.artifact_root must be a project-relative path',
     );
-    expect(() => normalizeWorkflowArtifactRoot('docs//native')).toThrow(
-      'native.artifact_root must not contain empty or dot path segments',
+    expect(() => normalizeWorkflowArtifactRoot('docs//loop')).toThrow(
+      'loop.artifact_root must not contain empty or dot path segments',
     );
-    expect(() => normalizeWorkflowArtifactRoot('docs/./native')).toThrow(
-      'native.artifact_root must not contain empty or dot path segments',
+    expect(() => normalizeWorkflowArtifactRoot('docs/./loop')).toThrow(
+      'loop.artifact_root must not contain empty or dot path segments',
     );
     expect(() => normalizeWorkflowArtifactRoot('./docs')).toThrow(
-      'native.artifact_root must not contain empty or dot path segments',
+      'loop.artifact_root must not contain empty or dot path segments',
     );
     expect(() => normalizeWorkflowArtifactRoot('docs/')).toThrow(
-      'native.artifact_root must not contain empty or dot path segments',
+      'loop.artifact_root must not contain empty or dot path segments',
     );
-    expect(normalizeClassicArtifactLayout(undefined)).toBe('docs');
-    expect(() => normalizeClassicArtifactLayout('elsewhere')).toThrow(
-      'classic.artifact_layout must be legacy or docs',
+    expect(normalizePipelineArtifactLayout(undefined)).toBe('docs');
+    expect(() => normalizePipelineArtifactLayout('elsewhere')).toThrow(
+      'pipeline.artifact_layout must be legacy or docs',
     );
   });
 
@@ -359,7 +359,7 @@ describe('workflow contract normalization', () => {
       await writeWorkflowProjectConfig(projectRoot, defaultWorkflowProjectConfig('docs'));
       await expect(
         fs.readFile(path.join(projectRoot, '.owner', 'config.yaml'), 'utf8'),
-      ).resolves.toContain('default_workflow: native');
+      ).resolves.toContain('default_workflow: loop');
     } finally {
       linkSpy.mockRestore();
       await fs.rm(projectRoot, { recursive: true, force: true });
@@ -410,9 +410,9 @@ describe('workflow contract normalization', () => {
           projectRoot,
           [
             'schema: owner.project.v1',
-            'default_workflow: native',
-            'workflows: [native]',
-            'native:',
+            'default_workflow: loop',
+            'workflows: [loop]',
+            'loop:',
             '  artifact_root: docs',
             '',
           ].join('\n'),
@@ -472,9 +472,9 @@ describe('workflow contract normalization', () => {
         outsideConfig,
         [
           'schema: owner.project.v1',
-          'default_workflow: native',
-          'workflows: [native]',
-          'native:',
+          'default_workflow: loop',
+          'workflows: [loop]',
+          'loop:',
           '  artifact_root: docs',
           '',
         ].join('\n'),
@@ -511,9 +511,9 @@ describe('workflow contract normalization', () => {
         await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });
         const externalSource = [
           'schema: owner.project.v1',
-          'default_workflow: native',
-          'workflows: [native]',
-          'native:',
+          'default_workflow: loop',
+          'workflows: [loop]',
+          'loop:',
           '  artifact_root: external-root',
           'extension: external-change',
           '',
@@ -542,9 +542,9 @@ describe('workflow contract normalization', () => {
       const configPath = path.join(projectRoot, '.owner', 'config.yaml');
       const successor = [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'workflows: [native]',
-        'native:',
+        'default_workflow: loop',
+        'workflows: [loop]',
+        'loop:',
         '  artifact_root: successor-root',
         'extension: successor',
         '',
@@ -641,15 +641,15 @@ describe('workflow contract normalization', () => {
     }
   });
 
-  it('normalizes the self-contained Native workflow without external Skill calls', () => {
+  it('normalizes the self-contained Loop workflow without external Skill calls', () => {
     const workflow = normalizeWorkflowDefinition(
-      builtinOwnerNativeWorkflow({
-        name: 'native-product-change',
-        goal: 'Ship through the lightweight Native workflow.',
+      builtinOwnerLoopWorkflow({
+        name: 'loop-product-change',
+        goal: 'Ship through the lightweight Loop workflow.',
       }),
     );
 
-    expect(workflow.protocol.kind).toBe('owner-native');
+    expect(workflow.protocol.kind).toBe('owner-loop');
     expect(workflow.protocol.nodes.map((node) => node.id)).toEqual([
       'shape',
       'build',
@@ -657,24 +657,24 @@ describe('workflow contract normalization', () => {
       'archive',
     ]);
     expect(
-      workflow.protocol.nodes.every((node) => node.implementation.skill === 'owner-native'),
+      workflow.protocol.nodes.every((node) => node.implementation.skill === 'owner-loop'),
     ).toBe(true);
     expect(workflow.protocol.nodes.every((node) => node.requiredSkillCalls.length === 0)).toBe(
       true,
     );
     expect(workflow.protocol.nodes.every((node) => node.augmentations.length === 0)).toBe(true);
-    expect(workflow.requiredSkills).toEqual(['owner-native']);
+    expect(workflow.requiredSkills).toEqual(['owner-loop']);
     expect(workflow.protocol.outputSchemas.map((schema) => schema.id)).toEqual([
-      'owner.native.brief.v1',
-      'owner.native.spec-change.v1',
-      'owner.native.implementation.v1',
-      'owner.native.verify.v1',
-      'owner.native.archive.v1',
+      'owner.loop.brief.v1',
+      'owner.loop.spec-change.v1',
+      'owner.loop.implementation.v1',
+      'owner.loop.verify.v1',
+      'owner.loop.archive.v1',
     ]);
     expect(workflow.protocol.state).toEqual({
-      kind: 'native-change',
+      kind: 'loop-change',
       statePath: 'changes/*/owner-state.yaml',
-      pathBase: 'native-root',
+      pathBase: 'loop-root',
       currentNodeField: 'phase',
       completedNodesField: 'runtime.completedNodes',
       evidenceField: 'runtime.trajectory',
@@ -719,7 +719,7 @@ describe('workflow contract normalization', () => {
     expect(workflow.protocol.state).toEqual({
       kind: 'owner-overlay',
       statePath: 'changes/*/.owner.yaml',
-      pathBase: 'classic-openspec-root',
+      pathBase: 'pipeline-openspec-root',
       currentNodeField: 'phase',
       completedNodesField: 'completedNodes',
       evidenceField: 'evidence',

@@ -1,8 +1,8 @@
 import {
-  BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS,
+  BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS,
   BUILTIN_OWNER_OUTPUT_SCHEMAS,
   OWNER_FIVE_PHASE_NODES,
-  OWNER_NATIVE_NODES,
+  OWNER_LOOP_NODES,
 } from './builtins.js';
 import type {
   NormalizedWorkflowDefinition,
@@ -71,8 +71,8 @@ function templatesFor(
   if (kind === 'owner-five-phase-overlay') {
     return [...OWNER_FIVE_PHASE_NODES.map(cloneTemplate), ...customNodes.map(cloneTemplate)];
   }
-  if (kind === 'owner-native') {
-    return [...OWNER_NATIVE_NODES.map(cloneTemplate), ...customNodes.map(cloneTemplate)];
+  if (kind === 'owner-loop') {
+    return [...OWNER_LOOP_NODES.map(cloneTemplate), ...customNodes.map(cloneTemplate)];
   }
   return customNodes.map(cloneTemplate);
 }
@@ -81,8 +81,8 @@ function outputSchemasFor(input: WorkflowDefinitionInput): WorkflowOutputSchema[
   const schemas =
     input.kind === 'owner-five-phase-overlay'
       ? BUILTIN_OWNER_OUTPUT_SCHEMAS
-      : input.kind === 'owner-native'
-        ? BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS
+      : input.kind === 'owner-loop'
+        ? BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS
         : [];
   const byId = new Map<string, WorkflowOutputSchema>();
   for (const schema of [...schemas, ...(input.outputSchemas ?? [])]) {
@@ -162,16 +162,16 @@ export function normalizeWorkflowDefinition(
         ? {
             kind: 'owner-overlay',
             statePath: 'changes/*/.owner.yaml',
-            pathBase: 'classic-openspec-root',
+            pathBase: 'pipeline-openspec-root',
             currentNodeField: 'phase',
             completedNodesField: 'completedNodes',
             evidenceField: 'evidence',
           }
-        : input.kind === 'owner-native'
+        : input.kind === 'owner-loop'
           ? {
-              kind: 'native-change',
+              kind: 'loop-change',
               statePath: 'changes/*/owner-state.yaml',
-              pathBase: 'native-root',
+              pathBase: 'loop-root',
               currentNodeField: 'phase',
               completedNodesField: 'runtime.completedNodes',
               evidenceField: 'runtime.trajectory',
@@ -188,8 +188,8 @@ export function normalizeWorkflowDefinition(
         id:
           input.kind === 'owner-five-phase-overlay'
             ? 'owner-five-phase-contract'
-            : input.kind === 'owner-native'
-              ? 'owner-native-contract'
+            : input.kind === 'owner-loop'
+              ? 'owner-loop-contract'
               : 'workflow-route-conformance',
         expectedNodeOrder: nodes.filter((node) => !node.disabled).map((node) => node.id),
         requiredOutputSchemas: dedupe(nodes.flatMap((node) => node.outputSchemas)),

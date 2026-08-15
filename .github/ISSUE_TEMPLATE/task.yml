@@ -59,6 +59,6 @@ body:
         - `pnpm lint`
         - `pnpm run lint:architecture`
         - `pnpm test`
-        - `npx vitest run test/domains/owner-classic/owner-scripts.test.ts`
+        - `npx vitest run test/domains/owner-pipeline/owner-scripts.test.ts`
     validations:
       required: false

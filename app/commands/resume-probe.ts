@@ -51,9 +51,9 @@ export async function resolveProjectLanguage(projectPath: string): Promise<strin
     });
     if (!document) return 'unknown';
     const language =
-      document.config?.default_workflow === 'classic'
-        ? document.classic?.language
-        : (document.native?.language ?? document.classic?.language);
+      document.config?.default_workflow === 'pipeline'
+        ? document.pipeline?.language
+        : (document.loop?.language ?? document.pipeline?.language);
     return typeof language === 'string' && language.trim() ? language.trim() : 'unknown';
   } catch {
     return 'unknown';

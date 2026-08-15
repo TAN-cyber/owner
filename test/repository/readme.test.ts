@@ -8,16 +8,16 @@ async function readBoth(): Promise<[string, string]> {
 }
 
 describe('Owner README contract', () => {
-  it('documents Native and Classic as explicit workflow choices', async () => {
+  it('documents Loop and Pipeline as explicit workflow choices', async () => {
     const [english, chinese] = await readBoth();
 
     for (const content of [english, chinese]) {
-      expect(content).toContain('Native');
-      expect(content).toContain('Classic');
-      expect(content).toContain('--workflow native');
+      expect(content).toContain('Loop');
+      expect(content).toContain('Pipeline');
+      expect(content).toContain('--workflow loop');
       expect(content).toContain('--workflow both');
-      expect(content).toContain('owner-native');
-      expect(content).toContain('owner-classic');
+      expect(content).toContain('owner-loop');
+      expect(content).toContain('owner-pipeline');
     }
   });
 

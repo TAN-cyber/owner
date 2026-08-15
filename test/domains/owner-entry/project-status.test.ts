@@ -5,15 +5,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { inspectOwnerProjectStatus } from '../../../domains/owner-entry/project-status.js';
-import {
-  createNativeChange,
-  nativeChangeDir,
-} from '../../../domains/owner-native/native-change.js';
+import { createLoopChange, loopChangeDir } from '../../../domains/owner-loop/loop-change.js';
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
-import { nativeProjectPaths } from '../../../domains/owner-native/native-paths.js';
+} from '../../../domains/owner-loop/loop-config.js';
+import { loopProjectPaths } from '../../../domains/owner-loop/loop-paths.js';
 
 const VALID_BRIEF = `# Outcome
 Ship one outcome.
@@ -26,31 +23,31 @@ No migration.
 # Constraints and invariants
 Keep workflows separate.
 # Decisions
-Use Native state.
+Use Loop state.
 # Open questions
 None.
 # Verification expectations
 Run focused checks.
 `;
 
-const classicStateScript = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs');
+const pipelineStateScript = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs');
 
-function bothProjectConfig(nativeRoot: string) {
-  const config = defaultProjectConfig(nativeRoot);
-  config.workflows = ['native', 'classic'];
-  config.classic = { artifact_layout: 'legacy', language: 'en' };
+function bothProjectConfig(loopRoot: string) {
+  const config = defaultProjectConfig(loopRoot);
+  config.workflows = ['loop', 'pipeline'];
+  config.pipeline = { artifact_layout: 'legacy', language: 'en' };
   return config;
 }
 
-async function writeClassicOnlyConfig(projectRoot: string): Promise<void> {
+async function writePipelineOnlyConfig(projectRoot: string): Promise<void> {
   await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });
   await fs.writeFile(
     path.join(projectRoot, '.owner', 'config.yaml'),
     [
       'schema: owner.project.v1',
-      'default_workflow: classic',
-      'workflows: [classic]',
-      'classic:',
+      'default_workflow: pipeline',
+      'workflows: [pipeline]',
+      'pipeline:',
       '  artifact_layout: legacy',
       '  language: en',
       '',
@@ -59,9 +56,9 @@ async function writeClassicOnlyConfig(projectRoot: string): Promise<void> {
   );
 }
 
-async function initializeClassicChange(projectRoot: string, name: string): Promise<void> {
+async function initializePipelineChange(projectRoot: string, name: string): Promise<void> {
   await fs.mkdir(path.join(projectRoot, 'openspec'), { recursive: true });
-  const result = spawnSync(process.execPath, [classicStateScript, 'init', name, 'full'], {
+  const result = spawnSync(process.execPath, [pipelineStateScript, 'init', name, 'full'], {
     cwd: projectRoot,
     encoding: 'utf8',
   });
@@ -97,52 +94,52 @@ describe('Owner project status', () => {
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('partitions configured Native changes under a versioned status contract', async () => {
+  it('partitions configured Loop changes under a versioned status contract', async () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
-    const paths = await nativeProjectPaths(projectRoot, '.');
-    const state = await createNativeChange({ paths, name: 'native-only', language: 'en' });
-    await fs.writeFile(path.join(nativeChangeDir(paths, state.name), state.brief), VALID_BRIEF);
+    const paths = await loopProjectPaths(projectRoot, '.');
+    const state = await createLoopChange({ paths, name: 'loop-only', language: 'en' });
+    await fs.writeFile(path.join(loopChangeDir(paths, state.name), state.brief), VALID_BRIEF);
 
     const status = await inspectOwnerProjectStatus(projectRoot);
     expect(status).toMatchObject({
       schema: 'owner.status.v2',
       defaultEntry: {
-        workflow: 'native',
-        skill: 'owner-native',
+        workflow: 'loop',
+        skill: 'owner-loop',
         source: 'project-config',
       },
       workflows: {
-        native: {
+        loop: {
           changes: [
             {
-              name: 'native-only',
+              name: 'loop-only',
               phase: 'shape',
-              nextCommand: 'owner native next native-only --summary "<summary>" --confirmed',
+              nextCommand: 'owner loop next loop-only --summary "<summary>" --confirmed',
             },
           ],
         },
-        classic: { changes: [] },
+        pipeline: { changes: [] },
       },
       unmanagedOpenSpec: [],
     });
-    expect(status.workflows.classic).toEqual({ changes: [] });
-    expect(status.workflows.classic.error).toBeUndefined();
+    expect(status.workflows.pipeline).toEqual({ changes: [] });
+    expect(status.workflows.pipeline.error).toBeUndefined();
 
     await writeProjectConfig(projectRoot, {
       ...defaultProjectConfig('.'),
-      native: {
-        ...defaultProjectConfig('.').native,
+      loop: {
+        ...defaultProjectConfig('.').loop,
         clarification_mode: 'batch',
       },
     });
     await expect(inspectOwnerProjectStatus(projectRoot)).resolves.toMatchObject({
       workflows: {
-        native: {
+        loop: {
           changes: [
             {
-              name: 'native-only',
+              name: 'loop-only',
               phase: 'shape',
-              nextCommand: 'owner native next native-only --summary "<summary>" --confirmed',
+              nextCommand: 'owner loop next loop-only --summary "<summary>" --confirmed',
             },
           ],
         },
@@ -151,7 +148,7 @@ describe('Owner project status', () => {
   });
 
   it('keeps plain OpenSpec changes outside both Owner workflows', async () => {
-    await writeClassicOnlyConfig(projectRoot);
+    await writePipelineOnlyConfig(projectRoot);
     const changeDir = path.join(projectRoot, 'openspec', 'changes', 'plain-change');
     await fs.mkdir(changeDir, { recursive: true });
     await fs.writeFile(path.join(changeDir, 'tasks.md'), '- [x] done\n');
@@ -159,26 +156,26 @@ describe('Owner project status', () => {
     const status = await inspectOwnerProjectStatus(projectRoot);
 
     expect(status.defaultEntry).toEqual({
-      workflow: 'classic',
-      skill: 'owner-classic',
+      workflow: 'pipeline',
+      skill: 'owner-pipeline',
       source: 'project-config',
     });
-    expect(status.workflows.native.changes).toEqual([]);
-    expect(status.workflows.classic.changes).toEqual([]);
+    expect(status.workflows.loop.changes).toEqual([]);
+    expect(status.workflows.pipeline.changes).toEqual([]);
     expect(status.unmanagedOpenSpec).toEqual([
       expect.objectContaining({
         name: 'plain-change',
         ownerManaged: false,
         archiveReady: true,
-        recommendedArchiveCommand: 'owner classic openspec -- archive plain-change -y',
+        recommendedArchiveCommand: 'owner pipeline openspec -- archive plain-change -y',
         tasksCompleted: 1,
         tasksTotal: 1,
       }),
     ]);
   });
 
-  it('fails closed for a valid Classic change name backed by a directory link', async () => {
-    await writeClassicOnlyConfig(projectRoot);
+  it('fails closed for a valid Pipeline change name backed by a directory link', async () => {
+    await writePipelineOnlyConfig(projectRoot);
     const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-project-status-outside-'));
     try {
       await fs.writeFile(path.join(outsideRoot, 'tasks.md'), '- [x] outside task\n', 'utf8');
@@ -192,7 +189,7 @@ describe('Owner project status', () => {
       const status = await inspectOwnerProjectStatus(projectRoot);
 
       expect(status.unmanagedOpenSpec).toEqual([]);
-      expect(status.workflows.classic.changes).toEqual([
+      expect(status.workflows.pipeline.changes).toEqual([
         expect.objectContaining({
           name: 'unsafe-change',
           phase: 'invalid',
@@ -206,9 +203,9 @@ describe('Owner project status', () => {
     }
   });
 
-  it('fails closed when a Classic runtime directory is a directory link', async () => {
-    await writeClassicOnlyConfig(projectRoot);
-    await initializeClassicChange(projectRoot, 'unsafe-runtime');
+  it('fails closed when a Pipeline runtime directory is a directory link', async () => {
+    await writePipelineOnlyConfig(projectRoot);
+    await initializePipelineChange(projectRoot, 'unsafe-runtime');
     const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-project-runtime-outside-'));
     try {
       await fs.symlink(
@@ -219,7 +216,7 @@ describe('Owner project status', () => {
 
       const status = await inspectOwnerProjectStatus(projectRoot);
 
-      expect(status.workflows.classic.changes).toEqual([
+      expect(status.workflows.pipeline.changes).toEqual([
         expect.objectContaining({
           name: 'unsafe-runtime',
           phase: 'invalid',
@@ -231,40 +228,40 @@ describe('Owner project status', () => {
     }
   });
 
-  it('reports configured Classic as unavailable when its root is missing', async () => {
-    await writeClassicOnlyConfig(projectRoot);
+  it('reports configured Pipeline as unavailable when its root is missing', async () => {
+    await writePipelineOnlyConfig(projectRoot);
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.classic).toEqual({
+    expect(status.workflows.pipeline).toEqual({
       changes: [],
-      error: expect.stringContaining('Configured Classic OpenSpec root is missing'),
+      error: expect.stringContaining('Configured Pipeline OpenSpec root is missing'),
     });
     expect(status.unmanagedOpenSpec).toEqual([]);
   });
 
-  it('reports Classic-managed changes only in the Classic workflow', async () => {
-    await writeClassicOnlyConfig(projectRoot);
-    await initializeClassicChange(projectRoot, 'classic-only');
+  it('reports Pipeline-managed changes only in the Pipeline workflow', async () => {
+    await writePipelineOnlyConfig(projectRoot);
+    await initializePipelineChange(projectRoot, 'pipeline-only');
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.native.changes).toEqual([]);
-    expect(status.workflows.classic.changes).toEqual([
+    expect(status.workflows.loop.changes).toEqual([]);
+    expect(status.workflows.pipeline.changes).toEqual([
       expect.objectContaining({
-        name: 'classic-only',
+        name: 'pipeline-only',
         ownerManaged: true,
         workflow: 'full',
         phase: 'open',
-        recommendedArchiveCommand: 'owner archive classic-only',
+        recommendedArchiveCommand: 'owner archive pipeline-only',
       }),
     ]);
     expect(status.unmanagedOpenSpec).toEqual([]);
   });
 
-  it('reports Classic unavailable without guessing a legacy root when project config is malformed', async () => {
-    await writeClassicOnlyConfig(projectRoot);
-    await initializeClassicChange(projectRoot, 'classic-survives');
+  it('reports Pipeline unavailable without guessing a legacy root when project config is malformed', async () => {
+    await writePipelineOnlyConfig(projectRoot);
+    await initializePipelineChange(projectRoot, 'pipeline-survives');
     const unmanagedDir = path.join(projectRoot, 'openspec', 'changes', 'plain-survives');
     await fs.mkdir(unmanagedDir, { recursive: true });
     await fs.writeFile(path.join(unmanagedDir, 'tasks.md'), '- [ ] todo\n');
@@ -274,22 +271,22 @@ describe('Owner project status', () => {
     const status = await inspectOwnerProjectStatus(projectRoot);
 
     expect(status.defaultEntry).toEqual({ error: expect.stringContaining('Invalid') });
-    expect(status.workflows.native).toEqual({
+    expect(status.workflows.loop).toEqual({
       changes: [],
       error: expect.stringContaining('Invalid'),
     });
-    expect(status.workflows.classic).toEqual({
+    expect(status.workflows.pipeline).toEqual({
       changes: [],
       error: expect.stringContaining('Invalid'),
     });
     expect(status.unmanagedOpenSpec).toEqual([]);
   });
 
-  it('reports only the configured Classic root when a standalone root coexists', async () => {
+  it('reports only the configured Pipeline root when a standalone root coexists', async () => {
     const config = defaultProjectConfig('docs');
-    config.default_workflow = 'classic';
-    config.workflows = ['classic'];
-    config.classic = { artifact_layout: 'docs' };
+    config.default_workflow = 'pipeline';
+    config.workflows = ['pipeline'];
+    config.pipeline = { artifact_layout: 'docs' };
     await writeProjectConfig(projectRoot, config);
     await fs.mkdir(path.join(projectRoot, 'openspec', 'changes', 'legacy'), { recursive: true });
     await fs.mkdir(path.join(projectRoot, 'docs', 'openspec', 'changes', 'configured'), {
@@ -298,16 +295,16 @@ describe('Owner project status', () => {
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.classic).toEqual({ changes: [] });
+    expect(status.workflows.pipeline).toEqual({ changes: [] });
     expect(status.unmanagedOpenSpec).toEqual([
       expect.objectContaining({ name: 'configured', ownerManaged: false }),
     ]);
   });
 
   it.each(['changes-root', 'change-dir'] as const)(
-    'does not inspect project-external Classic state through a %s junction',
+    'does not inspect project-external Pipeline state through a %s junction',
     async (kind) => {
-      await writeClassicOnlyConfig(projectRoot);
+      await writePipelineOnlyConfig(projectRoot);
       const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-status-outside-'));
       try {
         await fs.writeFile(
@@ -330,11 +327,11 @@ describe('Owner project status', () => {
         const status = await inspectOwnerProjectStatus(projectRoot);
 
         if (kind === 'changes-root') {
-          expect(status.workflows.classic.changes).toEqual([]);
-          expect(status.workflows.classic.error).toMatch(/symbolic link or junction/iu);
+          expect(status.workflows.pipeline.changes).toEqual([]);
+          expect(status.workflows.pipeline.error).toMatch(/symbolic link or junction/iu);
         } else {
-          expect(status.workflows.classic.error).toBeUndefined();
-          expect(status.workflows.classic.changes).toEqual([
+          expect(status.workflows.pipeline.error).toBeUndefined();
+          expect(status.workflows.pipeline.changes).toEqual([
             expect.objectContaining({
               name: 'external-change',
               phase: 'invalid',
@@ -352,7 +349,7 @@ describe('Owner project status', () => {
   );
 
   it('ignores unrelated invalid names but fails closed for a legal-name non-directory', async () => {
-    await writeClassicOnlyConfig(projectRoot);
+    await writePipelineOnlyConfig(projectRoot);
     const changesRoot = path.join(projectRoot, 'openspec', 'changes');
     await fs.mkdir(changesRoot, { recursive: true });
     await fs.writeFile(path.join(changesRoot, 'README.md'), 'ignore\n', 'utf8');
@@ -360,8 +357,8 @@ describe('Owner project status', () => {
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.classic.error).toBeUndefined();
-    expect(status.workflows.classic.changes).toEqual([
+    expect(status.workflows.pipeline.error).toBeUndefined();
+    expect(status.workflows.pipeline.changes).toEqual([
       expect.objectContaining({
         name: 'legal-name',
         phase: 'invalid',
@@ -371,29 +368,29 @@ describe('Owner project status', () => {
     expect(status.unmanagedOpenSpec).toEqual([]);
   });
 
-  it('keeps same-name Native and Classic changes separate under a custom artifact root', async () => {
+  it('keeps same-name Loop and Pipeline changes separate under a custom artifact root', async () => {
     await writeProjectConfig(projectRoot, bothProjectConfig('docs'));
-    const paths = await nativeProjectPaths(projectRoot, 'docs');
-    const native = await createNativeChange({ paths, name: 'shared-name', language: 'en' });
-    await fs.writeFile(path.join(nativeChangeDir(paths, native.name), native.brief), VALID_BRIEF);
-    await initializeClassicChange(projectRoot, 'shared-name');
+    const paths = await loopProjectPaths(projectRoot, 'docs');
+    const loop = await createLoopChange({ paths, name: 'shared-name', language: 'en' });
+    await fs.writeFile(path.join(loopChangeDir(paths, loop.name), loop.brief), VALID_BRIEF);
+    await initializePipelineChange(projectRoot, 'shared-name');
     const unmanagedDir = path.join(projectRoot, 'openspec', 'changes', 'plain-change');
     await fs.mkdir(unmanagedDir, { recursive: true });
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.native.changes.map((change) => change.name)).toEqual(['shared-name']);
-    expect(status.workflows.classic.changes.map((change) => change.name)).toEqual(['shared-name']);
+    expect(status.workflows.loop.changes.map((change) => change.name)).toEqual(['shared-name']);
+    expect(status.workflows.pipeline.changes.map((change) => change.name)).toEqual(['shared-name']);
     expect(status.unmanagedOpenSpec.map((change) => change.name)).toEqual(['plain-change']);
   });
 
-  it('reports an incomplete Native artifact-root move instead of projecting stale changes', async () => {
+  it('reports an incomplete Loop artifact-root move instead of projecting stale changes', async () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
-    const paths = await nativeProjectPaths(projectRoot, '.');
-    const native = await createNativeChange({ paths, name: 'stale-change', language: 'en' });
-    await fs.writeFile(path.join(nativeChangeDir(paths, native.name), native.brief), VALID_BRIEF);
+    const paths = await loopProjectPaths(projectRoot, '.');
+    const loop = await createLoopChange({ paths, name: 'stale-change', language: 'en' });
+    await fs.writeFile(path.join(loopChangeDir(paths, loop.name), loop.brief), VALID_BRIEF);
     const config = defaultProjectConfig('.');
-    config.native.pending_root_move = {
+    config.loop.pending_root_move = {
       id: 'deadbeef-0001',
       fromArtifactRoot: '.',
       toArtifactRoot: 'docs',
@@ -403,88 +400,88 @@ describe('Owner project status', () => {
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.defaultEntry).toMatchObject({ workflow: 'native' });
-    expect(status.workflows.native).toEqual({
+    expect(status.defaultEntry).toMatchObject({ workflow: 'loop' });
+    expect(status.workflows.loop).toEqual({
       changes: [],
-      error: expect.stringContaining('owner native doctor --repair'),
+      error: expect.stringContaining('owner loop doctor --repair'),
     });
   });
 
   it('discovers the configured project from a nested working directory', async () => {
     await writeProjectConfig(projectRoot, bothProjectConfig('docs'));
-    const paths = await nativeProjectPaths(projectRoot, 'docs');
-    const native = await createNativeChange({ paths, name: 'nested-native', language: 'en' });
-    await fs.writeFile(path.join(nativeChangeDir(paths, native.name), native.brief), VALID_BRIEF);
-    await initializeClassicChange(projectRoot, 'nested-classic');
+    const paths = await loopProjectPaths(projectRoot, 'docs');
+    const loop = await createLoopChange({ paths, name: 'nested-loop', language: 'en' });
+    await fs.writeFile(path.join(loopChangeDir(paths, loop.name), loop.brief), VALID_BRIEF);
+    await initializePipelineChange(projectRoot, 'nested-pipeline');
     const nested = path.join(projectRoot, 'src', 'feature');
     await fs.mkdir(nested, { recursive: true });
 
     const status = await inspectOwnerProjectStatus(nested);
 
-    expect(status.defaultEntry).toMatchObject({ workflow: 'native' });
-    expect(status.workflows.native.changes.map((change) => change.name)).toEqual(['nested-native']);
-    expect(status.workflows.classic.changes.map((change) => change.name)).toEqual([
-      'nested-classic',
+    expect(status.defaultEntry).toMatchObject({ workflow: 'loop' });
+    expect(status.workflows.loop.changes.map((change) => change.name)).toEqual(['nested-loop']);
+    expect(status.workflows.pipeline.changes.map((change) => change.name)).toEqual([
+      'nested-pipeline',
     ]);
   });
 
   it('does not let corrupt changes on either workflow hide healthy changes', async () => {
     await writeProjectConfig(projectRoot, bothProjectConfig('.'));
-    const paths = await nativeProjectPaths(projectRoot, '.');
-    const healthyNative = await createNativeChange({
+    const paths = await loopProjectPaths(projectRoot, '.');
+    const healthyLoop = await createLoopChange({
       paths,
-      name: 'native-healthy',
+      name: 'loop-healthy',
       language: 'en',
     });
     await fs.writeFile(
-      path.join(nativeChangeDir(paths, healthyNative.name), healthyNative.brief),
+      path.join(loopChangeDir(paths, healthyLoop.name), healthyLoop.brief),
       VALID_BRIEF,
     );
-    const brokenNativeDir = path.join(paths.changesDir, 'native-broken');
-    await fs.mkdir(brokenNativeDir, { recursive: true });
-    await fs.writeFile(path.join(brokenNativeDir, 'owner-state.yaml'), 'schema: [broken\n');
+    const brokenLoopDir = path.join(paths.changesDir, 'loop-broken');
+    await fs.mkdir(brokenLoopDir, { recursive: true });
+    await fs.writeFile(path.join(brokenLoopDir, 'owner-state.yaml'), 'schema: [broken\n');
 
-    await initializeClassicChange(projectRoot, 'classic-healthy');
-    await initializeClassicChange(projectRoot, 'classic-broken');
+    await initializePipelineChange(projectRoot, 'pipeline-healthy');
+    await initializePipelineChange(projectRoot, 'pipeline-broken');
     await fs.appendFile(
-      path.join(projectRoot, 'openspec', 'changes', 'classic-broken', '.owner.yaml'),
+      path.join(projectRoot, 'openspec', 'changes', 'pipeline-broken', '.owner.yaml'),
       'unknown_field: true\n',
     );
 
     const status = await inspectOwnerProjectStatus(projectRoot);
 
-    expect(status.workflows.native.changes).toEqual([
+    expect(status.workflows.loop.changes).toEqual([
       expect.objectContaining({
-        name: 'native-broken',
+        name: 'loop-broken',
         phase: 'invalid',
         error: expect.any(String),
       }),
-      expect.objectContaining({ name: 'native-healthy', phase: 'shape' }),
+      expect.objectContaining({ name: 'loop-healthy', phase: 'shape' }),
     ]);
-    expect(status.workflows.classic.changes).toEqual([
+    expect(status.workflows.pipeline.changes).toEqual([
       expect.objectContaining({
-        name: 'classic-broken',
+        name: 'pipeline-broken',
         phase: 'invalid',
         error: expect.any(String),
       }),
-      expect.objectContaining({ name: 'classic-healthy', phase: 'open' }),
+      expect.objectContaining({ name: 'pipeline-healthy', phase: 'open' }),
     ]);
   });
 
-  it('reads mixed Native, Classic, and OpenSpec status without changing project files', async () => {
+  it('reads mixed Loop, Pipeline, and OpenSpec status without changing project files', async () => {
     await writeProjectConfig(projectRoot, bothProjectConfig('docs'));
-    const paths = await nativeProjectPaths(projectRoot, 'docs');
-    const native = await createNativeChange({ paths, name: 'native-readonly', language: 'en' });
-    await fs.writeFile(path.join(nativeChangeDir(paths, native.name), native.brief), VALID_BRIEF);
-    await initializeClassicChange(projectRoot, 'classic-readonly');
-    const classicState = path.join(
+    const paths = await loopProjectPaths(projectRoot, 'docs');
+    const loop = await createLoopChange({ paths, name: 'loop-readonly', language: 'en' });
+    await fs.writeFile(path.join(loopChangeDir(paths, loop.name), loop.brief), VALID_BRIEF);
+    await initializePipelineChange(projectRoot, 'pipeline-readonly');
+    const pipelineState = path.join(
       projectRoot,
       'openspec',
       'changes',
-      'classic-readonly',
+      'pipeline-readonly',
       '.owner.yaml',
     );
-    await fs.appendFile(classicState, 'build_command: pnpm build\n');
+    await fs.appendFile(pipelineState, 'build_command: pnpm build\n');
     await fs.mkdir(path.join(projectRoot, 'openspec', 'changes', 'plain-readonly'));
     const before = await snapshotTree(projectRoot);
 

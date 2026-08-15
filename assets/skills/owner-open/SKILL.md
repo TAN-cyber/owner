@@ -1,11 +1,11 @@
 ---
 name: owner-open
-description: "Phase 1 of Owner Classic — open an OpenSpec change and stand up its proposal/design/tasks/.owner.yaml artifacts."
+description: "Phase 1 of Owner Pipeline — open an OpenSpec change and stand up its proposal/design/tasks/.owner.yaml artifacts."
 ---
 
 # Owner Phase 1: Open
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 ## Prerequisites
 
@@ -15,18 +15,18 @@ Before starting or recovering, read and follow `owner-classic/reference/classic-
 
 ### 0. Output Language Constraint
 
-Every prompt and artifact request passed to OpenSpec must include the resolved Owner artifact language, using normalized ids such as `en` or `zh-CN`. Before `.owner.yaml` exists, read `classic.language` from project `.owner/config.yaml`, then fall back to global `~/.owner/config.yaml`; after the change is initialized, use `owner state get <name> language`. If no configured language exists, fall back to the current user request language. The generated `proposal.md`, `design.md`, and `tasks.md` must use that language as their main language.
+Every prompt and artifact request passed to OpenSpec must include the resolved Owner artifact language, using normalized ids such as `en` or `zh-CN`. Before `.owner.yaml` exists, read `pipeline.language` from project `.owner/config.yaml`, then fall back to global `~/.owner/config.yaml`; after the change is initialized, use `owner state get <name> language`. If no configured language exists, fall back to the current user request language. The generated `proposal.md`, `design.md`, and `tasks.md` must use that language as their main language.
 
 ### 0a. Current Change Binding
 
-When resuming an existing change, inspect `<classic-change-dir>/.owner.yaml` first:
+When resuming an existing change, inspect `<pipeline-change-dir>/.owner.yaml` first:
 
-- If it exists and parses, first run `owner classic workspace resolve <change-name> --json`, enter the returned `projectRoot`, then select the change
+- If it exists and parses, first run `owner pipeline workspace resolve <change-name> --json`, enter the returned `projectRoot`, then select the change
 - If it is missing but the change directory is valid, first prepare the workspace with the selected isolation mode, then run `owner state init <change-name> full --isolation <selected-isolation>` from the returned `projectRoot`, and select the change
 - If it is malformed, stop and report the parse error; repair it manually from version control, a backup, or verifiable artifacts before continuing, and never overwrite a damaged file with `state set`
 
 ```bash
-owner classic workspace resolve <change-name> --json
+owner pipeline workspace resolve <change-name> --json
 # enter the returned projectRoot
 owner state select <change-name>
 ```
@@ -35,7 +35,7 @@ When creating a new change, initialize `.owner.yaml` first, then immediately run
 
 ### 0b. Workspace Decision and Preparation Before Open
 
-Read `owner-classic/reference/workspace.md` when creating a Classic change. The workspace decision must be completed before creating OpenSpec artifacts or `.owner.yaml`; it must not be deferred to Build:
+Read `owner-pipeline/reference/workspace.md` when creating a Pipeline change. The workspace decision must be completed before creating OpenSpec artifacts or `.owner.yaml`; it must not be deferred to Build:
 
 - When parallel intent is explicit, use `worktree` directly so the independent workspace is ready before OpenSpec and state creation
 - When isolation is not specified, follow the reference: show the valid `current`, `branch`, and `worktree` choices when a decision is needed, and make the recommendation explanatory only
@@ -44,7 +44,7 @@ Read `owner-classic/reference/workspace.md` when creating a Classic change. The 
 Prepare a new change before running OpenSpec `new`:
 
 ```bash
-owner classic workspace prepare <name> --isolation <current|branch|worktree> --json
+owner pipeline workspace prepare <name> --isolation <current|branch|worktree> --json
 # enter the returned projectRoot; all later OpenSpec, state, and artifact writes run there
 ```
 
@@ -55,7 +55,7 @@ The preparation command reuses a registered Worktree whose branch matches the ch
 Before any OpenSpec status or instructions command, run:
 
 ```bash
-owner classic openspec -- --version
+owner pipeline openspec -- --version
 ```
 
 This flow requires **OpenSpec >= 1.5.0**. Stop immediately if the version is older than 1.5.0, cannot be parsed, the command is unavailable, or it exits non-zero. Ask the user to run `npm install -g @fission-ai/openspec@latest` and retry. Never continue with an older CLI that lacks the `applyRequires`, `artifactPaths`, `changeRoot`, or `resolvedOutputPath` contracts.
@@ -65,7 +65,7 @@ This flow requires **OpenSpec >= 1.5.0**. Stop immediately if the version is old
 **Immediately execute:** Use the Skill tool to load the `openspec-explore` skill. Skipping this step is prohibited.
 
 <!-- external-openspec-skill-override -->
-**External OpenSpec Skill override:** After loading, use only its exploration method. Do not execute any instruction that invokes the official CLI directly, changes to a fixed cwd, or reads or writes a fixed physical OpenSpec path. Route every CLI call through `owner classic openspec -- <args...>` and replace every file path with the `<classic-*>` logical roots bound for this run.
+**External OpenSpec Skill override:** After loading, use only its exploration method. Do not execute any instruction that invokes the official CLI directly, changes to a fixed cwd, or reads or writes a fixed physical OpenSpec path. Route every CLI call through `owner pipeline openspec -- <args...>` and replace every file path with the `<pipeline-*>` logical roots bound for this run.
 
 After the skill loads, explore the problem space following its guidance, but do not treat one Q&A turn as sufficient clarification. You must continue asking, align with the user, and form a clarification summary covering:
 - Goals: the problem the user truly wants to solve and the expected outcome
@@ -94,7 +94,7 @@ Recommend splitting when any condition applies:
 - The work is expected to produce multiple delta specs or more than 3 large tasks
 - Failure or delay in one part should not block other parts from entering later phases
 
-When splitting is recommended, must follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for the user's choice.
+When splitting is recommended, must follow the `owner-pipeline/reference/decision-point.md` protocol to pause and wait for the user's choice.
 
 The user choices must include:
 - "Create multiple OpenSpec changes" — create independent changes from the proposed split
@@ -109,17 +109,17 @@ Immediately after the user confirms multiple changes, persist the accepted split
 
 In batch split mode, entering `/owner-open` for each split item must explicitly mark it as a "confirmed split item" and carry that split item's goals, scope, non-goals, and acceptance scenarios. Confirmed split items skip the PRD split preflight by default, unless the split item itself still clearly contains multiple independent capabilities.
 
-In batch split mode, a single split item must not auto-advance to `/owner-design` after completing the open phase. After splitting is complete, must pause and ask the user which change to start; after the user chooses, advance only that change into `/owner-design`, while other changes remain active and can be resumed later through `/owner-classic`.
+In batch split mode, a single split item must not auto-advance to `/owner-design` after completing the open phase. After splitting is complete, must pause and ask the user which change to start; after the user chooses, advance only that change into `/owner-design`, while other changes remain active and can be resumed later through `/owner-pipeline`.
 
 **Batch completion hard check (must not be skipped)**: after every split item completes its own open phase, run the following for each `<name>` in the user-confirmed list:
 
 ```bash
-owner classic openspec -- status --change "<name>" --json
+owner pipeline openspec -- status --change "<name>" --json
 owner state check <name> design
 ```
 
 The OpenSpec JSON must satisfy all of these conditions:
-- Resolved `changeRoot` must equal the resolver-bound `<classic-change-dir>`; stop if it does not, because Classic runtime does not support an external change root
+- Resolved `changeRoot` must equal the resolver-bound `<pipeline-change-dir>`; stop if it does not, because Pipeline runtime does not support an external change root
 - The schema must include core artifact ids `proposal`, `design`, and `tasks`; extra artifacts are allowed, but a missing core id is an incompatible schema
 - Every artifact listed in `applyRequires` must be `done` in `artifacts`
 - Concrete outputs in `artifactPaths.<artifact-id>.existingOutputPaths` (or `resolvedOutputPath` from instructions) must exist and be non-empty
@@ -127,7 +127,7 @@ The OpenSpec JSON must satisfy all of these conditions:
 
 If any split item fails these checks, must not report splitting complete or ask which change to start. Stop and resume `/owner-open` from that change's first `ready` or `blocked` artifact. If OpenSpec passes but Owner state fails, repair `.owner.yaml` initialization or phase, then rerun the checks for the entire batch.
 
-Only after every split item passes both CLI checks may you pause and ask which change to start. Mark the chosen item `selected` in the batch manifest, then advance only that change into `/owner-design`; other changes remain active and can be resumed later through `/owner-classic`.
+Only after every split item passes both CLI checks may you pause and ask which change to start. Mark the chosen item `selected` in the batch manifest, then advance only that change into `/owner-design`; other changes remain active and can be resumed later through `/owner-pipeline`.
 
 On resume, read `.owner/batches/<batch-id>.json` first, then run the CLI checks above for already-created active changes. Do not recreate items that fully pass; resume incomplete items from the first `ready` artifact returned by OpenSpec. Create missing items from the persisted manifest. If the manifest is missing or damaged, stop and ask the user to rebuild/confirm it instead of inferring the original batch boundary from directory names.
 
@@ -138,23 +138,23 @@ Before creating OpenSpec artifacts, turn Step 1 clarification into a resolved br
 - **Continue directly when scope and naming are both unambiguous**. Do not pause merely to approve a summary or name; final review confirms the change name, scope, and artifacts together
 - If the user supplied a name, normalize it to kebab-case and echo it in the progress update. Do not re-confirm when normalization preserves meaning
 - Reuse a confirmed batch item's persisted summary and name. Re-clarify only when scope drift or missing manifest data is detected
-- Use `owner-classic/reference/decision-point.md` for one joint question only when mutually exclusive choices still change scope or the target change identity. Naming preference alone is not a blocking point
+- Use `owner-pipeline/reference/decision-point.md` for one joint question only when mutually exclusive choices still change scope or the target change identity. Naming preference alone is not a blocking point
 
 OpenSpec names must be kebab-case English using lowercase letters, digits, and single hyphens. When a collision exists but the target remains clear, derive a stable non-conflicting name and continue. Ask only when Owner cannot determine whether to reuse the existing change or create a new one.
 
-Do not run `owner classic openspec -- new change` or create proposal/design/tasks while the resolved brief or name remains ambiguous. Continue clarification or resolve the genuine user decision before Step 2.
+Do not run `owner pipeline openspec -- new change` or create proposal/design/tasks while the resolved brief or name remains ambiguous. Continue clarification or resolve the genuine user decision before Step 2.
 
 ### 2. Create Change Structure + Initialize State
 
 **Immediately execute:** Use the Skill tool to load the `openspec-new-change` skill. Skipping this step is prohibited.
 
 <!-- external-openspec-skill-override -->
-**External OpenSpec Skill override:** After loading, use only its change-creation semantics. Do not execute any instruction that invokes the official CLI directly, changes to a fixed cwd, or writes the change under a fixed physical OpenSpec root. Run create, status, and instructions through `owner classic openspec -- <args...>`, and use `<classic-change-dir>` and the other logical roots for every file path.
+**External OpenSpec Skill override:** After loading, use only its change-creation semantics. Do not execute any instruction that invokes the official CLI directly, changes to a fixed cwd, or writes the change under a fixed physical OpenSpec root. Run create, status, and instructions through `owner pipeline openspec -- <args...>`, and use `<pipeline-change-dir>` and the other logical roots for every file path.
 
-Full `/owner-classic` workflow must not use the Skill tool to load the `openspec-propose` skill by default; only load it when the user explicitly requests generating the proposal and artifacts in one pass.
+Full `/owner-pipeline` workflow must not use the Skill tool to load the `openspec-propose` skill by default; only load it when the user explicitly requests generating the proposal and artifacts in one pass.
 
 <!-- external-openspec-skill-override -->
-**External OpenSpec Skill override:** Apply the same rule to `openspec-propose`: ignore direct official CLI, fixed-cwd, and fixed physical OpenSpec path instructions; use the adapter and resolver-returned `<classic-*>` logical roots.
+**External OpenSpec Skill override:** Apply the same rule to `openspec-propose`: ignore direct official CLI, fixed-cwd, and fixed physical OpenSpec path instructions; use the adapter and resolver-returned `<pipeline-*>` logical roots.
 
 After the skill loads, follow its guidance to create the change skeleton. When Step 1b has produced an unambiguous resolved brief, override its "STOP and wait for user direction" behavior to avoid a duplicate question.
 
@@ -168,9 +168,9 @@ owner state select <name>
 owner state check <name> open
 ```
 
-Stop if any command fails. Then run `owner classic openspec -- status --change "<name>" --json` once and perform compatibility preflight:
+Stop if any command fails. Then run `owner pipeline openspec -- status --change "<name>" --json` once and perform compatibility preflight:
 
-- Resolved `changeRoot` must equal the resolver-bound `<classic-change-dir>`, and `planningHome` (when present) must remain inside the current repository
+- Resolved `changeRoot` must equal the resolver-bound `<pipeline-change-dir>`, and `planningHome` (when present) must remain inside the current repository
 - `artifacts` must contain core ids `proposal`, `design`, and `tasks`; extra artifacts are allowed
 - `applyRequires` must be a parseable list of artifact ids and every id must exist in `artifacts`
 - Stop on missing fields, escaping paths, or missing core ids; never fall back to a guessed fixed template
@@ -179,13 +179,13 @@ After preflight, generate the implementation-required artifacts from the OpenSpe
 
 **OpenSpec status-driven artifact loop**:
 
-1. Run `owner classic openspec -- status --change "<name>" --json` and parse the complete JSON.
+1. Run `owner pipeline openspec -- status --change "<name>" --json` and parse the complete JSON.
 2. Exit when every item in `applyRequires` is `done`; record `isComplete` as diagnostic only and do not use it as a phase blocker.
 3. From unfinished `ready` artifacts, prioritize items that advance the `applyRequires` dependency closure and process them in CLI-returned order. Must not hard-code generation order or assume the schema contains only proposal/design/tasks.
 4. Fetch current instructions for each ready `<artifact-id>`:
 
    ```bash
-   owner classic openspec -- instructions <artifact-id> --change "<name>" --json
+   owner pipeline openspec -- instructions <artifact-id> --change "<name>" --json
    ```
 
 5. For the returned JSON instruction payload, you must:
@@ -204,7 +204,7 @@ After preflight, generate the implementation-required artifacts from the OpenSpe
 Confirm the following artifacts have been created:
 
 ```
-<classic-change-dir>/
+<pipeline-change-dir>/
 ├── .openspec.yaml
 ├── .owner.yaml
 ├── proposal.md       # Why + What: problem, goals, scope
@@ -241,7 +241,7 @@ Then check key artifact content: proposal covers problem, goals, scope, and non-
 
 ### 5. User Review and Confirmation (Blocking Point)
 
-After all OpenSpec artifacts are complete and the content check passes, **must follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for user confirmation**. Must not execute the phase guard or auto-transition before user confirmation.
+After all OpenSpec artifacts are complete and the content check passes, **must follow the `owner-pipeline/reference/decision-point.md` protocol to pause and wait for user confirmation**. Must not execute the phase guard or auto-transition before user confirmation.
 
 The final review confirms the change name, scope, and artifact content together. Do not skip it because Step 1b resolved the brief, and do not add another routine summary/name confirmation before it.
 
@@ -276,7 +276,7 @@ Full workflow auto-transitions to `phase: design`; hotfix/tweak presets auto-tra
 
 ## Automatic Handoff to Next Phase
 
-Follow `owner-classic/reference/auto-transition.md`. Key command:
+Follow `owner-pipeline/reference/auto-transition.md`. Key command:
 
 ```bash
 owner state next <change-name>

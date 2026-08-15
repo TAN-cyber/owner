@@ -16,7 +16,7 @@ export interface OwnerCurrentSelection {
   branch: string | null;
 }
 
-export interface LegacyClassicSelection {
+export interface LegacyPipelineSelection {
   version: 1;
   change: string;
   branch: string | null;
@@ -62,7 +62,7 @@ function parseSelection(source: string): { selection: OwnerCurrentSelection; leg
     return {
       selection: {
         schema: OWNER_CURRENT_SELECTION_SCHEMA,
-        workflow: 'classic',
+        workflow: 'pipeline',
         change: value.change,
         branch: (value.branch as string | null | undefined) ?? null,
       },
@@ -73,8 +73,8 @@ function parseSelection(source: string): { selection: OwnerCurrentSelection; leg
   if (value.schema !== OWNER_CURRENT_SELECTION_SCHEMA) {
     throw new Error(`current change selection schema must be ${OWNER_CURRENT_SELECTION_SCHEMA}`);
   }
-  if (value.workflow !== 'native' && value.workflow !== 'classic') {
-    throw new Error('current change selection workflow must be native or classic');
+  if (value.workflow !== 'loop' && value.workflow !== 'pipeline') {
+    throw new Error('current change selection workflow must be loop or pipeline');
   }
   if (typeof value.change !== 'string') {
     throw new Error('current change selection change must be a string');
@@ -82,8 +82,8 @@ function parseSelection(source: string): { selection: OwnerCurrentSelection; leg
   if (!validBranch(value.branch)) {
     throw new Error('current change selection branch must be a string or null');
   }
-  if (value.workflow === 'native' && value.branch !== null) {
-    throw new Error('Native current change selection branch must be null');
+  if (value.workflow === 'loop' && value.branch !== null) {
+    throw new Error('Loop current change selection branch must be null');
   }
   return { selection: value as unknown as OwnerCurrentSelection, legacy: false };
 }
@@ -128,7 +128,7 @@ export async function writeOwnerCurrentSelection(
   }
 }
 
-export async function migrateLegacyClassicSelection(projectRoot: string): Promise<boolean> {
+export async function migrateLegacyPipelineSelection(projectRoot: string): Promise<boolean> {
   const current = await readOwnerCurrentSelection(projectRoot);
   if (current.status === 'missing' || !current.legacy) return false;
   await writeOwnerCurrentSelection(projectRoot, current.selection);

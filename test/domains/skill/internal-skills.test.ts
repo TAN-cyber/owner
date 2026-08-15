@@ -11,7 +11,7 @@ import {
 const manifest: Manifest = {
   version: '1.0.0',
   skills: ['owner/SKILL.md', 'owner-open/SKILL.md', 'owner/scripts/runtime.mjs'],
-  internalSkills: ['owner/runtime/classic/skill.yaml'],
+  internalSkills: ['owner/runtime/pipeline/skill.yaml'],
 };
 
 function userFacingSkillNames(value: Manifest): string[] {
@@ -22,9 +22,9 @@ function userFacingSkillNames(value: Manifest): string[] {
 }
 
 describe('internal Skill assets', () => {
-  it('binds every Classic entry Skill to an explicit current change', async () => {
+  it('binds every Pipeline entry Skill to an explicit current change', async () => {
     const skillNames = [
-      'owner-classic',
+      'owner-pipeline',
       'owner-open',
       'owner-design',
       'owner-build',
@@ -68,7 +68,7 @@ describe('internal Skill assets', () => {
       'owner/SKILL.md',
       'owner-open/SKILL.md',
       'owner/scripts/runtime.mjs',
-      'owner/runtime/classic/skill.yaml',
+      'owner/runtime/pipeline/skill.yaml',
     ]);
   });
 
@@ -80,38 +80,38 @@ describe('internal Skill assets', () => {
     const shipped = await readManifest();
 
     expect(shipped.internalSkills).toEqual([
-      'owner/runtime/classic/skill.yaml',
-      'owner/runtime/classic/guardrails.yaml',
-      'owner/runtime/classic/checks.yaml',
+      'owner/runtime/pipeline/skill.yaml',
+      'owner/runtime/pipeline/guardrails.yaml',
+      'owner/runtime/pipeline/checks.yaml',
     ]);
-    expect(userFacingSkillNames(shipped)).toContain('owner-classic');
+    expect(userFacingSkillNames(shipped)).toContain('owner-pipeline');
     expect(userFacingSkillNames(shipped)).not.toContain('runtime');
     expect(await getManifestSkills()).toEqual(getManagedSkillPaths(shipped));
   });
 
-  it('selects Native and Classic assets by workflow', async () => {
+  it('selects Loop and Pipeline assets by workflow', async () => {
     const shipped = await readManifest();
-    const native = await getManifestSkills('native');
-    const classic = await getManifestSkills('classic');
+    const loop = await getManifestSkills('loop');
+    const pipeline = await getManifestSkills('pipeline');
     const both = await getManifestSkills('both');
 
-    expect(native).toEqual(
+    expect(loop).toEqual(
       getManagedSkillPaths(shipped).filter(
         (skillPath) =>
           skillPath === 'owner/SKILL.md' ||
           skillPath === 'owner/scripts/owner-entry-runtime.mjs' ||
           skillPath === 'owner/scripts/owner-hook-router.mjs' ||
-          skillPath.startsWith('owner-native/'),
+          skillPath.startsWith('owner-loop/'),
       ),
     );
-    expect(native).not.toContain('owner-classic/SKILL.md');
-    expect(native).not.toContain('owner-classic/reference/scripts.md');
-    expect(native).not.toContain('owner-open/SKILL.md');
+    expect(loop).not.toContain('owner-pipeline/SKILL.md');
+    expect(loop).not.toContain('owner-pipeline/reference/scripts.md');
+    expect(loop).not.toContain('owner-open/SKILL.md');
 
-    expect(classic).toContain('owner-classic/SKILL.md');
-    expect(classic).toContain('owner-classic/reference/scripts.md');
-    expect(classic).toContain('owner-open/SKILL.md');
-    expect(classic).not.toContain('owner-native/SKILL.md');
+    expect(pipeline).toContain('owner-pipeline/SKILL.md');
+    expect(pipeline).toContain('owner-pipeline/reference/scripts.md');
+    expect(pipeline).toContain('owner-open/SKILL.md');
+    expect(pipeline).not.toContain('owner-loop/SKILL.md');
     expect(both).toEqual(getManagedSkillPaths(shipped));
   });
 });

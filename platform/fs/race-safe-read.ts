@@ -40,7 +40,7 @@ export interface RaceSafeReadOptions {
    * Called inside the same synchronization window as the built-in identity
    * checks at each checkpoint. A thrown error aborts the read exactly like an
    * identity mismatch. Use this to stack domain-specific checks (for example
-   * Native directory-chain verification) without opening a second race window.
+   * Loop directory-chain verification) without opening a second race window.
    */
   verify?: (
     checkpoint: RaceSafeReadCheckpoint,

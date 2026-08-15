@@ -18,8 +18,8 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       include: ['app/**/*.ts', 'domains/**/*.ts', 'platform/**/*.ts'],
       exclude: [
-        // Classic runtime behavior is generated to .mjs and exercised through subprocess smoke tests.
-        'domains/owner-classic/**',
+        // Pipeline runtime behavior is generated to .mjs and exercised through subprocess smoke tests.
+        'domains/owner-pipeline/**',
       ],
       thresholds: {
         branches: 75,

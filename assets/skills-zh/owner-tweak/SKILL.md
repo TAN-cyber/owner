@@ -5,11 +5,11 @@ description: "Owner 预设 —— 处理可收敛为单一 OpenSpec change 的�
 
 # Owner 预设路径：Tweak
 
-开始或恢复前必须先读取并执行 `owner-classic/reference/classic-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<classic-*>` 逻辑根。
+开始或恢复前必须先读取并执行 `owner-pipeline/reference/pipeline-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<pipeline-*>` 逻辑根。
 
 Tweak 是 Owner 五阶段能力的预设工作流，不是独立的平行流程。它串联 OpenSpec 的核心流程，复用 open、build、verify、archive 能力，仅跳过 Superpowers brainstorming 和完整 plan。
 
-适用于串联 OpenSpec 的轻量改动，例如配置调整、文档或 prompt 优化，以及需 spec 驱动（含 delta spec）但不需要完整 `/owner-classic` 深度设计流程的中等变更。delta spec 在 tweak 中是一等公民正常产物，需要 delta spec 本身不构成升级理由。
+适用于串联 OpenSpec 的轻量改动，例如配置调整、文档或 prompt 优化，以及需 spec 驱动（含 delta spec）但不需要完整 `/owner-pipeline` 深度设计流程的中等变更。delta spec 在 tweak 中是一等公民正常产物，需要 delta spec 本身不构成升级理由。
 
 **适用条件**（必须全部满足）：
 1. 可收敛为**单一 OpenSpec change**
@@ -17,7 +17,7 @@ Tweak 是 Owner 五阶段能力的预设工作流，不是独立的平行流程�
 3. 不涉及跨模块、跨层级的架构协调
 4. 任务规模可预估（文件数和任务数仅作提示，不作为硬性升级条件，见下方升级判定）
 
-**不适用**：如变更过程中命中质变信号（见「升级判定」章节），由用户决定是否升级为完整 `/owner-classic` 流程。
+**不适用**：如变更过程中命中质变信号（见「升级判定」章节），由用户决定是否升级为完整 `/owner-pipeline` 流程。
 
 ---
 
@@ -25,11 +25,11 @@ Tweak 是 Owner 五阶段能力的预设工作流，不是独立的平行流程�
 
 ### 0. 输出语言约束
 
-精简版 OpenSpec 产物必须使用 Owner 配置产物语言。`.owner.yaml` 尚不存在时依次读取项目 `.owner/config.yaml` 和全局 `~/.owner/config.yaml` 的 `classic.language`，初始化后使用 `owner state get <name> language` 读取。
+精简版 OpenSpec 产物必须使用 Owner 配置产物语言。`.owner.yaml` 尚不存在时依次读取项目 `.owner/config.yaml` 和全局 `~/.owner/config.yaml` 的 `pipeline.language`，初始化后使用 `owner state get <name> language` 读取。
 
 执行链路：open → OpenSpec apply → verify → archive。Tweak 为每个阶段提供默认决策：精简开启、通过 OpenSpec apply 直接构建、按规模与 delta spec 判定验证轻重、验证通过后进入归档前最终确认。
 
-开始前按 `owner-classic/reference/scripts.md` 运行公开 Owner CLI 命令；从任意入口恢复时先按 `owner-classic/reference/context-recovery.md` 检查 phase/workflow。
+开始前按 `owner-pipeline/reference/scripts.md` 运行公开 Owner CLI 命令；从任意入口恢复时先按 `owner-pipeline/reference/context-recovery.md` 检查 phase/workflow。
 
 恢复已有 tweak change 时，第一项状态操作必须是 `owner state select <change-name>`；创建新 change 时，在 `.owner.yaml` 初始化成功后立即运行该命令，再进入源码写入步骤。
 
@@ -40,7 +40,7 @@ Tweak 是 Owner 五阶段能力的预设工作流，不是独立的平行流程�
 **立即执行：** 使用 Skill 工具加载 `openspec-new-change` 技能。禁止跳过此步骤。
 
 <!-- external-openspec-skill-override -->
-**外部 OpenSpec Skill 覆写：** 加载后不得执行其中直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径的指令；所有 OpenSpec 命令改用 `owner classic openspec -- <args...>`，所有 change 与 artifact 路径改用本轮绑定的 `<classic-*>` 逻辑根。
+**外部 OpenSpec Skill 覆写：** 加载后不得执行其中直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径的指令；所有 OpenSpec 命令改用 `owner pipeline openspec -- <args...>`，所有 change 与 artifact 路径改用本轮绑定的 `<pipeline-*>` 逻辑根。
 
 技能加载后，按其指引创建精简版产物：
   - `proposal.md` — 变更动机 + 目标 + 范围
@@ -61,9 +61,9 @@ owner state select <name>
 owner state check <name> open
 ```
 
-若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-classic/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
+若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-pipeline/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
 
-入口工作区隔离是用户决策点，不再把 `current` 当作默认隔离模式写入。按 `owner-classic/reference/decision-point.md` 暂停让用户单选：
+入口工作区隔离是用户决策点，不再把 `current` 当作默认隔离模式写入。按 `owner-pipeline/reference/decision-point.md` 暂停让用户单选：
 
 - A. 当前分支直接工作：运行 `owner state set <name> isolation current`，如实绑定当前分支
 - B. 创建分支：先创建并切换到 `tweak/YYYYMMDD/<change-name>`，再运行 `owner state set <name> isolation branch`
@@ -86,20 +86,20 @@ owner guard <change-name> open --apply
 使用 tweak 默认值：`build_mode: direct`。`isolation` 必须沿用 Step 1 中用户已确认的入口工作区隔离方式，不得自行改回 `current`。跳过 Superpowers `brainstorming` 和 `writing-plans`，改由 OpenSpec 的 apply action 执行当前 change 的 tasks。
 
 <IMPORTANT>
-这条 apply 路径只属于 tweak。完整 `/owner-classic` 或 `workflow: full` 不得套用 tweak 的 `openspec-apply-change` 构建路径；full 仍必须先通过 `/owner-design` 生成 Design Doc，再由 `/owner-build` 通过 Superpowers `writing-plans`、执行方式选择和对应执行技能完成构建。
+这条 apply 路径只属于 tweak。完整 `/owner-pipeline` 或 `workflow: full` 不得套用 tweak 的 `openspec-apply-change` 构建路径；full 仍必须先通过 `/owner-design` 生成 Design Doc，再由 `/owner-build` 通过 Superpowers `writing-plans`、执行方式选择和对应执行技能完成构建。
 </IMPORTANT>
 
-继续或开始修改前，按 `owner-classic/reference/dirty-worktree.md` 协议处理未提交改动。若归因后发现命中质变信号或文件数 tripwire，按本文件「升级判定」处理。
+继续或开始修改前，按 `owner-pipeline/reference/dirty-worktree.md` 协议处理未提交改动。若归因后发现命中质变信号或文件数 tripwire，按本文件「升级判定」处理。
 
 **立即执行：** 使用 Skill 工具加载 `openspec-apply-change` 技能。禁止跳过此步骤。
 
 <!-- external-openspec-skill-override -->
-**外部 OpenSpec Skill 覆写：** 加载后只采用其 apply 语义；其中任何直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径都必须替换为 `owner classic openspec -- <args...>` 与 `<classic-*>` 逻辑根。
+**外部 OpenSpec Skill 覆写：** 加载后只采用其 apply 语义；其中任何直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径都必须替换为 `owner pipeline openspec -- <args...>` 与 `<pipeline-*>` 逻辑根。
 
 技能加载后，以当前 `<change-name>` 作为输入，按 `openspec-apply-change` 的指引执行 OpenSpec apply 流程：
 
-1. 运行或遵循 `owner classic openspec -- status --change "<name>" --json`，确认 schema 和任务 artifact
-2. 运行或遵循 `owner classic openspec -- instructions apply --change "<name>" --json`，读取 OpenSpec 返回的 apply 指令、`contextFiles`、任务进度和动态 instruction
+1. 运行或遵循 `owner pipeline openspec -- status --change "<name>" --json`，确认 schema 和任务 artifact
+2. 运行或遵循 `owner pipeline openspec -- instructions apply --change "<name>" --json`，读取 OpenSpec 返回的 apply 指令、`contextFiles`、任务进度和动态 instruction
 3. 读取 apply 指令列出的所有 context files，不得只凭旧对话或手写 tasks 循环实现
 4. 按 apply 指令逐个完成未勾选任务，保持改动最小且聚焦
 5. 每完成一个任务后：
@@ -112,9 +112,9 @@ owner guard <change-name> open --apply
 
 执行 tweak 期间，只要运行程序、测试、构建或手动验证时出现崩溃、异常行为、测试失败或构建失败，必须使用 Skill 工具加载 Superpowers `systematic-debugging` 技能。在完成根因调查前，不得提出或实施源码修复。
 
-具体调查、最小失败测试、修复验证和保持当前 change 验证闭环的要求，按 `owner-classic/reference/debug-gate.md` 执行。
+具体调查、最小失败测试、修复验证和保持当前 change 验证闭环的要求，按 `owner-pipeline/reference/debug-gate.md` 执行。
 
-**升级判定检查**：build 全程持续判断，并在 build→verify 守卫执行前做一次集中复核。判定采用三层分工（详见「升级判定」章节）：质变信号靠 agent 语义识别、文件数仅作提示交用户拍板、scale 脚本仅管验证轻重。命中质变信号或文件数超提示阈值时，**不得自行升级或自行判定可继续**，必须按 `owner-classic/reference/decision-point.md` 暂停并把决策权交给用户：继续 tweak 轻量流程，还是升级为完整 `/owner-classic`。
+**升级判定检查**：build 全程持续判断，并在 build→verify 守卫执行前做一次集中复核。判定采用三层分工（详见「升级判定」章节）：质变信号靠 agent 语义识别、文件数仅作提示交用户拍板、scale 脚本仅管验证轻重。命中质变信号或文件数超提示阈值时，**不得自行升级或自行判定可继续**，必须按 `owner-pipeline/reference/decision-point.md` 暂停并把决策权交给用户：继续 tweak 轻量流程，还是升级为完整 `/owner-pipeline`。
 
 运行阶段守卫完成 build → verify 过渡：
 
@@ -153,7 +153,7 @@ owner state set <change-name> verify_mode full
 <IMPORTANT>
 Tweak 流程默认 **一次性连续执行**。调用 `/owner-tweak` 后，agent 在 tweak 自有步骤间自动推进，不主动停顿。**例外**：若 `auto_transition: false`，则在每个 phase 边界（build/verify/archive 之间）结束当前调用并按 `HINT` 交还控制权，由用户稍后手动运行下一阶段命令；这是手动衔接，不是新的确认点。无论 `auto_transition` 取何值，以下真正的用户决策仍需暂停：
 
-1. 遇到升级判定信号（见「升级判定」章节），**必须暂停、展示选择并等待用户明确选择**：继续 tweak 轻量流程，还是升级为完整 `/owner-classic` 流程
+1. 遇到升级判定信号（见「升级判定」章节），**必须暂停、展示选择并等待用户明确选择**：继续 tweak 轻量流程，还是升级为完整 `/owner-pipeline` 流程
 2. 验证阶段（owner-verify）接受 WARNING/SUGGESTION 偏差、处理 Spec 漂移或超过自动修复上限后的策略决策；前 3 次明确可修复失败自动闭环
 3. 归档前最终确认，以及归档提交后的分支处理决策
 
@@ -168,13 +168,13 @@ Tweak 流程默认 **一次性连续执行**。调用 `/owner-tweak` 后，agent
 
 tweak 的升级判定只决定是否从轻量预设转为 full；delta spec 本身不是升级理由，文件数不自动升级，`owner state scale` 只决定验证轻重。
 
-若由 `/owner-classic` 入口传入 intent frame，tweak 在 build 前只复核 `risk_signal` 和升级信号：新增 capability、public API、schema 变更、跨模块协调或深层架构问题。命中时进入现有升级决策点；delta spec 仍是 tweak 的正常产物，不因存在 delta spec 自动升级；不得重新实现入口意图识别。
+若由 `/owner-pipeline` 入口传入 intent frame，tweak 在 build 前只复核 `risk_signal` 和升级信号：新增 capability、public API、schema 变更、跨模块协调或深层架构问题。命中时进入现有升级决策点；delta spec 仍是 tweak 的正常产物，不因存在 delta spec 自动升级；不得重新实现入口意图识别。
 
 持续检查以下质变信号：跨模块协调修改、需要新增 capability、数据库 schema 变更、引入新的 public API、触及深层架构问题；以及 tweak 特有信号：需要拆分为多个 OpenSpec changes。命中任一信号时，agent **不得自行升级或自行判定可继续**。
 
 文件数 tripwire 仅作提示：改动文件数超过提示阈值（如 > 6 个文件）时，也交给用户决定继续 tweak 还是升级 full；文件数多不等于质变。tweak 常伴随 delta spec 或配置调整，波及面天然比 bug 修复宽，故提示阈值高于 hotfix。
 
-命中质变信号或文件数 tripwire 时，**必须按 `owner-classic/reference/decision-point.md` 的协议暂停并等待用户明确选择**。不得直接进入 `/owner-design`，不得自动补充 Design Doc。
+命中质变信号或文件数 tripwire 时，**必须按 `owner-pipeline/reference/decision-point.md` 的协议暂停并等待用户明确选择**。不得直接进入 `/owner-design`，不得自动补充 Design Doc。
 
 用户选择升级（选项 B）后，使用状态机合法的升级通道，单条命令完成预设流程 → full 转换并回退到 design 阶段：
 
@@ -182,7 +182,7 @@ tweak 的升级判定只决定是否从轻量预设转为 full；delta spec 本�
 owner state transition <name> preset-escalate
 ```
 
-该命令原子地把 `workflow`/`classic_profile` 置为 `full`、`phase` 回退到 `design`、清空 `design_doc`，并清除预设专属的 `build_mode`、`tdd_mode`、`review_mode`、`isolation` 和 `verify_mode`。然后在当前 change 基础上补充 Design Doc：**立即使用 Skill 工具加载 `owner-design` skill**；进入 build 后必须重新进行一次完整的联合工作方式选择。
+该命令原子地把 `workflow`/`pipeline_profile` 置为 `full`、`phase` 回退到 `design`、清空 `design_doc`，并清除预设专属的 `build_mode`、`tdd_mode`、`review_mode`、`isolation` 和 `verify_mode`。然后在当前 change 基础上补充 Design Doc：**立即使用 Skill 工具加载 `owner-design` skill**；进入 build 后必须重新进行一次完整的联合工作方式选择。
 
 用户选择继续（选项 A）时，继续 tweak 流程，并记录用户确认继续的原因。
 
@@ -197,7 +197,7 @@ owner state transition <name> preset-escalate
 
 ## 自动衔接下一阶段
 
-按 `owner-classic/reference/auto-transition.md` 执行。关键命令：
+按 `owner-pipeline/reference/auto-transition.md` 执行。关键命令：
 
 ```bash
 owner state next <name>

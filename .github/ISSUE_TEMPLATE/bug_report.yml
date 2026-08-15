@@ -17,9 +17,9 @@ body:
       description: Which part of Owner is affected?
       options:
         - CLI command / user interaction (`app/`)
-        - Classic workflow runtime (`domains/owner-classic`, `assets/skills/owner/scripts/`)
+        - Pipeline workflow runtime (`domains/owner-pipeline`, `assets/skills/owner/scripts/`)
         - Engine (`domains/engine`)
-        - Native workflow runtime (`domains/owner-native`)
+        - Loop workflow runtime (`domains/owner-loop`)
         - Integrations (`domains/integrations`)
         - Skill domain (`domains/skill`)
         - Workflow contract (`domains/workflow-contract`)

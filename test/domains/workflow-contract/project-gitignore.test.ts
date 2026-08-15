@@ -65,9 +65,9 @@ describe('Owner project .gitignore', () => {
       '.owner/skills/demo/SKILL.md',
       '.owner/drafts/demo.md',
       '.owner/cache/index.json',
-      '.owner/runtime/native/changes/demo/state.json',
-      '.owner/runtime/native/locks/demo.lock',
-      '.owner/runtime/native/transactions/demo/journal.json',
+      '.owner/runtime/loop/changes/demo/state.json',
+      '.owner/runtime/loop/locks/demo.lock',
+      '.owner/runtime/loop/transactions/demo/journal.json',
     ];
     for (const relative of files) {
       const target = path.join(root, ...relative.split('/'));

@@ -12,7 +12,7 @@ import { repairOwnerCurrentSelection } from '../../../domains/owner-entry/curren
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
+} from '../../../domains/owner-loop/loop-config.js';
 
 describe('shared Owner current selection repair', () => {
   let root: string;
@@ -29,14 +29,14 @@ describe('shared Owner current selection repair', () => {
     await writeProjectConfig(root, defaultProjectConfig('.'));
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
 
     await expect(
-      repairOwnerCurrentSelection(root, { migrateLegacyClassic: false }),
-    ).resolves.toEqual({ migratedLegacyClassic: false, clearedStaleSelection: true });
+      repairOwnerCurrentSelection(root, { migrateLegacyPipeline: false }),
+    ).resolves.toEqual({ migratedLegacyPipeline: false, clearedStaleSelection: true });
     await expect(readOwnerCurrentSelection(root)).resolves.toEqual({ status: 'missing' });
   });
 
@@ -44,17 +44,17 @@ describe('shared Owner current selection repair', () => {
     await writeProjectConfig(root, defaultProjectConfig('.'));
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'classic',
-      change: 'classic-change',
+      workflow: 'pipeline',
+      change: 'pipeline-change',
       branch: null,
     });
 
     await expect(
-      repairOwnerCurrentSelection(root, { migrateLegacyClassic: false }),
-    ).resolves.toEqual({ migratedLegacyClassic: false, clearedStaleSelection: false });
+      repairOwnerCurrentSelection(root, { migrateLegacyPipeline: false }),
+    ).resolves.toEqual({ migratedLegacyPipeline: false, clearedStaleSelection: false });
     await expect(readOwnerCurrentSelection(root)).resolves.toMatchObject({
       status: 'selected',
-      selection: { workflow: 'classic', change: 'classic-change' },
+      selection: { workflow: 'pipeline', change: 'pipeline-change' },
     });
   });
 
@@ -64,20 +64,20 @@ describe('shared Owner current selection repair', () => {
     await fs.writeFile(file, '{broken\n');
 
     await expect(
-      repairOwnerCurrentSelection(root, { migrateLegacyClassic: false }),
-    ).resolves.toEqual({ migratedLegacyClassic: false, clearedStaleSelection: false });
+      repairOwnerCurrentSelection(root, { migrateLegacyPipeline: false }),
+    ).resolves.toEqual({ migratedLegacyPipeline: false, clearedStaleSelection: false });
     await expect(fs.readFile(file, 'utf8')).resolves.toBe('{broken\n');
   });
 
-  it('propagates deterministic Classic migration failures to the lifecycle command', async () => {
+  it('propagates deterministic Pipeline migration failures to the lifecycle command', async () => {
     const migrationFailure = new Error('cannot replace current selection');
 
     await expect(
       repairOwnerCurrentSelection(
         root,
-        { migrateLegacyClassic: true },
+        { migrateLegacyPipeline: true },
         {
-          migrateLegacyClassic: async () => {
+          migrateLegacyPipeline: async () => {
             throw migrationFailure;
           },
           resolveOwner: async () => ({ status: 'none' }),
@@ -93,9 +93,9 @@ describe('shared Owner current selection repair', () => {
     await expect(
       repairOwnerCurrentSelection(
         root,
-        { migrateLegacyClassic: false },
+        { migrateLegacyPipeline: false },
         {
-          migrateLegacyClassic: async () => false,
+          migrateLegacyPipeline: async () => false,
           resolveOwner: async () => ({
             status: 'none',
             staleSelection: {

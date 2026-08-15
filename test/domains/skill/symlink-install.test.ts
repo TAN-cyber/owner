@@ -24,11 +24,11 @@ const mockPlatform: Platform = {
 
 const codexPlatform = PLATFORMS.find((platform) => platform.id === 'codex');
 
-const RETIRED_NATIVE_BUNDLES = [
-  'owner-native/scripts/owner-native-checkpoint.mjs',
-  'owner-native/scripts/owner-native-check.mjs',
-  'owner-native/scripts/owner-native-evidence.mjs',
-  'owner-native/scripts/owner-native-receipt.mjs',
+const RETIRED_LOOP_BUNDLES = [
+  'owner-loop/scripts/owner-loop-checkpoint.mjs',
+  'owner-loop/scripts/owner-loop-check.mjs',
+  'owner-loop/scripts/owner-loop-evidence.mjs',
+  'owner-loop/scripts/owner-loop-receipt.mjs',
 ] as const;
 
 if (!codexPlatform) {
@@ -111,15 +111,15 @@ describe('symlink install mode', () => {
 
   describe('copyOwnerSkillsForPlatform install modes', () => {
     it.each(['copy', 'symlink'] as const)(
-      'removes only retired Native bundles from the %s storage root after a successful install',
+      'removes only retired Loop bundles from the %s storage root after a successful install',
       async (installMode) => {
         const storageRoot =
           installMode === 'copy'
             ? path.join(tmpDir, '.claude', 'skills')
             : path.join(tmpDir, '.owner', 'skills', 'skills');
-        const userFile = path.join(storageRoot, 'owner-native', 'scripts', 'user-helper.mjs');
+        const userFile = path.join(storageRoot, 'owner-loop', 'scripts', 'user-helper.mjs');
         await mkdir(path.dirname(userFile), { recursive: true });
-        for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+        for (const relativePath of RETIRED_LOOP_BUNDLES) {
           await writeFile(path.join(storageRoot, ...relativePath.split('/')), 'legacy bundle\n');
         }
         await writeFile(userFile, 'keep user content\n');
@@ -131,33 +131,31 @@ describe('symlink install mode', () => {
           'skills',
           'project',
           installMode,
-          'native',
+          'loop',
         );
 
         expect(result.failed).toBe(0);
-        for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+        for (const relativePath of RETIRED_LOOP_BUNDLES) {
           await expect(
             lstat(path.join(storageRoot, ...relativePath.split('/'))),
           ).rejects.toMatchObject({ code: 'ENOENT' });
         }
         await expect(readFile(userFile, 'utf8')).resolves.toBe('keep user content\n');
         expect(
-          await fileExists(
-            path.join(storageRoot, 'owner-native', 'scripts', 'owner-native-next.mjs'),
-          ),
+          await fileExists(path.join(storageRoot, 'owner-loop', 'scripts', 'owner-loop-next.mjs')),
         ).toBe(true);
       },
     );
 
-    it('leaves retired Native paths untouched during a Classic-only install', async () => {
+    it('leaves retired Loop paths untouched during a Pipeline-only install', async () => {
       const retiredPath = path.join(
         tmpDir,
         '.claude',
         'skills',
-        ...RETIRED_NATIVE_BUNDLES[0].split('/'),
+        ...RETIRED_LOOP_BUNDLES[0].split('/'),
       );
       await mkdir(path.dirname(retiredPath), { recursive: true });
-      await writeFile(retiredPath, 'keep Native installation\n');
+      await writeFile(retiredPath, 'keep Loop installation\n');
 
       const result = await copyOwnerSkillsForPlatform(
         tmpDir,
@@ -166,16 +164,16 @@ describe('symlink install mode', () => {
         'skills',
         'project',
         'copy',
-        'classic',
+        'pipeline',
       );
 
       expect(result.failed).toBe(0);
-      await expect(readFile(retiredPath, 'utf8')).resolves.toBe('keep Native installation\n');
+      await expect(readFile(retiredPath, 'utf8')).resolves.toBe('keep Loop installation\n');
     });
 
     it('recognizes retired bundles when replacing a beta17 copy tree with managed symlinks', async () => {
       const installedRoot = path.join(tmpDir, '.claude', 'skills');
-      for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+      for (const relativePath of RETIRED_LOOP_BUNDLES) {
         const target = path.join(installedRoot, ...relativePath.split('/'));
         await mkdir(path.dirname(target), { recursive: true });
         await writeFile(target, 'legacy bundle\n');
@@ -188,12 +186,12 @@ describe('symlink install mode', () => {
         'skills',
         'project',
         'symlink',
-        'native',
+        'loop',
       );
 
       expect(result.failed).toBe(0);
-      expect((await lstat(path.join(installedRoot, 'owner-native'))).isSymbolicLink()).toBe(true);
-      for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+      expect((await lstat(path.join(installedRoot, 'owner-loop'))).isSymbolicLink()).toBe(true);
+      for (const relativePath of RETIRED_LOOP_BUNDLES) {
         await expect(
           lstat(path.join(installedRoot, ...relativePath.split('/'))),
         ).rejects.toMatchObject({ code: 'ENOENT' });
@@ -274,7 +272,7 @@ describe('symlink install mode', () => {
       expect(linkedPath).toBe(expectedTarget);
     });
 
-    it('links only Classic workflow assets for a Classic install', async () => {
+    it('links only Pipeline workflow assets for a Pipeline install', async () => {
       const result = await copyOwnerSkillsForPlatform(
         tmpDir,
         mockPlatform,
@@ -282,7 +280,7 @@ describe('symlink install mode', () => {
         'skills',
         'project',
         'symlink',
-        'classic',
+        'pipeline',
       );
 
       expect(result.failed).toBe(0);
@@ -290,10 +288,10 @@ describe('symlink install mode', () => {
         readFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), 'utf8'),
       ).resolves.toContain('name: owner');
       await expect(
-        readFile(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md'), 'utf8'),
-      ).resolves.toContain('name: owner-classic');
+        readFile(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'SKILL.md'), 'utf8'),
+      ).resolves.toContain('name: owner-pipeline');
       await expect(
-        lstat(path.join(tmpDir, '.claude', 'skills', 'owner-native')),
+        lstat(path.join(tmpDir, '.claude', 'skills', 'owner-loop')),
       ).rejects.toMatchObject({ code: 'ENOENT' });
     });
 

@@ -1,23 +1,23 @@
-import { clearOwnerCurrentSelection, migrateLegacyClassicSelection } from './current-selection.js';
+import { clearOwnerCurrentSelection, migrateLegacyPipelineSelection } from './current-selection.js';
 import { resolveHookWorkflowOwner } from './hook-router.js';
 
 export interface RepairOwnerCurrentSelectionOptions {
-  migrateLegacyClassic: boolean;
+  migrateLegacyPipeline: boolean;
 }
 
 export interface RepairOwnerCurrentSelectionResult {
-  migratedLegacyClassic: boolean;
+  migratedLegacyPipeline: boolean;
   clearedStaleSelection: boolean;
 }
 
 interface RepairOwnerCurrentSelectionDependencies {
-  migrateLegacyClassic: typeof migrateLegacyClassicSelection;
+  migrateLegacyPipeline: typeof migrateLegacyPipelineSelection;
   resolveOwner: typeof resolveHookWorkflowOwner;
   clearSelection: typeof clearOwnerCurrentSelection;
 }
 
 const DEFAULT_DEPENDENCIES: RepairOwnerCurrentSelectionDependencies = {
-  migrateLegacyClassic: migrateLegacyClassicSelection,
+  migrateLegacyPipeline: migrateLegacyPipelineSelection,
   resolveOwner: resolveHookWorkflowOwner,
   clearSelection: clearOwnerCurrentSelection,
 };
@@ -27,15 +27,15 @@ export async function repairOwnerCurrentSelection(
   options: RepairOwnerCurrentSelectionOptions,
   dependencies: RepairOwnerCurrentSelectionDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<RepairOwnerCurrentSelectionResult> {
-  const migratedLegacyClassic = options.migrateLegacyClassic
-    ? await dependencies.migrateLegacyClassic(projectRoot)
+  const migratedLegacyPipeline = options.migrateLegacyPipeline
+    ? await dependencies.migrateLegacyPipeline(projectRoot)
     : false;
 
   const resolution = await dependencies.resolveOwner(projectRoot);
   if (!('staleSelection' in resolution) || resolution.staleSelection?.code !== 'target-missing') {
-    return { migratedLegacyClassic, clearedStaleSelection: false };
+    return { migratedLegacyPipeline, clearedStaleSelection: false };
   }
 
   await dependencies.clearSelection(projectRoot);
-  return { migratedLegacyClassic, clearedStaleSelection: true };
+  return { migratedLegacyPipeline, clearedStaleSelection: true };
 }

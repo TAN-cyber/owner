@@ -7,7 +7,7 @@ import path from 'path';
 import {
   clearOwnerCurrentSelectionIf,
   ownerCurrentSelectionFile,
-  migrateLegacyClassicSelection,
+  migrateLegacyPipelineSelection,
   readOwnerCurrentSelection,
   writeOwnerCurrentSelection,
 } from '../../../domains/owner-entry/current-selection.js';
@@ -26,7 +26,7 @@ describe('shared Owner current selection', () => {
   it('writes and reads one workflow owner atomically', async () => {
     const selection = {
       schema: 'owner.selection.v2' as const,
-      workflow: 'native' as const,
+      workflow: 'loop' as const,
       change: 'one-change',
       branch: null,
     };
@@ -40,7 +40,7 @@ describe('shared Owner current selection', () => {
     });
   });
 
-  it('migrates the released Classic v1 record in place', async () => {
+  it('migrates the released Pipeline v1 record in place', async () => {
     const file = ownerCurrentSelectionFile(root);
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(
@@ -48,29 +48,29 @@ describe('shared Owner current selection', () => {
       `${JSON.stringify({ version: 1, change: 'legacy-change', branch: 'main' }, null, 2)}\n`,
     );
 
-    await expect(migrateLegacyClassicSelection(root)).resolves.toBe(true);
+    await expect(migrateLegacyPipelineSelection(root)).resolves.toBe(true);
     expect(JSON.parse(await fs.readFile(file, 'utf8'))).toEqual({
       schema: 'owner.selection.v2',
-      workflow: 'classic',
+      workflow: 'pipeline',
       change: 'legacy-change',
       branch: 'main',
     });
-    await expect(migrateLegacyClassicSelection(root)).resolves.toBe(false);
+    await expect(migrateLegacyPipelineSelection(root)).resolves.toBe(false);
   });
 
   it('clears only an exact workflow and change owner', async () => {
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'classic',
-      change: 'classic-change',
+      workflow: 'pipeline',
+      change: 'pipeline-change',
       branch: null,
     });
 
-    await expect(clearOwnerCurrentSelectionIf(root, 'native', 'classic-change')).resolves.toBe(
+    await expect(clearOwnerCurrentSelectionIf(root, 'loop', 'pipeline-change')).resolves.toBe(
       false,
     );
-    await expect(clearOwnerCurrentSelectionIf(root, 'classic', 'other')).resolves.toBe(false);
-    await expect(clearOwnerCurrentSelectionIf(root, 'classic', 'classic-change')).resolves.toBe(
+    await expect(clearOwnerCurrentSelectionIf(root, 'pipeline', 'other')).resolves.toBe(false);
+    await expect(clearOwnerCurrentSelectionIf(root, 'pipeline', 'pipeline-change')).resolves.toBe(
       true,
     );
     await expect(readOwnerCurrentSelection(root)).resolves.toEqual({ status: 'missing' });
@@ -91,7 +91,7 @@ describe('shared Owner current selection', () => {
         branch: null,
       })}\n`,
     );
-    await expect(readOwnerCurrentSelection(root)).rejects.toThrow('native or classic');
+    await expect(readOwnerCurrentSelection(root)).rejects.toThrow('loop or pipeline');
   });
 
   it('bounds and regular-file checks the shared selection before parsing', async () => {
@@ -113,7 +113,7 @@ describe('shared Owner current selection', () => {
         outside,
         JSON.stringify({
           schema: 'owner.selection.v2',
-          workflow: 'native',
+          workflow: 'loop',
           change: 'not-the-real-selection',
           branch: null,
         }),
@@ -145,7 +145,7 @@ describe('shared Owner current selection', () => {
       file,
       JSON.stringify({
         schema: 'owner.selection.v2',
-        workflow: 'native',
+        workflow: 'loop',
         change: 'small-before-swap',
         branch: null,
       }),
@@ -157,7 +157,7 @@ describe('shared Owner current selection', () => {
       oversized,
       JSON.stringify({
         schema: 'owner.selection.v2',
-        workflow: 'native',
+        workflow: 'loop',
         change: oversizedChange,
         branch: null,
       }),
@@ -196,7 +196,7 @@ describe('shared Owner current selection', () => {
         file,
         JSON.stringify({
           schema: 'owner.selection.v2',
-          workflow: 'native',
+          workflow: 'loop',
           change: 'small-before-swap',
           branch: null,
         }),
@@ -207,7 +207,7 @@ describe('shared Owner current selection', () => {
         outside,
         JSON.stringify({
           schema: 'owner.selection.v2',
-          workflow: 'native',
+          workflow: 'loop',
           change: 'read-through-symlink',
           branch: null,
         }),

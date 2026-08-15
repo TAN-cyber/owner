@@ -8,8 +8,8 @@ import {
   sameFileObject,
   type FileObjectIdentity,
 } from '../../platform/fs/file-identity.js';
-import { classicLayoutPaths } from '../owner-classic/classic-layout.js';
-import { nativeProjectPaths } from '../owner-native/native-paths.js';
+import { pipelineLayoutPaths } from '../owner-pipeline/pipeline-layout.js';
+import { loopProjectPaths } from '../owner-loop/loop-paths.js';
 import {
   readWorkflowProjectConfigIdentity,
   readWorkflowProjectConfigSnapshot,
@@ -56,11 +56,11 @@ interface RemovalResult {
 
 const LEGACY_RULE_PATHS = [
   'owner/rules/owner-phase-guard.md',
-  'owner-native/rules/owner-native-phase-guard.md',
+  'owner-loop/rules/owner-loop-phase-guard.md',
 ] as const;
 const LEGACY_HOOK_SCRIPT_PATHS = [
   'owner/scripts/owner-hook-guard.mjs',
-  'owner-native/scripts/owner-native-hook-guard.mjs',
+  'owner-loop/scripts/owner-loop-hook-guard.mjs',
 ] as const;
 
 type ManagedWorkingTree = {
@@ -102,7 +102,7 @@ const SUPERPOWERS_WORKING_TREE: ManagedWorkingTree = {
 const OWNER_WORKING_TREE: ManagedWorkingTree = {
   'config.yaml': 'file',
 };
-const NATIVE_WORKING_TREE: ManagedWorkingTree = {
+const LOOP_WORKING_TREE: ManagedWorkingTree = {
   specs: EMPTY_MANAGED_WORKING_TREE,
   changes: EMPTY_MANAGED_WORKING_TREE,
   archive: EMPTY_MANAGED_WORKING_TREE,
@@ -711,7 +711,7 @@ async function removeOwnerSkillsForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope = 'project',
-  workflowsToRemove: readonly OwnerWorkflow[] = ['native', 'classic'],
+  workflowsToRemove: readonly OwnerWorkflow[] = ['loop', 'pipeline'],
   workflowsToKeep: readonly OwnerWorkflow[] = [],
 ): Promise<RemovalResult> {
   const manifest = await readManifest();
@@ -726,9 +726,9 @@ async function removeOwnerSkillsForPlatform(
   )) {
     if (workflowsToKeep.length > 0) removablePaths.delete(retainedPath);
   }
-  const removeRetiredNativePaths =
-    workflowsToRemove.includes('native') && !workflowsToKeep.includes('native');
-  if (removeRetiredNativePaths) {
+  const removeRetiredLoopPaths =
+    workflowsToRemove.includes('loop') && !workflowsToKeep.includes('loop');
+  if (removeRetiredLoopPaths) {
     for (const retiredPath of RETIRED_OWNER_OWNED_SKILL_PATHS) {
       removablePaths.add(retiredPath);
     }
@@ -738,7 +738,7 @@ async function removeOwnerSkillsForPlatform(
   const skillsRemoval = await removeManagedSkillsFromDirs(baseDir, uniqueSkillsDirs, managedSkills);
   let removed = skillsRemoval.removed;
   let failed = skillsRemoval.failed;
-  if (removeRetiredNativePaths) {
+  if (removeRetiredLoopPaths) {
     const centralCleanup = await removeRetiredOwnerOwnedSkillPaths([
       path.join(getCentralSkillsDir(baseDir, scope), 'skills'),
     ]);
@@ -761,7 +761,7 @@ async function removeOwnerRulesForPlatform(
   const manifest = await readManifest();
   const rulePaths = [
     ...(manifest.rules ?? []),
-    ...(manifest.nativeRules ?? []),
+    ...(manifest.loopRules ?? []),
     ...LEGACY_RULE_PATHS,
   ];
   if (!rulePaths || rulePaths.length === 0) {
@@ -975,7 +975,7 @@ async function removeOwnerHooksForPlatform(
   }
 
   const manifest = await readManifest();
-  const hooksConfig = { ...(manifest.hooks ?? {}), ...(manifest.nativeHooks ?? {}) };
+  const hooksConfig = { ...(manifest.hooks ?? {}), ...(manifest.loopHooks ?? {}) };
   if (!hooksConfig || Object.keys(hooksConfig).length === 0) {
     return { removed: 0, failed: 0 };
   }
@@ -1040,28 +1040,30 @@ async function removeWorkingDirs(
       ? (document.config.workflows ?? [document.config.default_workflow])
       : [];
     const workflowsToRemove = options.workflows;
-    const classicEnabled =
-      (workflowsToRemove === undefined || workflowsToRemove.includes('classic')) &&
-      (configuredWorkflows.includes('classic') || document?.classic !== undefined);
-    const nativeEnabled =
-      (workflowsToRemove === undefined || workflowsToRemove.includes('native')) &&
-      (configuredWorkflows.includes('native') || document?.native !== undefined);
+    const pipelineEnabled =
+      (workflowsToRemove === undefined || workflowsToRemove.includes('pipeline')) &&
+      (configuredWorkflows.includes('pipeline') || document?.pipeline !== undefined);
+    const loopEnabled =
+      (workflowsToRemove === undefined || workflowsToRemove.includes('loop')) &&
+      (configuredWorkflows.includes('loop') || document?.loop !== undefined);
     const selectiveWorkflowRemoval =
       workflowsToRemove !== undefined && workflowsToRemove.length < configuredWorkflows.length;
     const fullWorkflowRemoval =
       workflowsToRemove === undefined ||
       (configuredWorkflows.length > 0 && workflowsToRemove.length === configuredWorkflows.length);
     removeProjectConfigOnFailure = fullWorkflowRemoval;
-    const classicOnlyRemoval =
-      workflowsToRemove?.includes('classic') === true && !workflowsToRemove.includes('native');
-    const removingClassicWorkingDirs = classicEnabled || fullWorkflowRemoval;
-    const artifactLayout = classicEnabled ? (document?.classic?.artifact_layout ?? 'legacy') : null;
-    const layout = artifactLayout ? classicLayoutPaths(projectRoot, artifactLayout) : null;
+    const pipelineOnlyRemoval =
+      workflowsToRemove?.includes('pipeline') === true && !workflowsToRemove.includes('loop');
+    const removingPipelineWorkingDirs = pipelineEnabled || fullWorkflowRemoval;
+    const artifactLayout = pipelineEnabled
+      ? (document?.pipeline?.artifact_layout ?? 'legacy')
+      : null;
+    const layout = artifactLayout ? pipelineLayoutPaths(projectRoot, artifactLayout) : null;
     const preserveOpenSpecRoot =
       layout !== null &&
       (await realWorkingFileExists(path.join(layout.openSpecRoot, 'config.yaml')));
     const splitDocsWorkingTrees =
-      artifactLayout === 'docs' && (preserveOpenSpecRoot || classicOnlyRemoval);
+      artifactLayout === 'docs' && (preserveOpenSpecRoot || pipelineOnlyRemoval);
 
     if (artifactLayout) {
       const legacyRootExists = await assertWorkingTreeAbsentOrRealDirectory(
@@ -1086,51 +1088,51 @@ async function removeWorkingDirs(
         ? OWNER_WORKING_TREE
         : EMPTY_MANAGED_WORKING_TREE,
     );
-    const docsTree: ManagedWorkingTree = removingClassicWorkingDirs
+    const docsTree: ManagedWorkingTree = removingPipelineWorkingDirs
       ? { superpowers: cloneManagedWorkingTree(SUPERPOWERS_WORKING_TREE) }
       : {};
-    const legacyTree = removingClassicWorkingDirs
+    const legacyTree = removingPipelineWorkingDirs
       ? cloneManagedWorkingTree(OPENSPEC_WORKING_TREE)
       : {};
     if (artifactLayout === 'docs' && !preserveOpenSpecRoot) {
       mergeManagedWorkingTree(docsTree, ['openspec'], OPENSPEC_WORKING_TREE);
     }
 
-    let separateNativeRoot: string | null = null;
-    if (nativeEnabled) {
-      if (!document?.native) throw new Error('Native project config is incomplete');
-      const nativePaths = await nativeProjectPaths(projectRoot, document.native.artifact_root);
-      if (isInsideDirectory(docsDir, nativePaths.nativeRoot)) {
+    let separateLoopRoot: string | null = null;
+    if (loopEnabled) {
+      if (!document?.loop) throw new Error('Loop project config is incomplete');
+      const loopPaths = await loopProjectPaths(projectRoot, document.loop.artifact_root);
+      if (isInsideDirectory(docsDir, loopPaths.loopRoot)) {
         if (splitDocsWorkingTrees || selectiveWorkflowRemoval) {
-          separateNativeRoot = nativePaths.nativeRoot;
+          separateLoopRoot = loopPaths.loopRoot;
         } else {
           mergeManagedWorkingTree(
             docsTree,
-            path.relative(docsDir, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
-            NATIVE_WORKING_TREE,
+            path.relative(docsDir, loopPaths.loopRoot).split(path.sep).filter(Boolean),
+            LOOP_WORKING_TREE,
           );
         }
-      } else if (isInsideDirectory(ownerDir, nativePaths.nativeRoot)) {
+      } else if (isInsideDirectory(ownerDir, loopPaths.loopRoot)) {
         if (selectiveWorkflowRemoval) {
-          separateNativeRoot = nativePaths.nativeRoot;
+          separateLoopRoot = loopPaths.loopRoot;
         } else {
           mergeManagedWorkingTree(
             ownerTree,
-            path.relative(ownerDir, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
-            NATIVE_WORKING_TREE,
+            path.relative(ownerDir, loopPaths.loopRoot).split(path.sep).filter(Boolean),
+            LOOP_WORKING_TREE,
           );
         }
       } else if (
         artifactLayout === 'legacy' &&
-        isInsideDirectory(legacyOpenSpecRoot, nativePaths.nativeRoot)
+        isInsideDirectory(legacyOpenSpecRoot, loopPaths.loopRoot)
       ) {
         mergeManagedWorkingTree(
           legacyTree,
-          path.relative(legacyOpenSpecRoot, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
-          NATIVE_WORKING_TREE,
+          path.relative(legacyOpenSpecRoot, loopPaths.loopRoot).split(path.sep).filter(Boolean),
+          LOOP_WORKING_TREE,
         );
       } else {
-        separateNativeRoot = nativePaths.nativeRoot;
+        separateLoopRoot = loopPaths.loopRoot;
       }
     }
 
@@ -1148,8 +1150,8 @@ async function removeWorkingDirs(
     if (artifactLayout === 'legacy' && !preserveOpenSpecRoot) {
       candidates.push([layout!.openSpecRoot, legacyTree, false]);
     }
-    if (separateNativeRoot) {
-      candidates.push([separateNativeRoot, NATIVE_WORKING_TREE, false]);
+    if (separateLoopRoot) {
+      candidates.push([separateLoopRoot, LOOP_WORKING_TREE, false]);
     }
     if (Object.keys(ownerTree).length > 0) candidates.push([ownerDir, ownerTree, true]);
 

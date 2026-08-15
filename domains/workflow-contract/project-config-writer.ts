@@ -194,11 +194,11 @@ export async function writeWorkflowProjectConfig(
 ): Promise<void> {
   const snapshot = await readWorkflowProjectConfigSnapshot(projectRoot, {
     allowPartialProject: true,
-    allowMissingNativeFields: true,
+    allowMissingLoopFields: true,
   });
   const document = mergeWorkflowProjectConfigDocument(snapshot.document?.value ?? {}, config);
   const language =
-    config.native?.language === 'zh-CN' || config.classic?.language === 'zh-CN' ? 'zh-CN' : 'en';
+    config.loop?.language === 'zh-CN' || config.pipeline?.language === 'zh-CN' ? 'zh-CN' : 'en';
   await writeWorkflowProjectConfigDocument(projectRoot, document, language, {
     ...options,
     expectedIdentity: options.expectedIdentity ?? snapshot.identity,

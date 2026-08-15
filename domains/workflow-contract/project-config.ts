@@ -2,15 +2,15 @@ import path from 'path';
 import { stringify, parseDocument } from 'yaml';
 
 import type {
-  ClassicArtifactLayout,
+  PipelineArtifactLayout,
   ParsedWorkflowProjectConfigDocument,
   ProjectConfigLanguage,
-  WorkflowClassicProjectConfig,
+  WorkflowPipelineProjectConfig,
   WorkflowHookProjectConfig,
-  WorkflowNativeEnabledProjectConfig,
-  WorkflowNativePendingRootMove,
-  WorkflowNativeProjectConfig,
-  WorkflowNativeSnapshotConfig,
+  WorkflowLoopEnabledProjectConfig,
+  WorkflowLoopPendingRootMove,
+  WorkflowLoopProjectConfig,
+  WorkflowLoopSnapshotConfig,
   WorkflowProjectConfig,
 } from './types.js';
 
@@ -19,24 +19,24 @@ export type ProjectConfigCommentLanguage = 'en' | 'zh-CN';
 export const WORKFLOW_PROJECT_CONFIG_MAX_BYTES = 64 * 1024;
 export const MAX_WORKFLOW_SNAPSHOT_PATTERN_LENGTH = 1024;
 export const MAX_WORKFLOW_SNAPSHOT_PATTERN_WILDCARDS = 64;
-export const DEFAULT_WORKFLOW_NATIVE_MAX_VERIFY_FAILURES = 5;
+export const DEFAULT_WORKFLOW_LOOP_MAX_VERIFY_FAILURES = 5;
 
 // `owner init` installs the built-in Skills into every supported platform's
-// project-local Skill directory. A Native baseline describes the project being
+// project-local Skill directory. A Loop baseline describes the project being
 // changed, not these replicated, tool-managed copies. Keeping them outside the
 // default scope also keeps a newly initialized, non-Git project within the
 // bounded physical snapshot budget.
-const DEFAULT_WORKFLOW_NATIVE_MANAGED_SKILL_EXCLUDES = [
+const DEFAULT_WORKFLOW_LOOP_MANAGED_SKILL_EXCLUDES = [
   '.agents/skills/**',
   '.claude/skills/**',
 ] as const;
 
-// Native snapshots describe source and project intent, not dependency trees,
+// Loop snapshots describe source and project intent, not dependency trees,
 // IDE metadata, caches, test output, or compiler output. The generated-path
 // defaults below apply at every directory depth so monorepos do not pull
 // generated folders into a baseline just because they are nested below the
 // project root.
-const DEFAULT_WORKFLOW_NATIVE_GENERATED_EXCLUDES = [
+const DEFAULT_WORKFLOW_LOOP_GENERATED_EXCLUDES = [
   '**/.idea/**',
   '**/.vscode/**',
   '.codex/skills/**',
@@ -57,7 +57,7 @@ const DEFAULT_WORKFLOW_NATIVE_GENERATED_EXCLUDES = [
   '**/target/**',
   '**/.gradle/**',
   '**/.cxx/**',
-  '**/.externalNativeBuild/**',
+  '**/.externalLoopBuild/**',
   '**/captures/**',
   '**/__pycache__/**',
   '**/.pytest_cache/**',
@@ -80,15 +80,15 @@ const DEFAULT_WORKFLOW_NATIVE_GENERATED_EXCLUDES = [
   '**/Thumbs.db',
 ] as const;
 
-export const DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_EXCLUDES = [
-  ...DEFAULT_WORKFLOW_NATIVE_MANAGED_SKILL_EXCLUDES,
-  ...DEFAULT_WORKFLOW_NATIVE_GENERATED_EXCLUDES,
+export const DEFAULT_WORKFLOW_LOOP_SNAPSHOT_EXCLUDES = [
+  ...DEFAULT_WORKFLOW_LOOP_MANAGED_SKILL_EXCLUDES,
+  ...DEFAULT_WORKFLOW_LOOP_GENERATED_EXCLUDES,
 ].sort((left, right) => left.localeCompare(right, 'en'));
 
-export function mergeWorkflowNativeSnapshotExcludes(exclude: readonly string[]): string[] {
+export function mergeWorkflowLoopSnapshotExcludes(exclude: readonly string[]): string[] {
   const merged = [...exclude];
   const seen = new Set(exclude);
-  for (const pattern of DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_EXCLUDES) {
+  for (const pattern of DEFAULT_WORKFLOW_LOOP_SNAPSHOT_EXCLUDES) {
     if (seen.has(pattern)) continue;
     seen.add(pattern);
     merged.push(pattern);
@@ -96,9 +96,9 @@ export function mergeWorkflowNativeSnapshotExcludes(exclude: readonly string[]):
   return merged;
 }
 
-export const DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG: WorkflowNativeSnapshotConfig = {
+export const DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG: WorkflowLoopSnapshotConfig = {
   include: ['**/*'],
-  exclude: [...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_EXCLUDES],
+  exclude: [...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_EXCLUDES],
   max_files: 10_000,
   max_total_bytes: 256 * 1024 * 1024,
   max_duration_ms: 60_000,
@@ -111,104 +111,104 @@ type ProjectConfigCommentKey =
   | 'ambient_resume'
   | 'hook'
   | 'hook.allow_paths'
-  | 'native'
-  | 'native.artifact_root'
-  | 'native.language'
-  | 'native.clarification_mode'
-  | 'native.archive_confirmation'
-  | 'native.max_verify_failures'
-  | 'native.snapshot'
-  | 'native.snapshot.include'
-  | 'native.snapshot.exclude'
-  | 'native.snapshot.max_files'
-  | 'native.snapshot.max_total_bytes'
-  | 'native.snapshot.max_duration_ms'
-  | 'classic'
-  | 'classic.artifact_layout'
-  | 'classic.language'
-  | 'classic.context_compression'
-  | 'classic.review_mode'
-  | 'classic.auto_transition';
+  | 'loop'
+  | 'loop.artifact_root'
+  | 'loop.language'
+  | 'loop.clarification_mode'
+  | 'loop.archive_confirmation'
+  | 'loop.max_verify_failures'
+  | 'loop.snapshot'
+  | 'loop.snapshot.include'
+  | 'loop.snapshot.exclude'
+  | 'loop.snapshot.max_files'
+  | 'loop.snapshot.max_total_bytes'
+  | 'loop.snapshot.max_duration_ms'
+  | 'pipeline'
+  | 'pipeline.artifact_layout'
+  | 'pipeline.language'
+  | 'pipeline.context_compression'
+  | 'pipeline.review_mode'
+  | 'pipeline.auto_transition';
 
 const COMMENTS: Record<ProjectConfigCommentLanguage, Record<ProjectConfigCommentKey, string>> = {
   en: {
     schema: '# Configuration schema used by Owner. Do not edit this value.',
     default_workflow: '# Default workflow entered by /owner. Must also appear in workflows.',
-    workflows: '# Workflows enabled in this project: native, classic, or both.',
+    workflows: '# Workflows enabled in this project: loop, pipeline, or both.',
     ambient_resume:
-      '# Enables automatic recovery through the read-only Ambient Resume probe for both Native and Classic. Set false to disable it.\n# ambient_resume: true | false',
-    hook: '# Hook write policy shared by Native and Classic. Paths are project-relative.',
+      '# Enables automatic recovery through the read-only Ambient Resume probe for both Loop and Pipeline. Set false to disable it.\n# ambient_resume: true | false',
+    hook: '# Hook write policy shared by Loop and Pipeline. Paths are project-relative.',
     'hook.allow_paths':
       '# Project-relative directories allowed during guarded phases. Use one path per list item; empty by default.',
-    native: '# Native workflow settings. They do not change Classic state or behavior.',
-    'native.artifact_root':
-      '# Root directory where Native stores Owner specs and changes. Runtime data stays under .owner.',
-    'native.language':
-      '# Artifact language used by Native workflow documents.\n# language: en | zh-CN',
-    'native.clarification_mode':
-      '# Controls how Native asks clarifying questions: batch asks every currently answerable question per round (default), sequential asks one at a time.\n# clarification_mode: batch | sequential',
-    'native.archive_confirmation':
-      '# Controls whether Native archives automatically after a successful preview or waits for explicit user confirmation.\n# archive_confirmation: automatic | required',
-    'native.max_verify_failures':
-      '# Maximum failed Verify outcomes allowed for one confirmed acceptance target before Native stops the completion loop.',
-    'native.snapshot':
-      '# Controls the auditable project scope and bounded work used by Native content snapshots.',
-    'native.snapshot.include':
-      '# Selects the project-relative paths included in Native snapshots. Patterns use / and support *, **, and ?.',
-    'native.snapshot.exclude':
+    loop: '# Loop workflow settings. They do not change Pipeline state or behavior.',
+    'loop.artifact_root':
+      '# Root directory where Loop stores Owner specs and changes. Runtime data stays under .owner.',
+    'loop.language': '# Artifact language used by Loop workflow documents.\n# language: en | zh-CN',
+    'loop.clarification_mode':
+      '# Controls how Loop asks clarifying questions: batch asks every currently answerable question per round (default), sequential asks one at a time.\n# clarification_mode: batch | sequential',
+    'loop.archive_confirmation':
+      '# Controls whether Loop archives automatically after a successful preview or waits for explicit user confirmation.\n# archive_confirmation: automatic | required',
+    'loop.max_verify_failures':
+      '# Maximum failed Verify outcomes allowed for one confirmed acceptance target before Loop stops the completion loop.',
+    'loop.snapshot':
+      '# Controls the auditable project scope and bounded work used by Loop content snapshots.',
+    'loop.snapshot.include':
+      '# Selects the project-relative paths included in Loop snapshots. Patterns use / and support *, **, and ?.',
+    'loop.snapshot.exclude':
       '# Removes paths from the included scope. Exclusions are bound into each new change baseline.',
-    'native.snapshot.max_files':
+    'loop.snapshot.max_files':
       '# Bounds the number of files captured by one snapshot. Increase it for large monorepos.',
-    'native.snapshot.max_total_bytes':
+    'loop.snapshot.max_total_bytes':
       '# Bounds the total file content hashed by one snapshot. Content is streamed and does not depend on Git hashes.',
-    'native.snapshot.max_duration_ms':
+    'loop.snapshot.max_duration_ms':
       '# Bounds snapshot capture time in milliseconds. Increase it together with the byte budget on slower or larger repositories.',
-    classic: '# Classic workflow settings. They do not change Native state or behavior.',
-    'classic.artifact_layout':
-      '# Selects the Classic artifact layout. The default is docs; update preserves detected root-level legacy artifacts.\n# artifact_layout: legacy | docs',
-    'classic.language':
-      '# Artifact language used by Classic workflow documents.\n# language: en | zh-CN',
-    'classic.context_compression':
-      '# Controls beta context compression for new Classic changes.\n# context_compression: off | beta',
-    'classic.review_mode':
-      '# Sets the default review depth for new Classic changes.\n# review_mode: off | standard | thorough',
-    'classic.auto_transition':
-      '# Automatically enters the next Classic phase after a phase passes.\n# auto_transition: true | false',
+    pipeline: '# Pipeline workflow settings. They do not change Loop state or behavior.',
+    'pipeline.artifact_layout':
+      '# Selects the Pipeline artifact layout. The default is docs; update preserves detected root-level legacy artifacts.\n# artifact_layout: legacy | docs',
+    'pipeline.language':
+      '# Artifact language used by Pipeline workflow documents.\n# language: en | zh-CN',
+    'pipeline.context_compression':
+      '# Controls beta context compression for new Pipeline changes.\n# context_compression: off | beta',
+    'pipeline.review_mode':
+      '# Sets the default review depth for new Pipeline changes.\n# review_mode: off | standard | thorough',
+    'pipeline.auto_transition':
+      '# Automatically enters the next Pipeline phase after a phase passes.\n# auto_transition: true | false',
   },
   'zh-CN': {
     schema: '# Owner 使用的配置格式版本，请勿修改此值。',
     default_workflow: '# `/owner` 默认进入的工作流；该值也必须出现在 workflows 中。',
-    workflows: '# 此项目启用的工作流，可填写 native、classic 或同时启用两者。',
+    workflows: '# 此项目启用的工作流，可填写 loop、pipeline 或同时启用两者。',
     ambient_resume:
-      '# 是否启用只读的环境感知恢复探针，同时作用于 Native 和 Classic；设为 false 可关闭自动工作流恢复。\n# ambient_resume: true | false',
-    hook: '# Native 和 Classic 共享的 Hook 写入策略；路径必须是项目相对路径。',
+      '# 是否启用只读的环境感知恢复探针，同时作用于 Loop 和 Pipeline；设为 false 可关闭自动工作流恢复。\n# ambient_resume: true | false',
+    hook: '# Loop 和 Pipeline 共享的 Hook 写入策略；路径必须是项目相对路径。',
     'hook.allow_paths': '# 在受保护阶段允许写入的项目相对目录；每项填写一个目录，默认为空。',
-    native: '# Native 工作流配置，不会改变 Classic 的状态或行为。',
-    'native.artifact_root': '# Native 规格和 change 的存放根目录；运行时数据始终位于 .owner。',
-    'native.language': '# Native 工作流文档使用的产物语言。\n# 可选值：en | zh-CN',
-    'native.clarification_mode':
-      '# Native 提问澄清问题的方式：batch 每轮一次提出当前所有可回答的问题（默认），sequential 每轮只问一个。\n# 可选值：batch | sequential',
-    'native.archive_confirmation':
-      '# Native 归档检查成功后自动归档，或等待用户明确确认。\n# 可选值：automatic | required',
-    'native.max_verify_failures':
+    loop: '# Loop 工作流配置，不会改变 Pipeline 的状态或行为。',
+    'loop.artifact_root': '# Loop 规格和 change 的存放根目录；运行时数据始终位于 .owner。',
+    'loop.language': '# Loop 工作流文档使用的产物语言。\n# 可选值：en | zh-CN',
+    'loop.clarification_mode':
+      '# Loop 提问澄清问题的方式：batch 每轮一次提出当前所有可回答的问题（默认），sequential 每轮只问一个。\n# 可选值：batch | sequential',
+    'loop.archive_confirmation':
+      '# Loop 归档检查成功后自动归档，或等待用户明确确认。\n# 可选值：automatic | required',
+    'loop.max_verify_failures':
       '# 同一个已确认验收目标最多允许的 Verify 失败次数；达到上限后停止完成循环。',
-    'native.snapshot': '# Native 内容快照使用的可审计项目范围与有界工作预算。',
-    'native.snapshot.include': '# Native 快照纳入的项目相对路径；模式使用 /，支持 *、** 和 ?。',
-    'native.snapshot.exclude': '# 从纳入范围中排除路径；新 change 会把排除策略绑定到 baseline。',
-    'native.snapshot.max_files': '# 单次快照最多捕获的文件数；大型 monorepo 可按需提高。',
-    'native.snapshot.max_total_bytes':
+    'loop.snapshot': '# Loop 内容快照使用的可审计项目范围与有界工作预算。',
+    'loop.snapshot.include': '# Loop 快照纳入的项目相对路径；模式使用 /，支持 *、** 和 ?。',
+    'loop.snapshot.exclude': '# 从纳入范围中排除路径；新 change 会把排除策略绑定到 baseline。',
+    'loop.snapshot.max_files': '# 单次快照最多捕获的文件数；大型 monorepo 可按需提高。',
+    'loop.snapshot.max_total_bytes':
       '# 单次快照最多哈希的文件内容总字节数；内容采用流式读取，不依赖 Git hash。',
-    'native.snapshot.max_duration_ms':
+    'loop.snapshot.max_duration_ms':
       '# 单次快照的最长执行时间（毫秒）；较慢或更大的仓库应与字节预算一并提高。',
-    classic: '# Classic 工作流配置，不会改变 Native 的状态或行为。',
-    'classic.artifact_layout':
-      '# Classic 产物布局；默认使用 docs，update 检测到根目录 legacy 产物时予以保留。\n# 可选值：legacy | docs',
-    'classic.language': '# Classic 工作流文档使用的产物语言。\n# 可选值：en | zh-CN',
-    'classic.context_compression':
-      '# 新建 Classic change 是否启用 beta 上下文压缩。\n# 可选值：off | beta',
-    'classic.review_mode':
-      '# 新建 Classic change 默认使用的审查深度。\n# 可选值：off | standard | thorough',
-    'classic.auto_transition': '# Classic 阶段通过后是否自动进入下一阶段。\n# 可选值：true | false',
+    pipeline: '# Pipeline 工作流配置，不会改变 Loop 的状态或行为。',
+    'pipeline.artifact_layout':
+      '# Pipeline 产物布局；默认使用 docs，update 检测到根目录 legacy 产物时予以保留。\n# 可选值：legacy | docs',
+    'pipeline.language': '# Pipeline 工作流文档使用的产物语言。\n# 可选值：en | zh-CN',
+    'pipeline.context_compression':
+      '# 新建 Pipeline change 是否启用 beta 上下文压缩。\n# 可选值：off | beta',
+    'pipeline.review_mode':
+      '# 新建 Pipeline change 默认使用的审查深度。\n# 可选值：off | standard | thorough',
+    'pipeline.auto_transition':
+      '# Pipeline 阶段通过后是否自动进入下一阶段。\n# 可选值：true | false',
   },
 };
 
@@ -221,8 +221,8 @@ export function projectConfigComment(
 
 function commentKey(
   line: string,
-  block: 'native' | 'classic' | 'hook' | null,
-  nativeNested: 'snapshot' | null,
+  block: 'loop' | 'pipeline' | 'hook' | null,
+  loopNested: 'snapshot' | null,
 ): ProjectConfigCommentKey | null {
   const match = /^(\s*)([a-z_]+):/u.exec(line);
   if (!match) return null;
@@ -237,8 +237,8 @@ function commentKey(
   if (indent === 2 && block === 'hook' && key === 'allow_paths') {
     return 'hook.allow_paths';
   }
-  if (indent === 4 && block === 'native' && nativeNested === 'snapshot') {
-    const nestedKey = `native.snapshot.${key}` as ProjectConfigCommentKey;
+  if (indent === 4 && block === 'loop' && loopNested === 'snapshot') {
+    const nestedKey = `loop.snapshot.${key}` as ProjectConfigCommentKey;
     if (nestedKey in COMMENTS.en) return nestedKey;
   }
   return null;
@@ -249,10 +249,10 @@ export function renderStructuredProjectConfig(
   language: ProjectConfigCommentLanguage,
 ): string {
   const output: string[] = [];
-  let block: 'native' | 'classic' | 'hook' | null = null;
-  let nativeNested: 'snapshot' | null = null;
+  let block: 'loop' | 'pipeline' | 'hook' | null = null;
+  let loopNested: 'snapshot' | null = null;
   for (const line of stringify(value).trimEnd().split('\n')) {
-    const key = commentKey(line, block, nativeNested);
+    const key = commentKey(line, block, loopNested);
     if (key) {
       const indent = line.match(/^\s*/u)?.[0] ?? '';
       for (const comment of projectConfigComment(key, language).split('\n')) {
@@ -261,13 +261,13 @@ export function renderStructuredProjectConfig(
     }
     output.push(line);
     if (/^[a-z_]+:/u.test(line)) {
-      if (line.startsWith('native:')) block = 'native';
-      else if (line.startsWith('classic:')) block = 'classic';
+      if (line.startsWith('loop:')) block = 'loop';
+      else if (line.startsWith('pipeline:')) block = 'pipeline';
       else if (line.startsWith('hook:')) block = 'hook';
       else block = null;
-      nativeNested = null;
-    } else if (/^ {2}[a-z_]+:/u.test(line) && block === 'native') {
-      nativeNested = line.startsWith('  snapshot:') ? 'snapshot' : null;
+      loopNested = null;
+    } else if (/^ {2}[a-z_]+:/u.test(line) && block === 'loop') {
+      loopNested = line.startsWith('  snapshot:') ? 'snapshot' : null;
     }
   }
   output.push('');
@@ -297,22 +297,22 @@ function projectRelativeSegments(value: unknown, label: string): string[] {
 }
 
 export function normalizeWorkflowArtifactRoot(value: unknown): string {
-  const segments = projectRelativeSegments(value, 'native.artifact_root');
+  const segments = projectRelativeSegments(value, 'loop.artifact_root');
   return segments.length === 0 ? '.' : segments.join('/');
 }
 
-export function normalizeClassicArtifactLayout(
+export function normalizePipelineArtifactLayout(
   value: unknown,
-  fallback: ClassicArtifactLayout = 'docs',
-): ClassicArtifactLayout {
+  fallback: PipelineArtifactLayout = 'docs',
+): PipelineArtifactLayout {
   const resolved = value ?? fallback;
   if (resolved !== 'legacy' && resolved !== 'docs') {
-    throw new Error('classic.artifact_layout must be legacy or docs');
+    throw new Error('pipeline.artifact_layout must be legacy or docs');
   }
   return resolved;
 }
 
-export function hasExplicitClassicArtifactLayout(value: unknown): boolean {
+export function hasExplicitPipelineArtifactLayout(value: unknown): boolean {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -415,65 +415,63 @@ function positiveWorkflowSnapshotInteger(value: unknown, fallback: number, label
   return resolved as number;
 }
 
-function normalizeWorkflowSnapshot(value: unknown): WorkflowNativeSnapshotConfig {
+function normalizeWorkflowSnapshot(value: unknown): WorkflowLoopSnapshotConfig {
   if (value === undefined) {
     return {
-      ...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG,
-      include: [...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.include],
-      exclude: [...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.exclude],
+      ...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG,
+      include: [...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.include],
+      exclude: [...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.exclude],
     };
   }
-  const snapshot = projectConfigRecord(value, 'native.snapshot');
+  const snapshot = projectConfigRecord(value, 'loop.snapshot');
   return {
     include: workflowSnapshotPatterns(
       snapshot.include,
-      'native.snapshot.include',
-      DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.include,
+      'loop.snapshot.include',
+      DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.include,
     ),
     exclude: workflowSnapshotPatterns(
       snapshot.exclude,
-      'native.snapshot.exclude',
-      DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.exclude,
+      'loop.snapshot.exclude',
+      DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.exclude,
     ),
     max_files: positiveWorkflowSnapshotInteger(
       snapshot.max_files,
-      DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.max_files,
-      'native.snapshot.max_files',
+      DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.max_files,
+      'loop.snapshot.max_files',
     ),
     max_total_bytes: positiveWorkflowSnapshotInteger(
       snapshot.max_total_bytes,
-      DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.max_total_bytes,
-      'native.snapshot.max_total_bytes',
+      DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.max_total_bytes,
+      'loop.snapshot.max_total_bytes',
     ),
     max_duration_ms: positiveWorkflowSnapshotInteger(
       snapshot.max_duration_ms,
-      DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.max_duration_ms,
-      'native.snapshot.max_duration_ms',
+      DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.max_duration_ms,
+      'loop.snapshot.max_duration_ms',
     ),
   };
 }
 
-function normalizeWorkflowPendingRootMove(
-  value: unknown,
-): WorkflowNativePendingRootMove | undefined {
+function normalizeWorkflowPendingRootMove(value: unknown): WorkflowLoopPendingRootMove | undefined {
   if (value === undefined) return undefined;
-  const pending = projectConfigRecord(value, 'native.pending_root_move');
+  const pending = projectConfigRecord(value, 'loop.pending_root_move');
   const id = pending.id;
   const from = pending.from_artifact_root;
   const to = pending.to_artifact_root;
   const stage = pending.stage;
   if (typeof id !== 'string' || !/^[a-f0-9-]{8,}$/u.test(id)) {
-    throw new Error('native.pending_root_move.id is invalid');
+    throw new Error('loop.pending_root_move.id is invalid');
   }
   if (typeof from !== 'string' || typeof to !== 'string') {
-    throw new Error('native.pending_root_move roots must be strings');
+    throw new Error('loop.pending_root_move roots must be strings');
   }
   if (stage !== 'copying' && stage !== 'ready' && stage !== 'switched') {
-    throw new Error('native.pending_root_move.stage is invalid');
+    throw new Error('loop.pending_root_move.stage is invalid');
   }
-  let cleanup: WorkflowNativePendingRootMove['cleanup'];
+  let cleanup: WorkflowLoopPendingRootMove['cleanup'];
   if (pending.cleanup !== undefined) {
-    const rawCleanup = projectConfigRecord(pending.cleanup, 'native.pending_root_move.cleanup');
+    const rawCleanup = projectConfigRecord(pending.cleanup, 'loop.pending_root_move.cleanup');
     const kind = rawCleanup.kind;
     const state = rawCleanup.state;
     const manifestHash = rawCleanup.manifest_hash;
@@ -483,13 +481,13 @@ function normalizeWorkflowPendingRootMove(
       kind !== 'rollback-destination' &&
       kind !== 'rollback-staging'
     ) {
-      throw new Error('native.pending_root_move.cleanup.kind is invalid');
+      throw new Error('loop.pending_root_move.cleanup.kind is invalid');
     }
     if (state !== 'prepared' && state !== 'quarantined' && state !== 'deleting') {
-      throw new Error('native.pending_root_move.cleanup.state is invalid');
+      throw new Error('loop.pending_root_move.cleanup.state is invalid');
     }
     if (typeof manifestHash !== 'string' || !/^[a-f0-9]{64}$/u.test(manifestHash)) {
-      throw new Error('native.pending_root_move.cleanup.manifest_hash is invalid');
+      throw new Error('loop.pending_root_move.cleanup.manifest_hash is invalid');
     }
     cleanup = { kind, state, manifestHash };
   }
@@ -502,58 +500,57 @@ function normalizeWorkflowPendingRootMove(
   };
 }
 
-function normalizeWorkflowNativeProjectConfig(
+function normalizeWorkflowLoopProjectConfig(
   value: unknown,
   options: { allowMissingArtifactRoot?: boolean } = {},
-): WorkflowNativeProjectConfig {
-  const native = projectConfigRecord(value, 'native');
+): WorkflowLoopProjectConfig {
+  const loop = projectConfigRecord(value, 'loop');
   const artifactRoot =
-    native.artifact_root ?? (options.allowMissingArtifactRoot ? 'docs' : undefined);
+    loop.artifact_root ?? (options.allowMissingArtifactRoot ? 'docs' : undefined);
   if (typeof artifactRoot !== 'string') {
-    throw new Error('native.artifact_root must be a string');
+    throw new Error('loop.artifact_root must be a string');
   }
-  const clarificationMode = native.clarification_mode ?? 'batch';
+  const clarificationMode = loop.clarification_mode ?? 'batch';
   if (clarificationMode !== 'sequential' && clarificationMode !== 'batch') {
-    throw new Error('native.clarification_mode must be sequential or batch');
+    throw new Error('loop.clarification_mode must be sequential or batch');
   }
-  const archiveConfirmation = native.archive_confirmation ?? 'automatic';
+  const archiveConfirmation = loop.archive_confirmation ?? 'automatic';
   if (archiveConfirmation !== 'automatic' && archiveConfirmation !== 'required') {
-    throw new Error('native.archive_confirmation must be automatic or required');
+    throw new Error('loop.archive_confirmation must be automatic or required');
   }
-  const maxVerifyFailures =
-    native.max_verify_failures ?? DEFAULT_WORKFLOW_NATIVE_MAX_VERIFY_FAILURES;
+  const maxVerifyFailures = loop.max_verify_failures ?? DEFAULT_WORKFLOW_LOOP_MAX_VERIFY_FAILURES;
   if (!Number.isSafeInteger(maxVerifyFailures) || (maxVerifyFailures as number) < 1) {
-    throw new Error('native.max_verify_failures must be a positive integer');
+    throw new Error('loop.max_verify_failures must be a positive integer');
   }
-  const pending = normalizeWorkflowPendingRootMove(native.pending_root_move);
+  const pending = normalizeWorkflowPendingRootMove(loop.pending_root_move);
   return {
     artifact_root: normalizeWorkflowArtifactRoot(artifactRoot),
-    language: projectConfigLanguage(native.language, 'en', 'native.language'),
+    language: projectConfigLanguage(loop.language, 'en', 'loop.language'),
     clarification_mode: clarificationMode,
     archive_confirmation: archiveConfirmation,
     max_verify_failures: maxVerifyFailures as number,
-    snapshot: normalizeWorkflowSnapshot(native.snapshot),
+    snapshot: normalizeWorkflowSnapshot(loop.snapshot),
     ...(pending ? { pending_root_move: pending } : {}),
   };
 }
 
-function normalizeWorkflowClassicProjectConfig(value: unknown): WorkflowClassicProjectConfig {
-  const classic = projectConfigRecord(value, 'classic');
-  const contextCompression = classic.context_compression ?? 'off';
+function normalizeWorkflowPipelineProjectConfig(value: unknown): WorkflowPipelineProjectConfig {
+  const pipeline = projectConfigRecord(value, 'pipeline');
+  const contextCompression = pipeline.context_compression ?? 'off';
   if (contextCompression !== 'off' && contextCompression !== 'beta') {
-    throw new Error('classic.context_compression must be off or beta');
+    throw new Error('pipeline.context_compression must be off or beta');
   }
-  const reviewMode = classic.review_mode ?? 'standard';
+  const reviewMode = pipeline.review_mode ?? 'standard';
   if (reviewMode !== 'off' && reviewMode !== 'standard' && reviewMode !== 'thorough') {
-    throw new Error('classic.review_mode must be off, standard, or thorough');
+    throw new Error('pipeline.review_mode must be off, standard, or thorough');
   }
-  const autoTransition = classic.auto_transition ?? true;
+  const autoTransition = pipeline.auto_transition ?? true;
   if (typeof autoTransition !== 'boolean') {
-    throw new Error('classic.auto_transition must be true or false');
+    throw new Error('pipeline.auto_transition must be true or false');
   }
   return {
-    artifact_layout: normalizeClassicArtifactLayout(classic.artifact_layout),
-    language: projectConfigLanguage(classic.language, 'zh-CN', 'classic.language'),
+    artifact_layout: normalizePipelineArtifactLayout(pipeline.artifact_layout),
+    language: projectConfigLanguage(pipeline.language, 'zh-CN', 'pipeline.language'),
     context_compression: contextCompression,
     review_mode: reviewMode,
     auto_transition: autoTransition,
@@ -588,8 +585,8 @@ function normalizeAmbientResume(value: unknown): boolean {
 function normalizeWorkflowProjectConfig(
   root: Record<string, unknown>,
   hook: WorkflowHookProjectConfig | undefined,
-  native: WorkflowNativeProjectConfig | undefined,
-  classic: WorkflowClassicProjectConfig | undefined,
+  loop: WorkflowLoopProjectConfig | undefined,
+  pipeline: WorkflowPipelineProjectConfig | undefined,
   ambientResume: boolean,
   options: { allowPartialProject: boolean },
 ): WorkflowProjectConfig | null {
@@ -598,29 +595,29 @@ function normalizeWorkflowProjectConfig(
     hasSchema ||
     root.default_workflow !== undefined ||
     root.workflows !== undefined ||
-    (!options.allowPartialProject && root.native !== undefined);
+    (!options.allowPartialProject && root.loop !== undefined);
   if (!hasProjectMarker) return null;
   if (options.allowPartialProject && !hasSchema) return null;
   if (root.schema !== 'owner.project.v1') {
     throw new Error('Unsupported Owner project schema');
   }
-  if (root.default_workflow !== 'native' && root.default_workflow !== 'classic') {
-    throw new Error('default_workflow must be native or classic');
+  if (root.default_workflow !== 'loop' && root.default_workflow !== 'pipeline') {
+    throw new Error('default_workflow must be loop or pipeline');
   }
   const configuredWorkflows = root.workflows ?? [root.default_workflow];
   if (
     !Array.isArray(configuredWorkflows) ||
     configuredWorkflows.length === 0 ||
-    configuredWorkflows.some((workflow) => workflow !== 'native' && workflow !== 'classic')
+    configuredWorkflows.some((workflow) => workflow !== 'loop' && workflow !== 'pipeline')
   ) {
-    throw new Error('workflows must contain native and/or classic');
+    throw new Error('workflows must contain loop and/or pipeline');
   }
-  const workflows = [...new Set(configuredWorkflows)] as Array<'native' | 'classic'>;
+  const workflows = [...new Set(configuredWorkflows)] as Array<'loop' | 'pipeline'>;
   if (!workflows.includes(root.default_workflow)) {
     throw new Error('workflows must include default_workflow');
   }
-  if (workflows.includes('native') && !native) {
-    throw new Error('native must be a mapping');
+  if (workflows.includes('loop') && !loop) {
+    throw new Error('loop must be a mapping');
   }
   return {
     schema: 'owner.project.v1',
@@ -628,8 +625,8 @@ function normalizeWorkflowProjectConfig(
     workflows,
     ambient_resume: ambientResume,
     ...(hook ? { hook } : {}),
-    ...(native ? { native } : {}),
-    ...(classic ? { classic } : {}),
+    ...(loop ? { loop } : {}),
+    ...(pipeline ? { pipeline } : {}),
   };
 }
 
@@ -640,7 +637,7 @@ function normalizeWorkflowProjectConfig(
  */
 export function parseWorkflowProjectConfigDocument(
   source: string,
-  options: { allowPartialProject?: boolean; allowMissingNativeFields?: boolean } = {},
+  options: { allowPartialProject?: boolean; allowMissingLoopFields?: boolean } = {},
 ): ParsedWorkflowProjectConfigDocument {
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length > 0) {
@@ -657,15 +654,17 @@ export function parseWorkflowProjectConfigDocument(
   const ambientResume = normalizeAmbientResume(value.ambient_resume);
   const hook =
     value.hook === undefined ? undefined : normalizeWorkflowHookProjectConfig(value.hook);
-  const native =
-    value.native === undefined
+  const loop =
+    value.loop === undefined
       ? undefined
-      : normalizeWorkflowNativeProjectConfig(value.native, {
-          allowMissingArtifactRoot: options.allowMissingNativeFields,
+      : normalizeWorkflowLoopProjectConfig(value.loop, {
+          allowMissingArtifactRoot: options.allowMissingLoopFields,
         });
-  const classic =
-    value.classic === undefined ? undefined : normalizeWorkflowClassicProjectConfig(value.classic);
-  const config = normalizeWorkflowProjectConfig(value, hook, native, classic, ambientResume, {
+  const pipeline =
+    value.pipeline === undefined
+      ? undefined
+      : normalizeWorkflowPipelineProjectConfig(value.pipeline);
+  const config = normalizeWorkflowProjectConfig(value, hook, loop, pipeline, ambientResume, {
     allowPartialProject: options.allowPartialProject ?? false,
   });
   return {
@@ -673,13 +672,13 @@ export function parseWorkflowProjectConfigDocument(
     config,
     ambient_resume: ambientResume,
     ...(hook ? { hook } : {}),
-    ...(native ? { native } : {}),
-    ...(classic ? { classic } : {}),
+    ...(loop ? { loop } : {}),
+    ...(pipeline ? { pipeline } : {}),
   };
 }
 
 function workflowPendingRootMoveValue(
-  pending: WorkflowNativePendingRootMove,
+  pending: WorkflowLoopPendingRootMove,
 ): Record<string, unknown> {
   return {
     id: pending.id,
@@ -713,30 +712,30 @@ export function workflowProjectConfigManagedValue(
           },
         }
       : {}),
-    ...(config.native
+    ...(config.loop
       ? {
-          native: {
-            artifact_root: config.native.artifact_root,
-            language: config.native.language,
-            clarification_mode: config.native.clarification_mode,
-            archive_confirmation: config.native.archive_confirmation,
-            max_verify_failures: config.native.max_verify_failures,
-            ...(config.native.pending_root_move
+          loop: {
+            artifact_root: config.loop.artifact_root,
+            language: config.loop.language,
+            clarification_mode: config.loop.clarification_mode,
+            archive_confirmation: config.loop.archive_confirmation,
+            max_verify_failures: config.loop.max_verify_failures,
+            ...(config.loop.pending_root_move
               ? {
-                  pending_root_move: workflowPendingRootMoveValue(config.native.pending_root_move),
+                  pending_root_move: workflowPendingRootMoveValue(config.loop.pending_root_move),
                 }
               : {}),
           },
         }
       : {}),
-    ...(config.classic
+    ...(config.pipeline
       ? {
-          classic: {
-            artifact_layout: config.classic.artifact_layout,
-            language: config.classic.language,
-            context_compression: config.classic.context_compression,
-            review_mode: config.classic.review_mode,
-            auto_transition: config.classic.auto_transition,
+          pipeline: {
+            artifact_layout: config.pipeline.artifact_layout,
+            language: config.pipeline.language,
+            context_compression: config.pipeline.context_compression,
+            review_mode: config.pipeline.review_mode,
+            auto_transition: config.pipeline.auto_transition,
           },
         }
       : {}),
@@ -769,42 +768,42 @@ export function mergeWorkflowProjectConfigDocument(
       allow_paths: [...validated.hook.allow_paths],
     };
   }
-  if (validated.native) {
-    const existingNative = optionalRecord(existing.native);
-    const native: Record<string, unknown> = {
-      ...existingNative,
-      artifact_root: validated.native.artifact_root,
-      language: validated.native.language,
-      clarification_mode: validated.native.clarification_mode,
-      archive_confirmation: validated.native.archive_confirmation,
-      max_verify_failures: validated.native.max_verify_failures,
+  if (validated.loop) {
+    const existingLoop = optionalRecord(existing.loop);
+    const loop: Record<string, unknown> = {
+      ...existingLoop,
+      artifact_root: validated.loop.artifact_root,
+      language: validated.loop.language,
+      clarification_mode: validated.loop.clarification_mode,
+      archive_confirmation: validated.loop.archive_confirmation,
+      max_verify_failures: validated.loop.max_verify_failures,
     };
     // Snapshot settings are retained by the parser as a legacy v1-v3 runtime
-    // default, but Native v4 no longer persists them in user configuration.
-    delete native.snapshot;
-    if (validated.native.pending_root_move) {
-      const existingPending = optionalRecord(existingNative.pending_root_move);
-      const pending = workflowPendingRootMoveValue(validated.native.pending_root_move);
+    // default, but Loop v4 no longer persists them in user configuration.
+    delete loop.snapshot;
+    if (validated.loop.pending_root_move) {
+      const existingPending = optionalRecord(existingLoop.pending_root_move);
+      const pending = workflowPendingRootMoveValue(validated.loop.pending_root_move);
       const existingCleanup = optionalRecord(existingPending.cleanup);
       const managedCleanup = optionalRecord(pending.cleanup);
-      native.pending_root_move = {
+      loop.pending_root_move = {
         ...existingPending,
         ...pending,
         ...(pending.cleanup ? { cleanup: { ...existingCleanup, ...managedCleanup } } : {}),
       };
     } else {
-      delete native.pending_root_move;
+      delete loop.pending_root_move;
     }
-    output.native = native;
+    output.loop = loop;
   }
-  if (validated.classic) {
-    output.classic = {
-      ...optionalRecord(existing.classic),
-      artifact_layout: validated.classic.artifact_layout,
-      language: validated.classic.language,
-      context_compression: validated.classic.context_compression,
-      review_mode: validated.classic.review_mode,
-      auto_transition: validated.classic.auto_transition,
+  if (validated.pipeline) {
+    output.pipeline = {
+      ...optionalRecord(existing.pipeline),
+      artifact_layout: validated.pipeline.artifact_layout,
+      language: validated.pipeline.language,
+      context_compression: validated.pipeline.context_compression,
+      review_mode: validated.pipeline.review_mode,
+      auto_transition: validated.pipeline.auto_transition,
     };
   }
   return output;
@@ -813,21 +812,21 @@ export function mergeWorkflowProjectConfigDocument(
 export function defaultWorkflowProjectConfig(
   artifactRoot = 'docs',
   language: ProjectConfigLanguage = 'en',
-): WorkflowNativeEnabledProjectConfig {
+): WorkflowLoopEnabledProjectConfig {
   return {
     schema: 'owner.project.v1',
-    default_workflow: 'native',
+    default_workflow: 'loop',
     ambient_resume: true,
-    native: {
+    loop: {
       artifact_root: normalizeWorkflowArtifactRoot(artifactRoot),
       language,
       clarification_mode: 'batch',
       archive_confirmation: 'automatic',
-      max_verify_failures: DEFAULT_WORKFLOW_NATIVE_MAX_VERIFY_FAILURES,
+      max_verify_failures: DEFAULT_WORKFLOW_LOOP_MAX_VERIFY_FAILURES,
       snapshot: {
-        ...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG,
-        include: [...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.include],
-        exclude: [...DEFAULT_WORKFLOW_NATIVE_SNAPSHOT_CONFIG.exclude],
+        ...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG,
+        include: [...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.include],
+        exclude: [...DEFAULT_WORKFLOW_LOOP_SNAPSHOT_CONFIG.exclude],
       },
     },
   };
@@ -867,14 +866,14 @@ function workflowProjectRelativeSegments(value, label) {
 }
 
 function normalizeWorkflowArtifactRoot(value) {
-  const segments = workflowProjectRelativeSegments(value, 'native.artifact_root');
+  const segments = workflowProjectRelativeSegments(value, 'loop.artifact_root');
   return segments.length === 0 ? '.' : segments.join('/');
 }
 
-function normalizeClassicArtifactLayout(value, fallback = 'docs') {
+function normalizePipelineArtifactLayout(value, fallback = 'docs') {
   const resolved = value ?? fallback;
   if (resolved !== 'legacy' && resolved !== 'docs') {
-    throw new Error('classic.artifact_layout must be legacy or docs');
+    throw new Error('pipeline.artifact_layout must be legacy or docs');
   }
   return resolved;
 }
@@ -1639,14 +1638,14 @@ function workflowSnapshotPattern(value, label) {
 
 function validateWorkflowSnapshot(value) {
   if (value === undefined) return;
-  const snapshot = workflowConfigRecord(value, 'native.snapshot');
+  const snapshot = workflowConfigRecord(value, 'loop.snapshot');
   for (const key of ['include', 'exclude']) {
     if (snapshot[key] === undefined) continue;
     if (!Array.isArray(snapshot[key])) {
-      throw new Error('native.snapshot.' + key + ' contains an unsafe pattern');
+      throw new Error('loop.snapshot.' + key + ' contains an unsafe pattern');
     }
     for (const pattern of snapshot[key]) {
-      workflowSnapshotPattern(pattern, 'native.snapshot.' + key);
+      workflowSnapshotPattern(pattern, 'loop.snapshot.' + key);
     }
   }
   for (const key of ['max_files', 'max_total_bytes', 'max_duration_ms']) {
@@ -1654,32 +1653,32 @@ function validateWorkflowSnapshot(value) {
       snapshot[key] !== undefined &&
       (!Number.isSafeInteger(snapshot[key]) || snapshot[key] < 1)
     ) {
-      throw new Error('native.snapshot.' + key + ' must be a positive integer');
+      throw new Error('loop.snapshot.' + key + ' must be a positive integer');
     }
   }
 }
 
 function validateWorkflowPendingRootMove(value) {
   if (value === undefined) return;
-  const pending = workflowConfigRecord(value, 'native.pending_root_move');
+  const pending = workflowConfigRecord(value, 'loop.pending_root_move');
   if (typeof pending.id !== 'string' || !/^[a-f0-9-]{8,}$/u.test(pending.id)) {
-    throw new Error('native.pending_root_move.id is invalid');
+    throw new Error('loop.pending_root_move.id is invalid');
   }
   if (
     typeof pending.from_artifact_root !== 'string' ||
     typeof pending.to_artifact_root !== 'string'
   ) {
-    throw new Error('native.pending_root_move roots must be strings');
+    throw new Error('loop.pending_root_move roots must be strings');
   }
   normalizeWorkflowArtifactRoot(pending.from_artifact_root);
   normalizeWorkflowArtifactRoot(pending.to_artifact_root);
   if (!['copying', 'ready', 'switched'].includes(pending.stage)) {
-    throw new Error('native.pending_root_move.stage is invalid');
+    throw new Error('loop.pending_root_move.stage is invalid');
   }
   if (pending.cleanup !== undefined) {
     const cleanup = workflowConfigRecord(
       pending.cleanup,
-      'native.pending_root_move.cleanup',
+      'loop.pending_root_move.cleanup',
     );
     if (
       ![
@@ -1689,16 +1688,16 @@ function validateWorkflowPendingRootMove(value) {
         'rollback-staging',
       ].includes(cleanup.kind)
     ) {
-      throw new Error('native.pending_root_move.cleanup.kind is invalid');
+      throw new Error('loop.pending_root_move.cleanup.kind is invalid');
     }
     if (!['prepared', 'quarantined', 'deleting'].includes(cleanup.state)) {
-      throw new Error('native.pending_root_move.cleanup.state is invalid');
+      throw new Error('loop.pending_root_move.cleanup.state is invalid');
     }
     if (
       typeof cleanup.manifest_hash !== 'string' ||
       !/^[a-f0-9]{64}$/u.test(cleanup.manifest_hash)
     ) {
-      throw new Error('native.pending_root_move.cleanup.manifest_hash is invalid');
+      throw new Error('loop.pending_root_move.cleanup.manifest_hash is invalid');
     }
   }
 }
@@ -1709,16 +1708,16 @@ function managedWorkflowConfigFields(source) {
     root.schema !== undefined ||
     root.default_workflow !== undefined ||
     root.workflows !== undefined ||
-    root.native !== undefined;
+    root.loop !== undefined;
   if (hasProjectMarker && root.schema !== 'owner.project.v1') {
     throw new Error('Unsupported Owner project schema');
   }
   if (
     root.schema === 'owner.project.v1' &&
-    root.default_workflow !== 'native' &&
-    root.default_workflow !== 'classic'
+    root.default_workflow !== 'loop' &&
+    root.default_workflow !== 'pipeline'
   ) {
-    throw new Error('default_workflow must be native or classic');
+    throw new Error('default_workflow must be loop or pipeline');
   }
   const workflows =
     root.workflows ?? (root.default_workflow === undefined ? undefined : [root.default_workflow]);
@@ -1726,9 +1725,9 @@ function managedWorkflowConfigFields(source) {
     workflows !== undefined &&
     (!Array.isArray(workflows) ||
       workflows.length === 0 ||
-      workflows.some((workflow) => workflow !== 'native' && workflow !== 'classic'))
+      workflows.some((workflow) => workflow !== 'loop' && workflow !== 'pipeline'))
   ) {
-    throw new Error('workflows must contain native and/or classic');
+    throw new Error('workflows must contain loop and/or pipeline');
   }
   if (
     workflows !== undefined &&
@@ -1741,60 +1740,60 @@ function managedWorkflowConfigFields(source) {
     throw new Error('ambient_resume must be true or false');
   }
 
-  let nativeArtifactRoot = null;
-  if (root.native !== undefined) {
-    const native = workflowConfigRecord(root.native, 'native');
-    if (typeof native.artifact_root !== 'string') {
-      throw new Error('native.artifact_root must be a string');
+  let loopArtifactRoot = null;
+  if (root.loop !== undefined) {
+    const loop = workflowConfigRecord(root.loop, 'loop');
+    if (typeof loop.artifact_root !== 'string') {
+      throw new Error('loop.artifact_root must be a string');
     }
-    nativeArtifactRoot = normalizeWorkflowArtifactRoot(native.artifact_root);
-    workflowConfigLanguage(native.language, 'en', 'native.language');
-    const clarificationMode = native.clarification_mode ?? 'batch';
+    loopArtifactRoot = normalizeWorkflowArtifactRoot(loop.artifact_root);
+    workflowConfigLanguage(loop.language, 'en', 'loop.language');
+    const clarificationMode = loop.clarification_mode ?? 'batch';
     if (clarificationMode !== 'sequential' && clarificationMode !== 'batch') {
-      throw new Error('native.clarification_mode must be sequential or batch');
+      throw new Error('loop.clarification_mode must be sequential or batch');
     }
-    const archiveConfirmation = native.archive_confirmation ?? 'automatic';
+    const archiveConfirmation = loop.archive_confirmation ?? 'automatic';
     if (archiveConfirmation !== 'automatic' && archiveConfirmation !== 'required') {
-      throw new Error('native.archive_confirmation must be automatic or required');
+      throw new Error('loop.archive_confirmation must be automatic or required');
     }
-    const maxVerifyFailures = native.max_verify_failures ?? 5;
+    const maxVerifyFailures = loop.max_verify_failures ?? 5;
     if (!Number.isSafeInteger(maxVerifyFailures) || maxVerifyFailures < 1) {
-      throw new Error('native.max_verify_failures must be a positive integer');
+      throw new Error('loop.max_verify_failures must be a positive integer');
     }
-    validateWorkflowSnapshot(native.snapshot);
-    validateWorkflowPendingRootMove(native.pending_root_move);
+    validateWorkflowSnapshot(loop.snapshot);
+    validateWorkflowPendingRootMove(loop.pending_root_move);
   }
 
-  let classicArtifactLayout = null;
-  if (root.classic !== undefined) {
-    const classic = workflowConfigRecord(root.classic, 'classic');
-    classicArtifactLayout = normalizeClassicArtifactLayout(
-      classic.artifact_layout,
+  let pipelineArtifactLayout = null;
+  if (root.pipeline !== undefined) {
+    const pipeline = workflowConfigRecord(root.pipeline, 'pipeline');
+    pipelineArtifactLayout = normalizePipelineArtifactLayout(
+      pipeline.artifact_layout,
       'legacy',
     );
-    workflowConfigLanguage(classic.language, 'zh-CN', 'classic.language');
-    const compression = classic.context_compression ?? 'off';
+    workflowConfigLanguage(pipeline.language, 'zh-CN', 'pipeline.language');
+    const compression = pipeline.context_compression ?? 'off';
     if (compression !== 'off' && compression !== 'beta') {
-      throw new Error('classic.context_compression must be off or beta');
+      throw new Error('pipeline.context_compression must be off or beta');
     }
-    const reviewMode = classic.review_mode ?? 'standard';
+    const reviewMode = pipeline.review_mode ?? 'standard';
     if (!['off', 'standard', 'thorough'].includes(reviewMode)) {
-      throw new Error('classic.review_mode must be off, standard, or thorough');
+      throw new Error('pipeline.review_mode must be off, standard, or thorough');
     }
-    const autoTransition = classic.auto_transition ?? true;
+    const autoTransition = pipeline.auto_transition ?? true;
     if (typeof autoTransition !== 'boolean') {
-      throw new Error('classic.auto_transition must be true or false');
+      throw new Error('pipeline.auto_transition must be true or false');
     }
   }
-  const nativeEnabled = Array.isArray(workflows) && workflows.includes('native');
-  const classicEnabled = Array.isArray(workflows) && workflows.includes('classic');
-  if (nativeEnabled && root.native === undefined) {
-    throw new Error('native must be a mapping');
+  const loopEnabled = Array.isArray(workflows) && workflows.includes('loop');
+  const pipelineEnabled = Array.isArray(workflows) && workflows.includes('pipeline');
+  if (loopEnabled && root.loop === undefined) {
+    throw new Error('loop must be a mapping');
   }
-  if (classicEnabled && classicArtifactLayout === null) {
-    classicArtifactLayout = 'legacy';
+  if (pipelineEnabled && pipelineArtifactLayout === null) {
+    pipelineArtifactLayout = 'legacy';
   }
-  return { nativeArtifactRoot, classicArtifactLayout, nativeEnabled, classicEnabled };
+  return { loopArtifactRoot, pipelineArtifactLayout, loopEnabled, pipelineEnabled };
 }
 
 async function readWorkflowProjectPathConfig(projectRoot) {
@@ -1810,20 +1809,20 @@ async function readWorkflowProjectPathConfig(projectRoot) {
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
       return {
-        nativeArtifactRoot: null,
-        classicArtifactLayout: null,
-        nativeEnabled: false,
-        classicEnabled: false,
+        loopArtifactRoot: null,
+        pipelineArtifactLayout: null,
+        loopEnabled: false,
+        pipelineEnabled: false,
       };
     }
     throw error;
   }
   if (!inspection.exists) {
     return {
-      nativeArtifactRoot: null,
-      classicArtifactLayout: null,
-      nativeEnabled: false,
-      classicEnabled: false,
+      loopArtifactRoot: null,
+      pipelineArtifactLayout: null,
+      loopEnabled: false,
+      pipelineEnabled: false,
     };
   }
   const source = await readWorkflowProtectedFile(

@@ -73,13 +73,13 @@ pnpm build
 | Command                      | Purpose                                                                               |
 | ---------------------------- | ------------------------------------------------------------------------------------- |
 | `pnpm dev`                   | Watch mode (TypeScript)                                                               |
-| `pnpm build`                 | Full build (Classic, Native, and entry runtimes)                                      |
-| `pnpm build:classic-runtime` | Build only the Classic runtime (`scripts/build/build-classic-runtime.mjs`)            |
-| `pnpm build:native-runtime`  | Build only the Native runtime (`scripts/build/build-native-runtime.mjs`)              |
+| `pnpm build`                 | Full build (Pipeline, Loop, and entry runtimes)                                      |
+| `pnpm build:pipeline-runtime` | Build only the Pipeline runtime (`scripts/build/build-pipeline-runtime.mjs`)            |
+| `pnpm build:loop-runtime`  | Build only the Loop runtime (`scripts/build/build-loop-runtime.mjs`)              |
 | `pnpm build:entry-runtime`   | Build only the shared entry and Hook Router (`scripts/build/build-entry-runtime.mjs`) |
 | `pnpm test`                  | Run unit tests (Vitest)                                                               |
 | `pnpm test:coverage`         | Run tests with coverage                                                               |
-| `pnpm test:script-smoke`     | Run the Classic launcher smoke suite; CI entry point                                  |
+| `pnpm test:script-smoke`     | Run the Pipeline launcher smoke suite; CI entry point                                  |
 | `pnpm test:watch`            | Vitest watch mode                                                                     |
 | `pnpm lint`                  | ESLint + architecture linter                                                          |
 | `pnpm lint:architecture`     | Repository layering linter (`scripts/lint/architecture.mjs`)                          |
@@ -87,14 +87,14 @@ pnpm build
 | `pnpm format`                | Prettier formatting for `app/`, `domains/`, `platform/`                               |
 | `pnpm format:check`          | Prettier check (CI-enforced)                                                          |
 
-For workflow runtime work, first check freshness for the affected owner. Classic
+For workflow runtime work, first check freshness for the affected owner. Pipeline
 launchers also have a focused smoke suite:
 
 ```bash
-node scripts/build/build-classic-runtime.mjs --check
-node scripts/build/build-native-runtime.mjs --check
+node scripts/build/build-pipeline-runtime.mjs --check
+node scripts/build/build-loop-runtime.mjs --check
 node scripts/build/build-entry-runtime.mjs --check
-npx vitest run test/domains/owner-classic/owner-scripts.test.ts
+npx vitest run test/domains/owner-pipeline/owner-scripts.test.ts
 ```
 
 Before opening or updating a PR, run the full verification command unless the
@@ -200,8 +200,8 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`
 Examples:
 
 ```text
-feat(native): add archive preview output
-fix(classic): preserve checkpoint recovery state
+feat(loop): add archive preview output
+fix(pipeline): preserve checkpoint recovery state
 docs: update contributor commit rules
 ```
 
@@ -248,14 +248,14 @@ Source code is layered by responsibility, with each layer having a clear scope:
 ```text
 app/                 # CLI entry and command orchestration. Composes domain/platform capabilities only; holds no domain rules.
 ├── cli/             # Commander registration
-└── commands/        # owner init / status / workflow / resume-probe / doctor / update / uninstall / native / classic
+└── commands/        # owner init / status / workflow / resume-probe / doctor / update / uninstall / loop / pipeline
 
 domains/             # Business domain modules
 ├── engine/          # Shared execution state, loops, guardrails, and checks
 ├── integrations/    # OpenSpec and Superpowers integrations
-├── owner-classic/   # Classic workflow (state / guard / handoff / archive / intent / hook-guard)
-├── owner-entry/     # Shared Native/Classic entry, selection, and Hook Router
-├── owner-native/    # Native workflow (change / state / evidence / archive / guard)
+├── owner-pipeline/   # Pipeline workflow (state / guard / handoff / archive / intent / hook-guard)
+├── owner-entry/     # Shared Loop/Pipeline entry, selection, and Hook Router
+├── owner-loop/    # Loop workflow (change / state / evidence / archive / guard)
 ├── skill/           # Owner Skill installation, updates, and removal
 └── workflow-contract/ # Cross-workflow contracts
 
@@ -267,7 +267,7 @@ platform/            # Platform adaptation; domain code does not leak platform d
 └── version/         # Version comparison
 
 scripts/             # Repository automation (build / release / lint / install)
-├── build/           # Classic, Native, and entry runtime builders
+├── build/           # Pipeline, Loop, and entry runtime builders
 ├── install/         # postinstall.js
 ├── lib/             # Cross-script utilities
 ├── lint/            # architecture.mjs, gitignore-top-level.mjs
@@ -295,7 +295,7 @@ configurations.
   (`sourceRoots`).
 - Sub-modules of each layer
   (`appModules` / `domainModules` / `platformModules` / `scriptModules`).
-- Classic, Native, and entry runtime entry/output consistency.
+- Pipeline, Loop, and entry runtime entry/output consistency.
 - Built-in skill roots and the install manifest are consistent.
 - Test ownership (see the next section).
 - Migration-legacy directories (e.g. `src/`, `test/ts/`) are not reintroduced.
@@ -321,7 +321,7 @@ Test directories strictly follow the ownership of the code under test:
 
 Do not add horizontal buckets like `test/ts/`; legacy files should be migrated
 to the directories above. The CI smoke entry point is
-`pnpm test:script-smoke`; GitHub Actions and local runs share the same Classic
+`pnpm test:script-smoke`; GitHub Actions and local runs share the same Pipeline
 launcher smoke suite.
 
 ## Host Boundary
@@ -337,7 +337,7 @@ limited to these two hosts unless the product scope is explicitly changed.
    `assets/skills/`. The two versions must be behaviorally equivalent.
 3. Add new skills to `assets/manifest.json`.
 4. Add tests for generated assets or installer behavior when applicable
-   (`test/domains/skill/`, `test/repository/classic-runtime-assets.test.ts`).
+   (`test/domains/skill/`, `test/repository/pipeline-runtime-assets.test.ts`).
 5. When changing skill boilerplate, sync every copy across all `SKILL.md` and
    `reference/*` files.
 6. **Never directly modify the original Superpowers or OpenSpec skills.**
@@ -358,21 +358,21 @@ Workflow scripts are **generated Node.js bundles** (`.mjs`). They
 depend only on Node.js and **never on Bash / Git Bash / WSL**, so behavior is
 identical on macOS, Linux, and Windows.
 
-- Classic logic and per-command entries live in `domains/owner-classic/`;
-  `pnpm build:classic-runtime` generates the aggregate CLI runtime and one
+- Pipeline logic and per-command entries live in `domains/owner-pipeline/`;
+  `pnpm build:pipeline-runtime` generates the aggregate CLI runtime and one
   self-contained bundle per command in `assets/skills/owner/scripts/`.
-- Native logic lives in `domains/owner-native/`; `pnpm build:native-runtime`
-  generates the aggregate CLI runtime and one self-contained bundle per Native
-  command. The Native core workflow and Guard must not depend on external
+- Loop logic lives in `domains/owner-loop/`; `pnpm build:loop-runtime`
+  generates the aggregate CLI runtime and one self-contained bundle per Loop
+  command. The Loop core workflow and Guard must not depend on external
   Skills.
 - Shared entry resolution, selection, and Hook routing live in
   `domains/owner-entry/`; `pnpm build:entry-runtime` generates
   `owner-entry-runtime.mjs` and `owner-hook-router.mjs`.
 - Each platform installs one `owner-workflow-guard` Rule. Platforms with Hook
   support install only `owner-hook-router.mjs`. The Router uses
-  `.owner/current-change.json` to invoke exactly one Native or Classic Guard per
+  `.owner/current-change.json` to invoke exactly one Loop or Pipeline Guard per
   write. Their phases, directories, schemas, and Guard logic remain separate.
-- `owner-hook-guard.mjs` and `owner-native-hook-guard.mjs` are self-contained
+- `owner-hook-guard.mjs` and `owner-loop-hook-guard.mjs` are self-contained
   workflow Guard command bundles; neither is installed directly as a platform
   Hook.
 - Cross-platform concerns are handled by Node: hashing via `node:crypto`, YAML
@@ -386,15 +386,15 @@ identical on macOS, Linux, and Windows.
 - When adding or renaming an entry or generated output, sync
   `assets/manifest.json`, the matching runtime mapping in
   `config/repository-layout.json`, and the corresponding
-  `test/repository/*-runtime-assets.test.ts`. Classic command bundles also require an
+  `test/repository/*-runtime-assets.test.ts`. Pipeline command bundles also require an
   update to the fixture list in
-  `test/domains/owner-classic/owner-scripts.test.ts`.
+  `test/domains/owner-pipeline/owner-scripts.test.ts`.
 
 Runtime dispatch:
 
 ```text
-owner-runtime.mjs + owner-<command>.mjs               <- domains/owner-classic/*
-owner-native-runtime.mjs + owner-native-<command>.mjs <- domains/owner-native/*
+owner-runtime.mjs + owner-<command>.mjs               <- domains/owner-pipeline/*
+owner-loop-runtime.mjs + owner-loop-<command>.mjs <- domains/owner-loop/*
 owner-entry-runtime.mjs                                <- domains/owner-entry/*
 owner-hook-router.mjs                                  <- only installed Hook entry -> one Guard selected by current ownership
 ```
@@ -404,15 +404,15 @@ owner-hook-router.mjs                                  <- only installed Hook en
 When changing fields in a `.owner.yaml` state file, update all three places (all
 in TypeScript):
 
-1. `domains/owner-classic/classic-state-command.ts` for the `set` whitelist and
+1. `domains/owner-pipeline/pipeline-state-command.ts` for the `set` whitelist and
    enum validation (`SETTABLE_FIELDS` / `MACHINE_OWNED_FIELDS`).
-2. `domains/owner-classic/classic-validate-command.ts` for schema validation
+2. `domains/owner-pipeline/pipeline-validate-command.ts` for schema validation
    and the known field set.
-3. `test/domains/owner-classic/owner-scripts.test.ts` for YAML examples and
+3. `test/domains/owner-pipeline/owner-scripts.test.ts` for YAML examples and
    assertions.
 
 Then run `pnpm build` to regenerate `owner-runtime.mjs`, otherwise the freshness
-check in `classic-runtime.test.ts` will fail.
+check in `pipeline-runtime.test.ts` will fail.
 
 ## Documentation and Bilingual Conventions
 

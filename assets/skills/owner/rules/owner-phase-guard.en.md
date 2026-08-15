@@ -8,7 +8,7 @@
 
 ### Phase Awareness (Highest Priority)
 
-When there is an active owner change (`<classic-change-dir>/.owner.yaml` bound by the Classic layout resolver exists), **before starting any operation** you must read the `phase` field to confirm the current phase.
+When there is an active owner change (`<pipeline-change-dir>/.owner.yaml` bound by the Pipeline layout resolver exists), **before starting any operation** you must read the `phase` field to confirm the current phase.
 
 When multiple active changes exist, resolve the current change first, then run:
 
@@ -28,7 +28,7 @@ Ordinary source writes are governed only by the selected change phase. With mult
 | `verify` | Verification, record verification report | Skip failure handling, handle the branch early |
 | `archive` | Confirm archive, run archive script, commit archive changes, handle the branch | Write source code |
 
-The hook hard-interception allowlist exempts only artifacts legal in the current phase as returned by the Classic layout resolver, plus Owner-owned `.owner/*` and `.superpowers/*` control workspaces and root-level Markdown files. Configuration directories and any worktree/source files inside them are not generally exempt and must obey the current change's phase restrictions.
+The hook hard-interception allowlist exempts only artifacts legal in the current phase as returned by the Pipeline layout resolver, plus Owner-owned `.owner/*` and `.superpowers/*` control workspaces and root-level Markdown files. Configuration directories and any worktree/source files inside them are not generally exempt and must obey the current change's phase restrictions.
 
 ### Phase-Entry Self-Consistency Check (Before Writing Source Code)
 
@@ -71,7 +71,7 @@ The following operations must be loaded through the Skill tool. When Skill is un
 
 The following decision points must pause to wait for explicit user selection; do not auto-fill based on recommendation rules:
 
-- **open**: Final artifact review, which also confirms the change name and scope. Add an earlier decision only for unresolved target/scope alternatives or a large-PRD split
+- **open**: Final artifact review, which also confirms the change name and scope. Add an earlier decision only for unresolved target/scope alterloops or a large-PRD split
 - **design**: brainstorming proposal confirmation (Design Doc cannot be created before confirmation)
 - **build**: After capability preflight, use one joint decision for a plan-ready pause or every executable `isolation` / `build_mode` / `tdd_mode` / `review_mode`; include the branch name when branch is selected, plus large spec-change and preset-upgrade decisions
 - **verify**: Accepting WARNING/SUGGESTION deviations, handling Spec drift, or choosing continue/stop after the automatic repair limit
@@ -113,8 +113,8 @@ After recovery, first re-run the "Phase-Entry Self-Consistency Check" table: if 
 
 **Special attention to `build_mode`**: If recovery script outputs `build_mode: subagent-driven-development`, you are the coordinator, not the executor. Must:
 1. Use the Skill tool to reload the Superpowers `subagent-driven-development` skill
-2. Re-read `owner-classic/reference/subagent-dispatch.md` for Owner-specific extensions
-3. Read `<classic-change-dir>/.owner/subagent-progress.md` to recover the exact stage, evidence, and review-fix round
+2. Re-read `owner-pipeline/reference/subagent-dispatch.md` for Owner-specific extensions
+3. Read `<pipeline-change-dir>/.owner/subagent-progress.md` to recover the exact stage, evidence, and review-fix round
 4. Do not execute tasks directly in the main session
 5. Resume from the checkpoint; start from the first unchecked task only when it is missing or mismatched
 6. Tasks already committed but not yet validated according to `review_mode` remain unchecked; continue the corresponding validation/review/fix loop

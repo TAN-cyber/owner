@@ -35,9 +35,7 @@ describe('Owner CLI banner rendering', () => {
     const logoWidth = Math.max(...OWNER_LOGO.map((line) => line.length));
     const logoOffset = lines[0]?.indexOf(OWNER_LOGO[0]) ?? -1;
 
-    expect(OWNER_TAGLINE).toBe(
-      'Resumable Native and Classic vibe coding for Claude Code and Codex',
-    );
+    expect(OWNER_TAGLINE).toBe('Resumable Loop and Pipeline vibe coding for Claude Code and Codex');
     expect(lines).toHaveLength(OWNER_BANNER_LINE_COUNT);
     for (const [index, logoLine] of OWNER_LOGO.entries()) {
       expect(lines[index]).toHaveLength(canvasWidth);

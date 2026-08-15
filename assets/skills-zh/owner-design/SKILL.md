@@ -1,11 +1,11 @@
 ---
 name: owner-design
-description: "Owner Classic 阶段 2 —— 为 change 产出深度技术 Design Doc。"
+description: "Owner Pipeline 阶段 2 —— 为 change 产出深度技术 Design Doc。"
 ---
 
 # Owner 阶段 2：深度设计（Design）
 
-开始或恢复前必须先读取并执行 `owner-classic/reference/classic-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<classic-*>` 逻辑根。
+开始或恢复前必须先读取并执行 `owner-pipeline/reference/pipeline-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<pipeline-*>` 逻辑根。
 
 ## 前置条件
 
@@ -18,7 +18,7 @@ description: "Owner Classic 阶段 2 —— 为 change 产出深度技术 Design
 
 ### 0. 入口状态验证（Entry Check）
 
-按 `owner-classic/reference/scripts.md` 运行公开 Owner CLI 命令，然后执行入口验证；从任意入口恢复时先按 `owner-classic/reference/context-recovery.md` 运行恢复检查：
+按 `owner-pipeline/reference/scripts.md` 运行公开 Owner CLI 命令，然后执行入口验证；从任意入口恢复时先按 `owner-pipeline/reference/context-recovery.md` 运行恢复检查：
 
 ```bash
 owner state select <change-name>
@@ -42,21 +42,21 @@ owner handoff <change-name> design --write
 默认 `context_compression: off` 时生成：
 
 ```text
-<classic-change-dir>/.owner/handoff/design-context.json
-<classic-change-dir>/.owner/handoff/design-context.md
+<pipeline-change-dir>/.owner/handoff/design-context.json
+<pipeline-change-dir>/.owner/handoff/design-context.md
 ```
 
-启用 beta（项目 `.owner/config.yaml` 中 `classic.context_compression: beta`，创建 change 时快照进入 `.owner.yaml`）时生成：
+启用 beta（项目 `.owner/config.yaml` 中 `pipeline.context_compression: beta`，创建 change 时快照进入 `.owner.yaml`）时生成：
 
 ```text
-<classic-change-dir>/.owner/handoff/spec-context.json
-<classic-change-dir>/.owner/handoff/spec-context.md
+<pipeline-change-dir>/.owner/handoff/spec-context.json
+<pipeline-change-dir>/.owner/handoff/spec-context.md
 ```
 
 并在 `.owner.yaml` 写入：
 
 ```yaml
-handoff_context: <classic-change-dir>/.owner/handoff/design-context.json
+handoff_context: <pipeline-change-dir>/.owner/handoff/design-context.json
 handoff_hash: <sha256>
 ```
 
@@ -96,12 +96,12 @@ Language: 使用 `owner state get <name> language` 读取到的 Owner 配置产�
 
 ```text
 Change: <change-name>
-OpenSpec Context Pack: <classic-change-dir>/.owner/handoff/design-context.md
-Machine handoff: <classic-change-dir>/.owner/handoff/design-context.json
+OpenSpec Context Pack: <pipeline-change-dir>/.owner/handoff/design-context.md
+Machine handoff: <pipeline-change-dir>/.owner/handoff/design-context.json
 
 如 context_compression: beta，则使用：
-OpenSpec Context Pack: <classic-change-dir>/.owner/handoff/spec-context.md
-Machine handoff: <classic-change-dir>/.owner/handoff/spec-context.json
+OpenSpec Context Pack: <pipeline-change-dir>/.owner/handoff/spec-context.md
+Machine handoff: <pipeline-change-dir>/.owner/handoff/spec-context.json
 
 OpenSpec 产物是上游事实源，但不得用“跳过重复上下文探索”削弱 Superpowers `brainstorming` 的澄清流程。
 你的任务是基于交接包做深度技术设计：实现方案、技术风险、测试策略、边界条件。
@@ -134,7 +134,7 @@ brainstorming 阶段不写入 Design Doc 文件，仅产出设计方案供 Step 
 
 ### 1c. 用户确认设计方案（阻塞点）
 
-brainstorming 产出设计方案后，**必须按 `owner-classic/reference/decision-point.md` 的协议暂停并等待用户明确确认设计方案**。不得在用户确认前创建最终 Design Doc、写入 `design_doc`、运行 design guard，或进入 `/owner-build`。
+brainstorming 产出设计方案后，**必须按 `owner-pipeline/reference/decision-point.md` 的协议暂停并等待用户明确确认设计方案**。不得在用户确认前创建最终 Design Doc、写入 `design_doc`、运行 design guard，或进入 `/owner-build`。
 
 暂停时只展示必要摘要：
 - 采用的技术方案
@@ -149,9 +149,9 @@ brainstorming 产出设计方案后，**必须按 `owner-classic/reference/decis
 
 用户确认设计方案后，在创建 Design Doc 前，创建或更新已增量维护的检查点文件，将其定稿为确认后的设计方案摘要：
 
-使用文件工具确保 `<classic-change-dir>/.owner/handoff/` 存在；不要依赖 POSIX 专用目录命令。
+使用文件工具确保 `<pipeline-change-dir>/.owner/handoff/` 存在；不要依赖 POSIX 专用目录命令。
 
-`<classic-change-dir>/.owner/handoff/brainstorm-summary.md` 结构：
+`<pipeline-change-dir>/.owner/handoff/brainstorm-summary.md` 结构：
 
 ```markdown
 # Brainstorm Summary
@@ -177,9 +177,9 @@ brainstorming 产出设计方案后，**必须按 `owner-classic/reference/decis
 ```
 
 **上下文压缩说明**：每次增量更新 `brainstorm-summary.md` 后，都是相对安全的压缩恢复点。Brainstorming 完成后，如上下文窗口紧张，应优先在此处进行压缩。压缩后重新加载以下文件继续 Step 2：
-- `<classic-change-dir>/.owner/handoff/brainstorm-summary.md`
-- `<classic-change-dir>/.owner/handoff/design-context.md`（或 beta 模式的 `spec-context.md`）
-- `<classic-change-dir>/.owner/handoff/design-context.json`（或 beta 模式的 `spec-context.json`）
+- `<pipeline-change-dir>/.owner/handoff/brainstorm-summary.md`
+- `<pipeline-change-dir>/.owner/handoff/design-context.md`（或 beta 模式的 `spec-context.md`）
+- `<pipeline-change-dir>/.owner/handoff/design-context.json`（或 beta 模式的 `spec-context.json`）
 
 ### 1e. 压缩策略（此处不阻塞）
 
@@ -249,11 +249,11 @@ owner guard <change-name> design --apply
 
 ## 上下文压缩恢复
 
-按 `owner-classic/reference/context-recovery.md` 执行，phase 参数为 `design`。
+按 `owner-pipeline/reference/context-recovery.md` 执行，phase 参数为 `design`。
 
 ## 自动衔接下一阶段
 
-按 `owner-classic/reference/auto-transition.md` 执行。关键命令：
+按 `owner-pipeline/reference/auto-transition.md` 执行。关键命令：
 
 ```bash
 owner state next <change-name>

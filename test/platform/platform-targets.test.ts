@@ -3,12 +3,12 @@ import { PLATFORMS } from '../../platform/install/platforms.js';
 import { resolvePlatformTarget } from '../../platform/install/platform-targets.js';
 
 describe('resolvePlatformTarget', () => {
-  it('returns a registered native platform by id', () => {
+  it('returns a registered loop platform by id', () => {
     const codex = PLATFORMS.find((platform) => platform.id === 'codex')!;
 
     expect(resolvePlatformTarget('codex', 'project')).toEqual({
       platform: codex,
-      native: true,
+      loop: true,
     });
   });
 

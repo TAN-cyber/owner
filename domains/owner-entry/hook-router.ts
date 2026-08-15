@@ -1,13 +1,10 @@
 import {
-  inspectClassicHookGuard,
-  listActiveClassicHookChanges,
-} from '../owner-classic/classic-hook-guard.js';
-import { ClassicLayoutUnavailableError } from '../owner-classic/classic-layout.js';
-import { resolveCurrentChange } from '../owner-classic/classic-current-change.js';
-import {
-  inspectNativeHookGuard,
-  listActiveNativeHookChanges,
-} from '../owner-native/native-hook-guard.js';
+  inspectPipelineHookGuard,
+  listActivePipelineHookChanges,
+} from '../owner-pipeline/pipeline-hook-guard.js';
+import { PipelineLayoutUnavailableError } from '../owner-pipeline/pipeline-layout.js';
+import { resolveCurrentChange } from '../owner-pipeline/pipeline-current-change.js';
+import { inspectLoopHookGuard, listActiveLoopHookChanges } from '../owner-loop/loop-hook-guard.js';
 import { memoizedHookRead } from '../../platform/process/hook-read-cache.js';
 import { readWorkflowProjectConfig } from '../workflow-contract/project-config-reader.js';
 import { readOwnerCurrentSelection } from './current-selection.js';
@@ -17,7 +14,7 @@ import type { OwnerHookDecision, OwnerHookRequest } from './hook-types.js';
 import type { OwnerWorkflow } from './types.js';
 
 // Wrap the hot reads so that within one Hook decision the router and the
-// delegated Classic/Native Guard share a single config + selection read
+// delegated Pipeline/Loop Guard share a single config + selection read
 // instead of each re-opening the same files.
 const readCachedCurrentSelection = memoizedHookRead(
   'readOwnerCurrentSelection',
@@ -50,60 +47,60 @@ export type HookWorkflowOwnerResolution =
         | 'selection-unreadable'
         | 'change-state-unreadable'
         | 'workflow-disabled'
-        | 'classic-selection-invalid';
+        | 'pipeline-selection-invalid';
       reason: string;
     };
 
 interface HookRouterDependencies {
-  listNative: typeof listActiveNativeHookChanges;
-  listClassic: typeof listActiveClassicHookChanges;
-  inspectNative: typeof inspectNativeHookGuard;
-  inspectClassic: typeof inspectClassicHookGuard;
+  listLoop: typeof listActiveLoopHookChanges;
+  listPipeline: typeof listActivePipelineHookChanges;
+  inspectLoop: typeof inspectLoopHookGuard;
+  inspectPipeline: typeof inspectPipelineHookGuard;
   scopeTargets?: typeof scopeOwnerHookTargets;
 }
 
 const DEFAULT_DEPENDENCIES: HookRouterDependencies = {
-  listNative: listActiveNativeHookChanges,
-  listClassic: listActiveClassicHookChanges,
-  inspectNative: inspectNativeHookGuard,
-  inspectClassic: inspectClassicHookGuard,
+  listLoop: listActiveLoopHookChanges,
+  listPipeline: listActivePipelineHookChanges,
+  inspectLoop: inspectLoopHookGuard,
+  inspectPipeline: inspectPipelineHookGuard,
 };
 
 function enabledWorkflows(
   config: Awaited<ReturnType<typeof readWorkflowProjectConfig>>,
 ): OwnerWorkflow[] {
-  if (!config) return ['classic'];
+  if (!config) return ['pipeline'];
   return config.workflows ?? [config.default_workflow];
 }
 
 async function listEnabledActiveChanges(
   projectRoot: string,
   enabled: OwnerWorkflow[],
-  dependencies: Pick<HookRouterDependencies, 'listNative' | 'listClassic'>,
+  dependencies: Pick<HookRouterDependencies, 'listLoop' | 'listPipeline'>,
   cached?: { workflow: OwnerWorkflow; candidates: ActiveHookChange[] },
-  options: { tolerateUnavailableClassic?: boolean } = {},
+  options: { tolerateUnavailablePipeline?: boolean } = {},
 ): Promise<ActiveHookChange[]> {
-  const listClassic = async (): Promise<ActiveHookChange[]> => {
-    if (!enabled.includes('classic')) return [];
-    if (cached?.workflow === 'classic') return cached.candidates;
+  const listPipeline = async (): Promise<ActiveHookChange[]> => {
+    if (!enabled.includes('pipeline')) return [];
+    if (cached?.workflow === 'pipeline') return cached.candidates;
     try {
-      return await dependencies.listClassic(projectRoot);
+      return await dependencies.listPipeline(projectRoot);
     } catch (error) {
-      if (options.tolerateUnavailableClassic && error instanceof ClassicLayoutUnavailableError) {
+      if (options.tolerateUnavailablePipeline && error instanceof PipelineLayoutUnavailableError) {
         return [];
       }
       throw error;
     }
   };
-  const [native, classic] = await Promise.all([
-    enabled.includes('native')
-      ? cached?.workflow === 'native'
+  const [loop, pipeline] = await Promise.all([
+    enabled.includes('loop')
+      ? cached?.workflow === 'loop'
         ? cached.candidates
-        : dependencies.listNative(projectRoot)
+        : dependencies.listLoop(projectRoot)
       : [],
-    listClassic(),
+    listPipeline(),
   ]);
-  return [...native, ...classic];
+  return [...loop, ...pipeline];
 }
 
 function resolveActiveCandidates(
@@ -119,7 +116,7 @@ function resolveActiveCandidates(
 
 export async function resolveHookWorkflowOwner(
   projectRoot: string,
-  dependencies: Pick<HookRouterDependencies, 'listNative' | 'listClassic'> = DEFAULT_DEPENDENCIES,
+  dependencies: Pick<HookRouterDependencies, 'listLoop' | 'listPipeline'> = DEFAULT_DEPENDENCIES,
 ): Promise<HookWorkflowOwnerResolution> {
   const config = await readCachedProjectConfig(projectRoot);
   const enabled = enabledWorkflows(config);
@@ -146,9 +143,9 @@ export async function resolveHookWorkflowOwner(
     let selectedCandidates: ActiveHookChange[];
     try {
       selectedCandidates =
-        selection.workflow === 'native'
-          ? await dependencies.listNative(projectRoot)
-          : await dependencies.listClassic(projectRoot);
+        selection.workflow === 'loop'
+          ? await dependencies.listLoop(projectRoot)
+          : await dependencies.listPipeline(projectRoot);
     } catch (error) {
       return {
         status: 'stale',
@@ -176,16 +173,16 @@ export async function resolveHookWorkflowOwner(
         };
       }
     }
-    if (selection.workflow === 'classic') {
+    if (selection.workflow === 'pipeline') {
       const resolved = await resolveCurrentChange(projectRoot);
       if (resolved.status !== 'selected') {
         return {
           status: 'stale',
-          code: 'classic-selection-invalid',
+          code: 'pipeline-selection-invalid',
           reason:
             resolved.status === 'stale'
               ? resolved.reason
-              : `selected Classic change '${selection.change}' is no longer active`,
+              : `selected Pipeline change '${selection.change}' is no longer active`,
         };
       }
     }
@@ -199,7 +196,7 @@ export async function resolveHookWorkflowOwner(
       dependencies,
       undefined,
       {
-        tolerateUnavailableClassic: true,
+        tolerateUnavailablePipeline: true,
       },
     );
     return resolveActiveCandidates(candidates);
@@ -253,7 +250,7 @@ export async function inspectOwnerHook(
     if (resolution.status === 'stale') {
       return {
         allowed: false,
-        reason: `${resolution.reason}. Resume /owner-native or /owner-classic and select the current change before retrying`,
+        reason: `${resolution.reason}. Resume /owner-loop or /owner-pipeline and select the current change before retrying`,
       };
     }
     if (resolution.status === 'ambiguous') {
@@ -266,9 +263,9 @@ export async function inspectOwnerHook(
     }
 
     const owner = resolution.owner;
-    return owner.workflow === 'native'
-      ? dependencies.inspectNative(projectRoot, projectRequest, owner.name)
-      : dependencies.inspectClassic(projectRoot, owner.name, projectRequest);
+    return owner.workflow === 'loop'
+      ? dependencies.inspectLoop(projectRoot, projectRequest, owner.name)
+      : dependencies.inspectPipeline(projectRoot, owner.name, projectRequest);
   } catch (error) {
     return {
       allowed: false,

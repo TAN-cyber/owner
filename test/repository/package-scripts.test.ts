@@ -21,25 +21,25 @@ describe('package scripts', () => {
     expect(packageJson.scripts?.prepare).toBe('node scripts/release/prepare.js');
   });
 
-  it('exposes independent Classic, Native, and entry resolver runtime builders', async () => {
+  it('exposes independent Pipeline, Loop, and entry resolver runtime builders', async () => {
     const packageJson = JSON.parse(await fs.readFile('package.json', 'utf-8')) as {
       scripts?: Record<string, string>;
     };
     const buildSource = await fs.readFile('build.js', 'utf8');
 
-    expect(packageJson.scripts?.['build:classic-runtime']).toBe(
-      'node scripts/build/build-classic-runtime.mjs',
+    expect(packageJson.scripts?.['build:pipeline-runtime']).toBe(
+      'node scripts/build/build-pipeline-runtime.mjs',
     );
-    expect(packageJson.scripts?.['build:native-runtime']).toBe(
-      'node scripts/build/build-native-runtime.mjs',
+    expect(packageJson.scripts?.['build:loop-runtime']).toBe(
+      'node scripts/build/build-loop-runtime.mjs',
     );
     expect(packageJson.scripts?.['build:entry-runtime']).toBe(
       'node scripts/build/build-entry-runtime.mjs',
     );
-    expect(buildSource.indexOf('buildClassicRuntime();')).toBeLessThan(
-      buildSource.indexOf('buildNativeRuntime();'),
+    expect(buildSource.indexOf('buildPipelineRuntime();')).toBeLessThan(
+      buildSource.indexOf('buildLoopRuntime();'),
     );
-    expect(buildSource.indexOf('buildNativeRuntime();')).toBeLessThan(
+    expect(buildSource.indexOf('buildLoopRuntime();')).toBeLessThan(
       buildSource.indexOf('buildEntryRuntime();'),
     );
     expect(buildSource.indexOf('buildEntryRuntime();')).toBeLessThan(

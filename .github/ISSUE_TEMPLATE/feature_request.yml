@@ -32,9 +32,9 @@ body:
       description: Where would this feature live?
       options:
         - CLI command / user interaction (`app/`)
-        - Classic workflow runtime (`domains/owner-classic`, `assets/skills/owner/scripts/`)
+        - Pipeline workflow runtime (`domains/owner-pipeline`, `assets/skills/owner/scripts/`)
         - Engine (`domains/engine`)
-        - Native workflow runtime (`domains/owner-native`)
+        - Loop workflow runtime (`domains/owner-loop`)
         - Integrations (`domains/integrations`)
         - Skill domain (`domains/skill`)
         - Workflow contract (`domains/workflow-contract`)
@@ -74,7 +74,7 @@ body:
     attributes:
       label: 🧰 Compatibility notes
       description: Mention affected platforms, install scopes, languages, test ownership, or runtime/generated assets if relevant.
-      placeholder: 'For example: project/global scope, English/Chinese skills, macOS/Linux/Windows, `test/domains/<domain>/`, or regenerated Classic runtime assets.'
+      placeholder: 'For example: project/global scope, English/Chinese skills, macOS/Linux/Windows, `test/domains/<domain>/`, or regenerated Pipeline runtime assets.'
     validations:
       required: false
 

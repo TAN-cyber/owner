@@ -2,9 +2,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 import { fileExists } from '../../platform/fs/file-system.js';
-import type { ClassicArtifactLayout } from '../owner-classic/classic-layout.js';
+import type { PipelineArtifactLayout } from '../owner-pipeline/pipeline-layout.js';
 import {
-  hasExplicitClassicArtifactLayout,
+  hasExplicitPipelineArtifactLayout,
   normalizeWorkflowArtifactRoot,
 } from '../workflow-contract/project-config.js';
 import {
@@ -28,7 +28,7 @@ export interface InitWorkflowDecision {
   workflow: OwnerWorkflow;
   source: InitWorkflowSource;
   artifactRoot: string;
-  classicArtifactLayout: ClassicArtifactLayout;
+  pipelineArtifactLayout: PipelineArtifactLayout;
   writeProjectConfig: boolean;
   legacyEvidence: string[];
 }
@@ -73,7 +73,7 @@ async function findLegacyEvidence(
 
   const visit = async (relativeDirectory: string): Promise<void> => {
     const inspection = await inspectProtectedProjectPath(projectRoot, relativeDirectory, {
-      label: 'legacy Classic change evidence',
+      label: 'legacy Pipeline change evidence',
       expected: 'directory',
     });
     if (!inspection.exists) return;
@@ -107,48 +107,48 @@ export async function resolveInitWorkflow(
   options: ResolveInitWorkflowOptions = {},
   projectConfigSnapshot?: WorkflowProjectConfigSnapshot,
 ): Promise<InitWorkflowDecision> {
-  if (options.workflow === 'classic' && options.artifactRoot !== undefined) {
-    throw new Error('--root is only valid with the Native workflow');
+  if (options.workflow === 'pipeline' && options.artifactRoot !== undefined) {
+    throw new Error('--root is only valid with the Loop workflow');
   }
 
   const requestedArtifactRoot =
     options.artifactRoot === undefined
       ? undefined
       : normalizeWorkflowArtifactRoot(options.artifactRoot);
-  const requestedWorkflow = options.workflow ?? (requestedArtifactRoot ? 'native' : undefined);
+  const requestedWorkflow = options.workflow ?? (requestedArtifactRoot ? 'loop' : undefined);
   const snapshot =
     projectConfigSnapshot ??
     (await readWorkflowProjectConfigSnapshot(projectRoot, {
       allowPartialProject: true,
-      allowMissingNativeFields: true,
+      allowMissingLoopFields: true,
     }));
   const existing = snapshot.document?.config ?? null;
   if (existing) {
     if (
       requestedArtifactRoot !== undefined &&
-      existing.native !== undefined &&
-      requestedArtifactRoot !== existing.native.artifact_root
+      existing.loop !== undefined &&
+      requestedArtifactRoot !== existing.loop.artifact_root
     ) {
       throw new Error(
-        `The configured Native artifact root is ${existing.native.artifact_root}; refusing requested ${requestedArtifactRoot}`,
+        `The configured Loop artifact root is ${existing.loop.artifact_root}; refusing requested ${requestedArtifactRoot}`,
       );
     }
     const workflow = requestedWorkflow ?? existing.default_workflow;
     const explicit = requestedWorkflow !== undefined || requestedArtifactRoot !== undefined;
-    const rawClassic = snapshot.document?.value.classic;
-    const hasExplicitClassicLayout = hasExplicitClassicArtifactLayout(rawClassic);
-    const inferredClassicLayout: ClassicArtifactLayout = hasExplicitClassicLayout
-      ? (existing.classic?.artifact_layout ?? 'docs')
+    const rawPipeline = snapshot.document?.value.pipeline;
+    const hasExplicitPipelineLayout = hasExplicitPipelineArtifactLayout(rawPipeline);
+    const inferredPipelineLayout: PipelineArtifactLayout = hasExplicitPipelineLayout
+      ? (existing.pipeline?.artifact_layout ?? 'docs')
       : (await fileExists(path.join(projectRoot, 'openspec')))
         ? 'legacy'
         : 'docs';
     return {
       workflow,
       source: explicit ? 'explicit-option' : 'project-config',
-      artifactRoot: requestedArtifactRoot ?? existing.native?.artifact_root ?? 'docs',
-      classicArtifactLayout: inferredClassicLayout,
+      artifactRoot: requestedArtifactRoot ?? existing.loop?.artifact_root ?? 'docs',
+      pipelineArtifactLayout: inferredPipelineLayout,
       writeProjectConfig:
-        workflow !== existing.default_workflow || (workflow === 'native' && !existing.native),
+        workflow !== existing.default_workflow || (workflow === 'loop' && !existing.loop),
       legacyEvidence: [],
     };
   }
@@ -166,26 +166,26 @@ export async function resolveInitWorkflow(
       workflow: requestedWorkflow,
       source: 'explicit-option',
       artifactRoot: requestedArtifactRoot ?? 'docs',
-      classicArtifactLayout: legacyArtifactLayout ? 'legacy' : 'docs',
+      pipelineArtifactLayout: legacyArtifactLayout ? 'legacy' : 'docs',
       writeProjectConfig: true,
       legacyEvidence,
     };
   }
   if (legacyEvidence.length > 0) {
     return {
-      workflow: 'classic',
+      workflow: 'pipeline',
       source: 'legacy-project',
       artifactRoot: 'docs',
-      classicArtifactLayout: legacyArtifactLayout ? 'legacy' : 'docs',
+      pipelineArtifactLayout: legacyArtifactLayout ? 'legacy' : 'docs',
       writeProjectConfig: false,
       legacyEvidence,
     };
   }
   return {
-    workflow: 'native',
+    workflow: 'loop',
     source: 'new-project-default',
     artifactRoot: 'docs',
-    classicArtifactLayout: 'docs',
+    pipelineArtifactLayout: 'docs',
     writeProjectConfig: true,
     legacyEvidence: [],
   };

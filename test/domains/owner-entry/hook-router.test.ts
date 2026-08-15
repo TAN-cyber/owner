@@ -11,7 +11,7 @@ import {
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
+} from '../../../domains/owner-loop/loop-config.js';
 
 describe('Owner Hook Router', () => {
   let root: string;
@@ -26,55 +26,55 @@ describe('Owner Hook Router', () => {
 
   async function configureBoth(): Promise<void> {
     const config = defaultProjectConfig('.');
-    config.workflows = ['native', 'classic'];
+    config.workflows = ['loop', 'pipeline'];
     await writeProjectConfig(root, config);
   }
 
   it('stays neutral for an unknown write target without reading Owner state', async () => {
-    const listNative = vi.fn(async () => {
-      throw new Error('Native state must not be read');
+    const listLoop = vi.fn(async () => {
+      throw new Error('Loop state must not be read');
     });
-    const listClassic = vi.fn(async () => {
-      throw new Error('Classic state must not be read');
+    const listPipeline = vi.fn(async () => {
+      throw new Error('Pipeline state must not be read');
     });
-    const inspectNative = vi.fn();
-    const inspectClassic = vi.fn();
+    const inspectLoop = vi.fn();
+    const inspectPipeline = vi.fn();
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'unknown', targets: [], toolName: 'FutureWriteTool' },
-      { listNative, listClassic, inspectNative, inspectClassic },
+      { listLoop, listPipeline, inspectLoop, inspectPipeline },
     );
 
     expect(decision).toMatchObject({ allowed: true });
-    expect(listNative).not.toHaveBeenCalled();
-    expect(listClassic).not.toHaveBeenCalled();
-    expect(inspectNative).not.toHaveBeenCalled();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(listLoop).not.toHaveBeenCalled();
+    expect(listPipeline).not.toHaveBeenCalled();
+    expect(inspectLoop).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
   it('stays neutral for project-external targets without reading Owner state', async () => {
     const externalTarget = path.join(os.tmpdir(), `owner-memory-${path.basename(root)}.md`);
-    const listNative = vi.fn(async () => {
-      throw new Error('Native state must not be read');
+    const listLoop = vi.fn(async () => {
+      throw new Error('Loop state must not be read');
     });
-    const listClassic = vi.fn(async () => {
-      throw new Error('Classic state must not be read');
+    const listPipeline = vi.fn(async () => {
+      throw new Error('Pipeline state must not be read');
     });
-    const inspectNative = vi.fn();
-    const inspectClassic = vi.fn();
+    const inspectLoop = vi.fn();
+    const inspectPipeline = vi.fn();
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'write', targets: [externalTarget], toolName: 'Write' },
-      { listNative, listClassic, inspectNative, inspectClassic },
+      { listLoop, listPipeline, inspectLoop, inspectPipeline },
     );
 
     expect(decision).toMatchObject({ allowed: true });
-    expect(listNative).not.toHaveBeenCalled();
-    expect(listClassic).not.toHaveBeenCalled();
-    expect(inspectNative).not.toHaveBeenCalled();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(listLoop).not.toHaveBeenCalled();
+    expect(listPipeline).not.toHaveBeenCalled();
+    expect(inspectLoop).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
   it('fails closed when the scope of an explicit write target cannot be determined', async () => {
@@ -86,10 +86,10 @@ describe('Owner Hook Router', () => {
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
       {
-        listNative: vi.fn(async () => []),
-        listClassic: vi.fn(async () => []),
-        inspectNative: vi.fn(),
-        inspectClassic: vi.fn(),
+        listLoop: vi.fn(async () => []),
+        listPipeline: vi.fn(async () => []),
+        inspectLoop: vi.fn(),
+        inspectPipeline: vi.fn(),
         scopeTargets,
       },
     );
@@ -102,13 +102,13 @@ describe('Owner Hook Router', () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
-      change: 'native-change',
+      workflow: 'loop',
+      change: 'loop-change',
       branch: null,
     });
     const externalTarget = path.join(os.tmpdir(), `owner-memory-${path.basename(root)}.md`);
-    const inspectNative = vi.fn(async () => ({ allowed: true, reason: 'native' }));
-    const inspectClassic = vi.fn(async () => ({ allowed: true, reason: 'classic' }));
+    const inspectLoop = vi.fn(async () => ({ allowed: true, reason: 'loop' }));
+    const inspectPipeline = vi.fn(async () => ({ allowed: true, reason: 'pipeline' }));
 
     const decision = await inspectOwnerHook(
       root,
@@ -118,82 +118,76 @@ describe('Owner Hook Router', () => {
         toolName: 'Edit',
       },
       {
-        listNative: async () => [
-          { workflow: 'native', name: 'native-change', phase: 'build' as const },
-        ],
-        listClassic: async () => [],
-        inspectNative,
-        inspectClassic,
+        listLoop: async () => [{ workflow: 'loop', name: 'loop-change', phase: 'build' as const }],
+        listPipeline: async () => [],
+        inspectLoop,
+        inspectPipeline,
       },
     );
 
-    expect(decision).toEqual({ allowed: true, reason: 'native' });
-    expect(inspectNative).toHaveBeenCalledWith(
+    expect(decision).toEqual({ allowed: true, reason: 'loop' });
+    expect(inspectLoop).toHaveBeenCalledWith(
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Edit' },
-      'native-change',
+      'loop-change',
     );
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
-  it('routes one event to only the selected Native Guard', async () => {
+  it('routes one event to only the selected Loop Guard', async () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
-      change: 'native-change',
+      workflow: 'loop',
+      change: 'loop-change',
       branch: null,
     });
-    const inspectNative = vi.fn(async () => ({ allowed: true, reason: 'native' }));
-    const inspectClassic = vi.fn(async () => ({ allowed: true, reason: 'classic' }));
+    const inspectLoop = vi.fn(async () => ({ allowed: true, reason: 'loop' }));
+    const inspectPipeline = vi.fn(async () => ({ allowed: true, reason: 'pipeline' }));
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
       {
-        listNative: async () => [
-          { workflow: 'native', name: 'native-change', phase: 'build' as const },
+        listLoop: async () => [{ workflow: 'loop', name: 'loop-change', phase: 'build' as const }],
+        listPipeline: async () => [
+          { workflow: 'pipeline', name: 'pipeline-change', phase: 'design' as const },
         ],
-        listClassic: async () => [
-          { workflow: 'classic', name: 'classic-change', phase: 'design' as const },
-        ],
-        inspectNative,
-        inspectClassic,
+        inspectLoop,
+        inspectPipeline,
       },
     );
 
-    expect(decision).toEqual({ allowed: true, reason: 'native' });
-    expect(inspectNative).toHaveBeenCalledOnce();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(decision).toEqual({ allowed: true, reason: 'loop' });
+    expect(inspectLoop).toHaveBeenCalledOnce();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
-  it('does not enumerate Classic state when Native owns the current selection', async () => {
+  it('does not enumerate Pipeline state when Loop owns the current selection', async () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
-      change: 'native-change',
+      workflow: 'loop',
+      change: 'loop-change',
       branch: null,
     });
-    const listClassic = vi.fn(async () => {
-      throw new Error('unrelated Classic state is unreadable');
+    const listPipeline = vi.fn(async () => {
+      throw new Error('unrelated Pipeline state is unreadable');
     });
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative: async () => [
-          { workflow: 'native', name: 'native-change', phase: 'build' as const },
-        ],
-        listClassic,
+        listLoop: async () => [{ workflow: 'loop', name: 'loop-change', phase: 'build' as const }],
+        listPipeline,
       }),
     ).resolves.toEqual({
       status: 'owned',
-      owner: { workflow: 'native', name: 'native-change', phase: 'build' },
+      owner: { workflow: 'loop', name: 'loop-change', phase: 'build' },
     });
-    expect(listClassic).not.toHaveBeenCalled();
+    expect(listPipeline).not.toHaveBeenCalled();
   });
 
-  it('ignores the standalone root when default owner enumeration checks Classic', async () => {
+  it('ignores the standalone root when default owner enumeration checks Pipeline', async () => {
     await configureBoth();
     await fs.mkdir(path.join(root, 'openspec', 'changes', 'legacy'), { recursive: true });
     await fs.mkdir(path.join(root, 'docs', 'openspec', 'changes', 'docs'), { recursive: true });
@@ -203,9 +197,9 @@ describe('Owner Hook Router', () => {
     expect(resolution).toEqual({ status: 'none' });
   });
 
-  it('routes one event to only the selected Classic Guard', async () => {
+  it('routes one event to only the selected Pipeline Guard', async () => {
     await configureBoth();
-    const changeDir = path.join(root, 'openspec', 'changes', 'classic-change');
+    const changeDir = path.join(root, 'openspec', 'changes', 'pipeline-change');
     await fs.mkdir(changeDir, { recursive: true });
     await fs.writeFile(
       path.join(changeDir, '.owner.yaml'),
@@ -225,36 +219,34 @@ describe('Owner Hook Router', () => {
     );
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'classic',
-      change: 'classic-change',
+      workflow: 'pipeline',
+      change: 'pipeline-change',
       branch: null,
     });
-    const inspectNative = vi.fn(async () => ({ allowed: true, reason: 'native' }));
-    const inspectClassic = vi.fn(async () => ({ allowed: true, reason: 'classic' }));
+    const inspectLoop = vi.fn(async () => ({ allowed: true, reason: 'loop' }));
+    const inspectPipeline = vi.fn(async () => ({ allowed: true, reason: 'pipeline' }));
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Edit' },
       {
-        listNative: async () => [
-          { workflow: 'native', name: 'native-change', phase: 'shape' as const },
+        listLoop: async () => [{ workflow: 'loop', name: 'loop-change', phase: 'shape' as const }],
+        listPipeline: async () => [
+          { workflow: 'pipeline', name: 'pipeline-change', phase: 'build' as const },
         ],
-        listClassic: async () => [
-          { workflow: 'classic', name: 'classic-change', phase: 'build' as const },
-        ],
-        inspectNative,
-        inspectClassic,
+        inspectLoop,
+        inspectPipeline,
       },
     );
 
-    expect(decision).toEqual({ allowed: true, reason: 'classic' });
-    expect(inspectClassic).toHaveBeenCalledOnce();
-    expect(inspectNative).not.toHaveBeenCalled();
+    expect(decision).toEqual({ allowed: true, reason: 'pipeline' });
+    expect(inspectPipeline).toHaveBeenCalledOnce();
+    expect(inspectLoop).not.toHaveBeenCalled();
   });
 
-  it('does not enumerate Native state when Classic owns the current selection', async () => {
+  it('does not enumerate Loop state when Pipeline owns the current selection', async () => {
     await configureBoth();
-    const changeDir = path.join(root, 'openspec', 'changes', 'classic-change');
+    const changeDir = path.join(root, 'openspec', 'changes', 'pipeline-change');
     await fs.mkdir(changeDir, { recursive: true });
     await fs.writeFile(
       path.join(changeDir, '.owner.yaml'),
@@ -274,26 +266,26 @@ describe('Owner Hook Router', () => {
     );
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'classic',
-      change: 'classic-change',
+      workflow: 'pipeline',
+      change: 'pipeline-change',
       branch: null,
     });
-    const listNative = vi.fn(async () => {
-      throw new Error('unrelated Native state is unreadable');
+    const listLoop = vi.fn(async () => {
+      throw new Error('unrelated Loop state is unreadable');
     });
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative,
-        listClassic: async () => [
-          { workflow: 'classic', name: 'classic-change', phase: 'build' as const },
+        listLoop,
+        listPipeline: async () => [
+          { workflow: 'pipeline', name: 'pipeline-change', phase: 'build' as const },
         ],
       }),
     ).resolves.toEqual({
       status: 'owned',
-      owner: { workflow: 'classic', name: 'classic-change', phase: 'build' },
+      owner: { workflow: 'pipeline', name: 'pipeline-change', phase: 'build' },
     });
-    expect(listNative).not.toHaveBeenCalled();
+    expect(listLoop).not.toHaveBeenCalled();
   });
 
   it('fails closed when multiple workflows have active changes without a selection', async () => {
@@ -304,14 +296,14 @@ describe('Owner Hook Router', () => {
         root,
         { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
         {
-          listNative: async () => [
-            { workflow: 'native', name: 'native-change', phase: 'build' as const },
+          listLoop: async () => [
+            { workflow: 'loop', name: 'loop-change', phase: 'build' as const },
           ],
-          listClassic: async () => [
-            { workflow: 'classic', name: 'classic-change', phase: 'build' as const },
+          listPipeline: async () => [
+            { workflow: 'pipeline', name: 'pipeline-change', phase: 'build' as const },
           ],
-          inspectNative: vi.fn(),
-          inspectClassic: vi.fn(),
+          inspectLoop: vi.fn(),
+          inspectPipeline: vi.fn(),
         },
       ),
     ).resolves.toMatchObject({
@@ -322,74 +314,74 @@ describe('Owner Hook Router', () => {
 
   it('fails closed when one workflow has multiple active changes without a selection', async () => {
     await configureBoth();
-    const inspectNative = vi.fn();
-    const inspectClassic = vi.fn();
+    const inspectLoop = vi.fn();
+    const inspectPipeline = vi.fn();
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
       {
-        listNative: async () => [
-          { workflow: 'native', name: 'first', phase: 'build' as const },
-          { workflow: 'native', name: 'second', phase: 'build' as const },
+        listLoop: async () => [
+          { workflow: 'loop', name: 'first', phase: 'build' as const },
+          { workflow: 'loop', name: 'second', phase: 'build' as const },
         ],
-        listClassic: async () => [],
-        inspectNative,
-        inspectClassic,
+        listPipeline: async () => [],
+        inspectLoop,
+        inspectPipeline,
       },
     );
 
     expect(decision).toMatchObject({ allowed: false, reason: expect.stringContaining('first') });
-    expect(inspectNative).not.toHaveBeenCalled();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(inspectLoop).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
   it('allows ordinary development when a stale selection has no active replacement', async () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
-    const inspectNative = vi.fn();
-    const inspectClassic = vi.fn();
+    const inspectLoop = vi.fn();
+    const inspectPipeline = vi.fn();
 
     const decision = await inspectOwnerHook(
       root,
       { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
       {
-        listNative: async () => [],
-        listClassic: async () => [],
-        inspectNative,
-        inspectClassic,
+        listLoop: async () => [],
+        listPipeline: async () => [],
+        inspectLoop,
+        inspectPipeline,
       },
     );
 
     expect(decision).toEqual({ allowed: true, reason: 'No active Owner change' });
-    expect(inspectNative).not.toHaveBeenCalled();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(inspectLoop).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
   it('classifies a stale selection with zero active changes as none', async () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative: async () => [],
-        listClassic: async () => [],
+        listLoop: async () => [],
+        listPipeline: async () => [],
       }),
     ).resolves.toEqual({
       status: 'none',
       staleSelection: {
         code: 'target-missing',
-        reason: "selected native change 'missing-change' is missing or archived",
+        reason: "selected loop change 'missing-change' is missing or archived",
       },
     });
   });
@@ -398,24 +390,22 @@ describe('Owner Hook Router', () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative: async () => [
-          { workflow: 'native', name: 'only-active', phase: 'build' as const },
-        ],
-        listClassic: async () => [],
+        listLoop: async () => [{ workflow: 'loop', name: 'only-active', phase: 'build' as const }],
+        listPipeline: async () => [],
       }),
     ).resolves.toEqual({
       status: 'inferred',
-      owner: { workflow: 'native', name: 'only-active', phase: 'build' },
+      owner: { workflow: 'loop', name: 'only-active', phase: 'build' },
       staleSelection: {
         code: 'target-missing',
-        reason: "selected native change 'missing-change' is missing or archived",
+        reason: "selected loop change 'missing-change' is missing or archived",
       },
     });
   });
@@ -424,25 +414,27 @@ describe('Owner Hook Router', () => {
     await configureBoth();
     await writeOwnerCurrentSelection(root, {
       schema: 'owner.selection.v2',
-      workflow: 'native',
+      workflow: 'loop',
       change: 'missing-change',
       branch: null,
     });
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative: async () => [{ workflow: 'native', name: 'first', phase: 'build' as const }],
-        listClassic: async () => [{ workflow: 'classic', name: 'second', phase: 'build' as const }],
+        listLoop: async () => [{ workflow: 'loop', name: 'first', phase: 'build' as const }],
+        listPipeline: async () => [
+          { workflow: 'pipeline', name: 'second', phase: 'build' as const },
+        ],
       }),
     ).resolves.toEqual({
       status: 'ambiguous',
       candidates: [
-        { workflow: 'native', name: 'first', phase: 'build' },
-        { workflow: 'classic', name: 'second', phase: 'build' },
+        { workflow: 'loop', name: 'first', phase: 'build' },
+        { workflow: 'pipeline', name: 'second', phase: 'build' },
       ],
       staleSelection: {
         code: 'target-missing',
-        reason: "selected native change 'missing-change' is missing or archived",
+        reason: "selected loop change 'missing-change' is missing or archived",
       },
     });
   });
@@ -452,10 +444,10 @@ describe('Owner Hook Router', () => {
 
     await expect(
       resolveHookWorkflowOwner(root, {
-        listNative: async () => {
+        listLoop: async () => {
           throw new Error('invalid owner-state.yaml');
         },
-        listClassic: async () => [],
+        listPipeline: async () => [],
       }),
     ).resolves.toEqual({
       status: 'stale',
@@ -466,23 +458,23 @@ describe('Owner Hook Router', () => {
 
   it('allows ordinary development when no Owner change is active', async () => {
     await configureBoth();
-    const inspectNative = vi.fn();
-    const inspectClassic = vi.fn();
+    const inspectLoop = vi.fn();
+    const inspectPipeline = vi.fn();
 
     await expect(
       inspectOwnerHook(
         root,
         { intent: 'write', targets: ['src/app.ts'], toolName: 'Write' },
         {
-          listNative: async () => [],
-          listClassic: async () => [],
-          inspectNative,
-          inspectClassic,
+          listLoop: async () => [],
+          listPipeline: async () => [],
+          inspectLoop,
+          inspectPipeline,
         },
       ),
     ).resolves.toEqual({ allowed: true, reason: 'No active Owner change' });
-    expect(inspectNative).not.toHaveBeenCalled();
-    expect(inspectClassic).not.toHaveBeenCalled();
+    expect(inspectLoop).not.toHaveBeenCalled();
+    expect(inspectPipeline).not.toHaveBeenCalled();
   });
 
   it('allows ordinary development when configured workflow roots have not been created', async () => {
@@ -500,15 +492,13 @@ describe('Owner Hook Router', () => {
   it('infers the only active change without writing selection', async () => {
     await configureBoth();
     const resolution = await resolveHookWorkflowOwner(root, {
-      listNative: async () => [
-        { workflow: 'native', name: 'only-change', phase: 'verify' as const },
-      ],
-      listClassic: async () => [],
+      listLoop: async () => [{ workflow: 'loop', name: 'only-change', phase: 'verify' as const }],
+      listPipeline: async () => [],
     });
 
     expect(resolution).toEqual({
       status: 'inferred',
-      owner: { workflow: 'native', name: 'only-change', phase: 'verify' },
+      owner: { workflow: 'loop', name: 'only-change', phase: 'verify' },
     });
     await expect(fs.access(path.join(root, '.owner', 'current-change.json'))).rejects.toMatchObject(
       {
@@ -517,19 +507,19 @@ describe('Owner Hook Router', () => {
     );
   });
 
-  it('treats no-config projects as Classic-only legacy projects', async () => {
+  it('treats no-config projects as Pipeline-only legacy projects', async () => {
     const resolution = await resolveHookWorkflowOwner(root, {
-      listNative: vi.fn(async () => [
-        { workflow: 'native', name: 'ignored-native', phase: 'build' as const },
+      listLoop: vi.fn(async () => [
+        { workflow: 'loop', name: 'ignored-loop', phase: 'build' as const },
       ]),
-      listClassic: async () => [
-        { workflow: 'classic', name: 'legacy-classic', phase: 'open' as const },
+      listPipeline: async () => [
+        { workflow: 'pipeline', name: 'legacy-pipeline', phase: 'open' as const },
       ],
     });
 
     expect(resolution).toEqual({
       status: 'inferred',
-      owner: { workflow: 'classic', name: 'legacy-classic', phase: 'open' },
+      owner: { workflow: 'pipeline', name: 'legacy-pipeline', phase: 'open' },
     });
   });
 });

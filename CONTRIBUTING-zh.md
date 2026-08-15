@@ -51,13 +51,13 @@ pnpm build
 | 命令                         | 用途                                                                      |
 | ---------------------------- | ------------------------------------------------------------------------- |
 | `pnpm dev`                   | TypeScript watch 模式                                                     |
-| `pnpm build`                 | 全量构建（Classic、Native、Entry runtime）                                |
-| `pnpm build:classic-runtime` | 单独打包 Classic runtime（`scripts/build/build-classic-runtime.mjs`）     |
-| `pnpm build:native-runtime`  | 单独打包 Native runtime（`scripts/build/build-native-runtime.mjs`）       |
+| `pnpm build`                 | 全量构建（Pipeline、Loop、Entry runtime）                                |
+| `pnpm build:pipeline-runtime` | 单独打包 Pipeline runtime（`scripts/build/build-pipeline-runtime.mjs`）     |
+| `pnpm build:loop-runtime`  | 单独打包 Loop runtime（`scripts/build/build-loop-runtime.mjs`）       |
 | `pnpm build:entry-runtime`   | 单独打包共享入口与 Hook Router（`scripts/build/build-entry-runtime.mjs`） |
 | `pnpm test`                  | 运行单元测试（Vitest）                                                    |
 | `pnpm test:coverage`         | 运行测试并生成覆盖率                                                      |
-| `pnpm test:script-smoke`     | 运行 Classic 启动器 smoke 套件，CI 入口                                   |
+| `pnpm test:script-smoke`     | 运行 Pipeline 启动器 smoke 套件，CI 入口                                   |
 | `pnpm test:watch`            | Vitest watch 模式                                                         |
 | `pnpm lint`                  | ESLint + 架构 linter                                                      |
 | `pnpm lint:architecture`     | 仓库分层 linter（`scripts/lint/architecture.mjs`）                        |
@@ -65,13 +65,13 @@ pnpm build
 | `pnpm format`                | Prettier 格式化 `app/`、`domains/`、`platform/`                           |
 | `pnpm format:check`          | Prettier 校验（CI 强制）                                                  |
 
-如果改动 Workflow runtime，先按归属运行对应新鲜度检查；Classic launcher 另有定向 smoke：
+如果改动 Workflow runtime，先按归属运行对应新鲜度检查；Pipeline launcher 另有定向 smoke：
 
 ```bash
-node scripts/build/build-classic-runtime.mjs --check
-node scripts/build/build-native-runtime.mjs --check
+node scripts/build/build-pipeline-runtime.mjs --check
+node scripts/build/build-loop-runtime.mjs --check
 node scripts/build/build-entry-runtime.mjs --check
-npx vitest run test/domains/owner-classic/owner-scripts.test.ts
+npx vitest run test/domains/owner-pipeline/owner-scripts.test.ts
 ```
 
 除纯文档改动外，开 PR 或更新 PR 前请运行完整验证：
@@ -164,8 +164,8 @@ git push --force-with-lease origin dev
 示例：
 
 ```text
-feat(native): add archive preview output
-fix(classic): preserve checkpoint recovery state
+feat(loop): add archive preview output
+fix(pipeline): preserve checkpoint recovery state
 docs: update contributor commit rules
 ```
 
@@ -202,14 +202,14 @@ npx prettier --check CONTRIBUTING.md CONTRIBUTING-zh.md
 ```text
 app/                 # CLI 入口与命令编排层。只组合 domain/platform 能力，不承载领域规则
 ├── cli/             # Commander 注册
-└── commands/        # owner init / status / workflow / resume-probe / doctor / update / uninstall / native / classic
+└── commands/        # owner init / status / workflow / resume-probe / doctor / update / uninstall / loop / pipeline
 
 domains/             # 业务领域模块
 ├── engine/          # 共享执行状态、循环、守卫与检查
 ├── integrations/    # OpenSpec 与 Superpowers 集成
-├── owner-classic/   # Classic 工作流（state / guard / handoff / archive / intent / hook-guard）
-├── owner-entry/     # Native/Classic 共享入口、selection 与 Hook Router
-├── owner-native/    # Native 工作流（change / state / evidence / archive / guard）
+├── owner-pipeline/   # Pipeline 工作流（state / guard / handoff / archive / intent / hook-guard）
+├── owner-entry/     # Loop/Pipeline 共享入口、selection 与 Hook Router
+├── owner-loop/    # Loop 工作流（change / state / evidence / archive / guard）
 ├── skill/           # Owner Skill 安装、更新与卸载
 └── workflow-contract/ # 跨 workflow 的契约
 
@@ -221,7 +221,7 @@ platform/            # 平台适配层，domain 不直接散落平台差异
 └── version/         # 版本比较
 
 scripts/             # 仓库自动化脚本（构建/发布/lint/install）
-├── build/           # Classic、Native、Entry runtime builder
+├── build/           # Pipeline、Loop、Entry runtime builder
 ├── install/         # postinstall.js
 ├── lib/             # 跨脚本工具
 ├── lint/            # architecture.mjs、gitignore-top-level.mjs
@@ -244,7 +244,7 @@ docs/                # 架构、运维、设计文档（docs/superpowers/ 由工
 - 顶层目录白名单（`config/repository-layout.json` 的 `allowedTopLevelEntries`）。
 - 活跃源码根只能是 `app` / `domains` / `platform`（`sourceRoots`）。
 - 各层的子模块（`appModules` / `domainModules` / `platformModules` / `scriptModules`）。
-- Classic、Native 与 Entry runtime 入口和生成物一致性。
+- Pipeline、Loop 与 Entry runtime 入口和生成物一致性。
 - 内置 Skill 根目录与 install manifest 一致。
 - 测试归属（见下节）。
 - 禁止恢复已迁移走的旧目录（例如 `src/`、`test/ts/`）。
@@ -265,7 +265,7 @@ docs/                # 架构、运维、设计文档（docs/superpowers/ 由工
 | `test/fixtures/`         | 测试数据                                                                               |
 | `test/helpers/`          | 测试工具（`owner-test-utils.ts`、`ensure-cli-built.ts`、`workflow-plan.ts`）           |
 
-禁止新增 `test/ts/` 这种横向桶；旧文件应迁移到上面对应目录。CI smoke 入口是 `pnpm test:script-smoke`，GitHub Actions 与本地跑同一套 Classic 启动器 smoke。
+禁止新增 `test/ts/` 这种横向桶；旧文件应迁移到上面对应目录。CI smoke 入口是 `pnpm test:script-smoke`，GitHub Actions 与本地跑同一套 Pipeline 启动器 smoke。
 
 ## 宿主边界
 
@@ -276,7 +276,7 @@ Owner 只支持 Claude Code 与 Codex。除非产品范围被明确调整，否�
 1. 先在 `assets/skills-zh/` 编写或更新中文版本。
 2. 确认措辞与行为后再同步 `assets/skills/` 下的英文版本，两版行为等价。
 3. 新增 Skill 时同步加入 `assets/manifest.json`。
-4. 视情况补充生成资产或安装行为的测试（`test/domains/skill/`、`test/repository/classic-runtime-assets.test.ts`）。
+4. 视情况补充生成资产或安装行为的测试（`test/domains/skill/`、`test/repository/pipeline-runtime-assets.test.ts`）。
 5. 改 Skill 样板（boilerplate）时，所有 `SKILL.md` 与 `reference/*` 中的样板要全量同步。
 6. **不能直接修改 Superpowers 和 OpenSpec 的原始 Skill。**
 
@@ -290,20 +290,20 @@ Skill 设计建议：
 
 工作流脚本是 **Node.js 启动器或生成 bundle（`.mjs`）**，只依赖 Node.js，**不依赖 Bash / Git Bash / WSL**，在 macOS、Linux、Windows 上行为一致。
 
-- Classic 的薄 launcher 位于 `assets/skills/owner/scripts/`，真实逻辑在 `domains/owner-classic/`，由 `pnpm build:classic-runtime` 生成 `owner-runtime.mjs`。
-- Native 真实逻辑位于 `domains/owner-native/`，由 `pnpm build:native-runtime` 生成 `assets/skills/owner-native/scripts/owner-native-runtime.mjs`。Native 主流程和 Guard 不得依赖外部 Skill。
+- Pipeline 的薄 launcher 位于 `assets/skills/owner/scripts/`，真实逻辑在 `domains/owner-pipeline/`，由 `pnpm build:pipeline-runtime` 生成 `owner-runtime.mjs`。
+- Loop 真实逻辑位于 `domains/owner-loop/`，由 `pnpm build:loop-runtime` 生成 `assets/skills/owner-loop/scripts/owner-loop-runtime.mjs`。Loop 主流程和 Guard 不得依赖外部 Skill。
 - 共享入口、selection 与 Hook Router 位于 `domains/owner-entry/`，由 `pnpm build:entry-runtime` 生成 `owner-entry-runtime.mjs` 和 `owner-hook-router.mjs`。
-- 每个平台只安装一份 `owner-workflow-guard` Rule；支持 Hook 的平台只安装一个 `owner-hook-router.mjs`。Router 根据 `.owner/current-change.json` 一次只调用 Native 或 Classic 的一个 Guard。两边的阶段、目录、schema 与 Guard 逻辑保持独立。
-- `owner-hook-guard.mjs` 和 `owner-native-hook-guard.mjs` 是各自 runtime 的薄 Guard launcher，不直接作为平台 Hook 安装。
+- 每个平台只安装一份 `owner-workflow-guard` Rule；支持 Hook 的平台只安装一个 `owner-hook-router.mjs`。Router 根据 `.owner/current-change.json` 一次只调用 Loop 或 Pipeline 的一个 Guard。两边的阶段、目录、schema 与 Guard 逻辑保持独立。
+- `owner-hook-guard.mjs` 和 `owner-loop-hook-guard.mjs` 是各自 runtime 的薄 Guard launcher，不直接作为平台 Hook 安装。
 - 跨平台由 Node 保证：hash 用 `node:crypto`，YAML 用 `yaml` 包，子进程用 `child_process`（构建/校验命令走 `spawnSync(cmd, { shell: true })`）。不再有 `sed -i` / `sha256sum` vs `shasum` / `pipefail` 等 shell 可移植性问题。
 - `owner-env.mjs` 打印自身所在目录，skill 样板通过 `node "$OWNER_ENV"` 解析同级启动器路径，命令统一为 `node "$OWNER_STATE" ...` 形式。
-- 新增或重命名入口/生成物时，必须同步 `assets/manifest.json`、`config/repository-layout.json` 的对应 runtime 映射，以及 `test/repository/*-runtime-assets.test.ts`；Classic launcher 还需同步 `test/domains/owner-classic/owner-scripts.test.ts` 的 fixture 列表。
+- 新增或重命名入口/生成物时，必须同步 `assets/manifest.json`、`config/repository-layout.json` 的对应 runtime 映射，以及 `test/repository/*-runtime-assets.test.ts`；Pipeline launcher 还需同步 `test/domains/owner-pipeline/owner-scripts.test.ts` 的 fixture 列表。
 
 运行时分发：
 
 ```text
-owner-runtime.mjs        <- domains/owner-classic/*
-owner-native-runtime.mjs <- domains/owner-native/*
+owner-runtime.mjs        <- domains/owner-pipeline/*
+owner-loop-runtime.mjs <- domains/owner-loop/*
 owner-entry-runtime.mjs  <- domains/owner-entry/*
 owner-hook-router.mjs    <- 平台唯一 Hook 入口 -> 当前 selection 的一个 workflow Guard
 ```
@@ -312,11 +312,11 @@ owner-hook-router.mjs    <- 平台唯一 Hook 入口 -> 当前 selection 的一�
 
 修改 `.owner.yaml` 状态文件字段时，需要同步三处（均在 TypeScript 中）：
 
-1. `domains/owner-classic/classic-state-command.ts`：`set` 白名单与 enum 校验（`SETTABLE_FIELDS` / `MACHINE_OWNED_FIELDS`）。
-2. `domains/owner-classic/classic-validate-command.ts`：schema 校验与已知字段集合。
-3. `test/domains/owner-classic/owner-scripts.test.ts`：测试中的 YAML 示例与断言。
+1. `domains/owner-pipeline/pipeline-state-command.ts`：`set` 白名单与 enum 校验（`SETTABLE_FIELDS` / `MACHINE_OWNED_FIELDS`）。
+2. `domains/owner-pipeline/pipeline-validate-command.ts`：schema 校验与已知字段集合。
+3. `test/domains/owner-pipeline/owner-scripts.test.ts`：测试中的 YAML 示例与断言。
 
-改完 1/2 后运行 `pnpm build` 重新生成 `owner-runtime.mjs`，否则 `classic-runtime.test.ts` 的新鲜度检查会失败。
+改完 1/2 后运行 `pnpm build` 重新生成 `owner-runtime.mjs`，否则 `pipeline-runtime.test.ts` 的新鲜度检查会失败。
 
 ## 文档与双语规范
 

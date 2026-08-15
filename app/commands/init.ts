@@ -26,7 +26,7 @@ import {
   copyOwnerSkillsForPlatform,
   copyOwnerRulesForPlatform,
   createWorkingDirs,
-  prepareNativeSkillInstallTarget,
+  prepareLoopSkillInstallTarget,
 } from '../../domains/skill/platform-install.js';
 import {
   reconcileOwnerHooksForPlatform,
@@ -36,26 +36,23 @@ import { syncOwnerProjectInstructions } from '../../domains/skill/project-instru
 import { LANGUAGES, type LanguageConfig } from '../../domains/skill/languages.js';
 import { resolveInitWorkflow } from '../../domains/owner-entry/init-workflow.js';
 import type { OwnerWorkflow, InitWorkflowSelection } from '../../domains/owner-entry/types.js';
-import { migrateLegacyClassicSelection } from '../../domains/owner-entry/current-selection.js';
-import { defaultProjectConfig } from '../../domains/owner-native/native-config.js';
-import {
-  ensureNativeDirectories,
-  nativeProjectPaths,
-} from '../../domains/owner-native/native-paths.js';
+import { migrateLegacyPipelineSelection } from '../../domains/owner-entry/current-selection.js';
+import { defaultProjectConfig } from '../../domains/owner-loop/loop-config.js';
+import { ensureLoopDirectories, loopProjectPaths } from '../../domains/owner-loop/loop-paths.js';
 import {
   installOpenSpec,
   isCommandAvailable,
   isOpenSpecCliCompatible,
 } from '../../domains/integrations/openspec.js';
 import {
-  assertClassicLayoutInitializationSafe,
-  beginClassicLayoutInitialization,
-  checkpointClassicLayoutInitialization,
-  completeClassicLayoutInitialization,
-  type ClassicLayoutInitializationPermit,
-} from '../../domains/owner-classic/classic-layout-initialization.js';
-import { classicLayoutPaths } from '../../domains/owner-classic/classic-layout.js';
-import { assertClassicOpenSpecRootHealthy } from '../../domains/owner-classic/classic-openspec-root.js';
+  assertPipelineLayoutInitializationSafe,
+  beginPipelineLayoutInitialization,
+  checkpointPipelineLayoutInitialization,
+  completePipelineLayoutInitialization,
+  type PipelineLayoutInitializationPermit,
+} from '../../domains/owner-pipeline/pipeline-layout-initialization.js';
+import { pipelineLayoutPaths } from '../../domains/owner-pipeline/pipeline-layout.js';
+import { assertPipelineOpenSpecRootHealthy } from '../../domains/owner-pipeline/pipeline-openspec-root.js';
 import {
   readWorkflowProjectConfigDocument,
   readWorkflowProjectConfigSnapshot,
@@ -97,30 +94,30 @@ function workflowChoiceNames(lang: string): Array<{
   if (lang === 'zh') {
     return [
       {
-        name: 'Native — 面向强模型的轻量自主流程，自带澄清、状态、检查与自动推进，不依赖外部 Skill',
-        value: 'native',
+        name: 'Loop — 面向强模型的轻量自主流程，自带澄清、状态、检查与自动推进，不依赖外部 Skill',
+        value: 'loop',
       },
       {
-        name: 'Classic — 面向高约束或较弱模型的完整 Spec/TDD 阶段流程，使用 OpenSpec 与 Superpowers',
-        value: 'classic',
+        name: 'Pipeline — 面向高约束或较弱模型的完整 Spec/TDD 阶段流程，使用 OpenSpec 与 Superpowers',
+        value: 'pipeline',
       },
       {
-        name: '两者 — 同时安装两套独立入口；/owner 默认使用 Native，也可显式进入 Classic',
+        name: '两者 — 同时安装两套独立入口；/owner 默认使用 Loop，也可显式进入 Pipeline',
         value: 'both',
       },
     ];
   }
   return [
     {
-      name: 'Native — lightweight autonomy for strong models, with clarification, state, checks, and auto-progression; no external skills',
-      value: 'native',
+      name: 'Loop — lightweight autonomy for strong models, with clarification, state, checks, and auto-progression; no external skills',
+      value: 'loop',
     },
     {
-      name: 'Classic — full Spec/TDD phases for high-control work or weaker models, using OpenSpec and Superpowers',
-      value: 'classic',
+      name: 'Pipeline — full Spec/TDD phases for high-control work or weaker models, using OpenSpec and Superpowers',
+      value: 'pipeline',
     },
     {
-      name: 'Both — install two independent entries; /owner defaults to Native and Classic remains explicit',
+      name: 'Both — install two independent entries; /owner defaults to Loop and Pipeline remains explicit',
       value: 'both',
     },
   ];
@@ -312,10 +309,10 @@ async function selectNpmDeps(
   lang: string,
   workflow: OwnerWorkflow,
 ): Promise<Set<NpmDepId>> {
-  if (workflow === 'native') return new Set();
+  if (workflow === 'loop') return new Set();
 
   const openSpecInstalled = isCommandAvailable('openspec');
-  const openSpecRequired = workflow === 'classic' && !isOpenSpecCliCompatible();
+  const openSpecRequired = workflow === 'pipeline' && !isOpenSpecCliCompatible();
   const superpowersInstalled = spPlatformIds.length === 0 ? true : undefined;
 
   const states: NpmDepState[] = [
@@ -385,8 +382,8 @@ function displaySummary(
   scope: InstallScope,
   lang: string,
   workflowSelection: InitWorkflowSelection,
-  nativeArtifactRoot: string | null,
-  classicArtifactLayout: 'legacy' | 'docs' | null,
+  loopArtifactRoot: string | null,
+  pipelineArtifactLayout: 'legacy' | 'docs' | null,
 ): void {
   const scopeLabel = scope === 'global' ? os.homedir() : 'project';
   const componentStatuses: Array<[keyof Omit<PlatformResult, 'platform'>, string]> = [
@@ -430,21 +427,19 @@ function displaySummary(
     }
   }
 
-  const showNativeWorkspace =
-    scope === 'project' &&
-    includesWorkflow(workflowSelection, 'native') &&
-    nativeArtifactRoot !== null;
-  const showClassicWorkspace =
-    scope === 'project' && includesWorkflow(workflowSelection, 'classic');
-  if (showNativeWorkspace || showClassicWorkspace) {
+  const showLoopWorkspace =
+    scope === 'project' && includesWorkflow(workflowSelection, 'loop') && loopArtifactRoot !== null;
+  const showPipelineWorkspace =
+    scope === 'project' && includesWorkflow(workflowSelection, 'pipeline');
+  if (showLoopWorkspace || showPipelineWorkspace) {
     console.log(`\n  ${t(lang, 'workingDirs')}`);
-    if (showNativeWorkspace) {
-      const root = nativeArtifactRoot === '.' ? '' : `${nativeArtifactRoot}/`;
-      console.log(`    ${t(lang, 'nativeWorkingDir')} ${root}owner/`);
+    if (showLoopWorkspace) {
+      const root = loopArtifactRoot === '.' ? '' : `${loopArtifactRoot}/`;
+      console.log(`    ${t(lang, 'loopWorkingDir')} ${root}owner/`);
     }
-    if (showClassicWorkspace) {
-      const openSpecRoot = classicArtifactLayout === 'docs' ? 'docs/openspec/' : 'openspec/';
-      console.log(`    ${lang === 'zh' ? 'Classic：' : 'Classic: '}${openSpecRoot}`);
+    if (showPipelineWorkspace) {
+      const openSpecRoot = pipelineArtifactLayout === 'docs' ? 'docs/openspec/' : 'openspec/';
+      console.log(`    ${lang === 'zh' ? 'Pipeline：' : 'Pipeline: '}${openSpecRoot}`);
       console.log(
         '    Superpowers: docs/superpowers/specs/, docs/superpowers/plans/, docs/superpowers/reports/',
       );
@@ -454,7 +449,7 @@ function displaySummary(
   if (failures.length === 0) {
     console.log(`\n  ${t(lang, 'getStarted')}`);
     console.log(`    ${t(lang, 'getStartedOwner')}`);
-    if (includesWorkflow(workflowSelection, 'classic')) {
+    if (includesWorkflow(workflowSelection, 'pipeline')) {
       console.log(`    ${t(lang, 'getStartedHotfix')}`);
       console.log(`    ${t(lang, 'getStartedTweak')}`);
     }
@@ -488,7 +483,7 @@ export async function initCommand(
     scope === 'project'
       ? await readWorkflowProjectConfigSnapshot(projectPath, {
           allowPartialProject: true,
-          allowMissingNativeFields: true,
+          allowMissingLoopFields: true,
         })
       : null;
   const suggestedWorkflowDecision =
@@ -496,7 +491,7 @@ export async function initCommand(
       ? await resolveInitWorkflow(
           projectPath,
           {
-            workflow: options.workflow === 'both' ? 'native' : options.workflow,
+            workflow: options.workflow === 'both' ? 'loop' : options.workflow,
             artifactRoot: options.artifactRoot,
           },
           initialProjectConfigSnapshot!,
@@ -505,19 +500,19 @@ export async function initCommand(
   const configuredWorkflows = initialProjectConfigSnapshot?.document?.config?.workflows ?? [];
   const suggestedWorkflowSelection: InitWorkflowSelection =
     options.workflow === undefined &&
-    configuredWorkflows.includes('native') &&
-    configuredWorkflows.includes('classic')
+    configuredWorkflows.includes('loop') &&
+    configuredWorkflows.includes('pipeline')
       ? 'both'
-      : (suggestedWorkflowDecision?.workflow ?? 'native');
+      : (suggestedWorkflowDecision?.workflow ?? 'loop');
   const workflowSelection = await selectWorkflow(options, lang, suggestedWorkflowSelection);
   if (
     scope === 'global' &&
     options.artifactRoot !== undefined &&
-    !includesWorkflow(workflowSelection, 'native')
+    !includesWorkflow(workflowSelection, 'loop')
   ) {
-    throw new Error('--root is only valid when the Native workflow is enabled');
+    throw new Error('--root is only valid when the Loop workflow is enabled');
   }
-  const workflow: OwnerWorkflow = workflowSelection === 'both' ? 'native' : workflowSelection;
+  const workflow: OwnerWorkflow = workflowSelection === 'both' ? 'loop' : workflowSelection;
   const workflowDecision =
     scope === 'project'
       ? options.workflow === undefined && (options.yes || options.json)
@@ -534,13 +529,13 @@ export async function initCommand(
   const initialProjectConfigDocument = initialProjectConfigSnapshot?.document ?? null;
   const workflowSource = workflowDecision?.source ?? 'global-install';
   const installMode =
-    workflowSelection === 'native' ? 'copy' : await selectInstallMode(options, lang);
+    workflowSelection === 'loop' ? 'copy' : await selectInstallMode(options, lang);
 
   const selectedPlatformTargets: PlatformTargetResolution[] = options.platform
     ? [resolvePlatformTarget(options.platform, scope)]
     : (await selectPlatforms(detected, options, lang)).map((platformId) => ({
         platform: SUPPORTED_PLATFORMS.find((platform) => platform.id === platformId)!,
-        native: true,
+        loop: true,
       }));
   const selectedPlatformIds = selectedPlatformTargets.map((target) => target.platform.id);
   if (selectedPlatformTargets.length === 0) {
@@ -553,11 +548,11 @@ export async function initCommand(
             language: language.id,
             workflow,
             initializedWorkflows:
-              workflowSelection === 'both' ? ['native', 'classic'] : [workflowSelection],
+              workflowSelection === 'both' ? ['loop', 'pipeline'] : [workflowSelection],
             workflowSource,
             projectConfigCreated: false,
             projectConfigUpdated: false,
-            nativeArtifactRoot: null,
+            loopArtifactRoot: null,
             selectedPlatforms: [],
             status: 'incomplete',
             failures: [{ component: 'Owner', reason: 'no platforms selected' }],
@@ -579,7 +574,7 @@ export async function initCommand(
 
   type PlatformPlan = ComponentPlan & {
     platform: Platform;
-    native: boolean;
+    loop: boolean;
     hasOS: boolean;
     hasSP: boolean;
     hasCM: boolean;
@@ -588,13 +583,13 @@ export async function initCommand(
   const plans: PlatformPlan[] = [];
 
   for (const target of selectedPlatformTargets) {
-    const { platform, native } = target;
+    const { platform, loop } = target;
     const hasOS =
-      native && includesWorkflow(workflowSelection, 'classic')
+      loop && includesWorkflow(workflowSelection, 'pipeline')
         ? await hasSkills(baseDir, platform, 'openspec', selectedPlatforms, scope)
         : false;
     const hasSP =
-      native && includesWorkflow(workflowSelection, 'classic')
+      loop && includesWorkflow(workflowSelection, 'pipeline')
         ? await hasSkills(baseDir, platform, 'superpowers', selectedPlatforms, scope)
         : false;
     const hasCM = await hasSkills(baseDir, platform, 'owner', selectedPlatforms, scope, {
@@ -602,19 +597,19 @@ export async function initCommand(
     });
 
     let osAction =
-      native && includesWorkflow(workflowSelection, 'classic')
+      loop && includesWorkflow(workflowSelection, 'pipeline')
         ? resolveAction(hasOS, options)
         : 'skip';
     let spAction =
-      native && includesWorkflow(workflowSelection, 'classic')
+      loop && includesWorkflow(workflowSelection, 'pipeline')
         ? resolveAction(hasSP, options)
         : 'skip';
     let cmAction =
-      workflowSelection === 'classic'
+      workflowSelection === 'pipeline'
         ? resolveOwnerAction(hasCM, options)
         : resolveAction(hasCM, options);
     if (
-      includesWorkflow(workflowSelection, 'native') &&
+      includesWorkflow(workflowSelection, 'loop') &&
       hasCM &&
       (options.yes || options.json) &&
       !options.skipExisting &&
@@ -652,14 +647,14 @@ export async function initCommand(
       }
     }
 
-    plans.push({ platform, native, osAction, spAction, cmAction, hasOS, hasSP, hasCM });
+    plans.push({ platform, loop, osAction, spAction, cmAction, hasOS, hasSP, hasCM });
   }
 
-  if (includesWorkflow(workflowSelection, 'native') && scope === 'project') {
+  if (includesWorkflow(workflowSelection, 'loop') && scope === 'project') {
     for (const plan of plans) {
       const action =
         plan.cmAction === 'overwrite' ? 'overwrite' : plan.cmAction === 'install' ? 'fill' : 'skip';
-      await prepareNativeSkillInstallTarget(
+      await prepareLoopSkillInstallTarget(
         baseDir,
         plan.platform,
         scope,
@@ -679,49 +674,49 @@ export async function initCommand(
     spPlatformIds,
     options,
     lang,
-    includesWorkflow(workflowSelection, 'classic') ? 'classic' : 'native',
+    includesWorkflow(workflowSelection, 'pipeline') ? 'pipeline' : 'loop',
   );
   const shouldInstallOpenSpecCli = selectedNpmDeps.has('openspec');
   const shouldInstallSuperpowers = selectedNpmDeps.has('superpowers');
-  const requiresClassicArtifactRoot =
+  const requiresPipelineArtifactRoot =
     scope === 'project' &&
     workflowDecision !== null &&
-    includesWorkflow(workflowSelection, 'classic');
+    includesWorkflow(workflowSelection, 'pipeline');
 
   let osGlobalStatus: InstallStatus = 'skipped';
   let osFailureReason: string | undefined;
-  let classicOpenSpecRootReady = !requiresClassicArtifactRoot;
-  let classicLayoutInitializationPermit: ClassicLayoutInitializationPermit | undefined;
-  if (requiresClassicArtifactRoot) {
+  let pipelineOpenSpecRootReady = !requiresPipelineArtifactRoot;
+  let pipelineLayoutInitializationPermit: PipelineLayoutInitializationPermit | undefined;
+  if (requiresPipelineArtifactRoot) {
     try {
-      let initialization = await assertClassicLayoutInitializationSafe(
+      let initialization = await assertPipelineLayoutInitializationSafe(
         projectPath,
-        workflowDecision!.classicArtifactLayout,
+        workflowDecision!.pipelineArtifactLayout,
         undefined,
         initialProjectConfigSnapshot?.identity,
       );
-      initialization = await beginClassicLayoutInitialization(projectPath, initialization);
-      classicLayoutInitializationPermit = initialization.initializationPermit;
+      initialization = await beginPipelineLayoutInitialization(projectPath, initialization);
+      pipelineLayoutInitializationPermit = initialization.initializationPermit;
     } catch (error) {
       osGlobalStatus = 'failed';
       osFailureReason = (error as Error).message;
-      log(`  Classic layout initialization: failed (${osFailureReason})`);
+      log(`  Pipeline layout initialization: failed (${osFailureReason})`);
     }
   }
-  const assertClassicProjectMutationAllowed =
+  const assertPipelineProjectMutationAllowed =
     scope === 'project' &&
     workflowDecision &&
-    classicLayoutInitializationPermit &&
-    includesWorkflow(workflowSelection, 'classic')
+    pipelineLayoutInitializationPermit &&
+    includesWorkflow(workflowSelection, 'pipeline')
       ? async () => {
-          await assertClassicLayoutInitializationSafe(
+          await assertPipelineLayoutInitializationSafe(
             projectPath,
-            workflowDecision.classicArtifactLayout,
-            classicLayoutInitializationPermit,
+            workflowDecision.pipelineArtifactLayout,
+            pipelineLayoutInitializationPermit,
           );
         }
       : undefined;
-  if ((osToolIds.length > 0 || requiresClassicArtifactRoot) && !osFailureReason) {
+  if ((osToolIds.length > 0 || requiresPipelineArtifactRoot) && !osFailureReason) {
     log(
       `\n  ${t(lang, 'installingOS')} ${
         osToolIds.length > 0 ? osToolIds.join(', ') : 'artifact root'
@@ -733,31 +728,31 @@ export async function initCommand(
         osToolIds,
         scope,
         shouldInstallOpenSpecCli,
-        scope === 'project' ? workflowDecision?.classicArtifactLayout : 'legacy',
-        assertClassicProjectMutationAllowed,
+        scope === 'project' ? workflowDecision?.pipelineArtifactLayout : 'legacy',
+        assertPipelineProjectMutationAllowed,
         (error) => {
           osFailureReason = error.message;
         },
       );
-      if (osGlobalStatus === 'installed' && requiresClassicArtifactRoot) {
-        await assertClassicProjectMutationAllowed?.();
-        await assertClassicOpenSpecRootHealthy(
+      if (osGlobalStatus === 'installed' && requiresPipelineArtifactRoot) {
+        await assertPipelineProjectMutationAllowed?.();
+        await assertPipelineOpenSpecRootHealthy(
           projectPath,
-          classicLayoutPaths(projectPath, workflowDecision!.classicArtifactLayout),
+          pipelineLayoutPaths(projectPath, workflowDecision!.pipelineArtifactLayout),
         );
-        await assertClassicProjectMutationAllowed?.();
-        if (classicLayoutInitializationPermit) {
-          await checkpointClassicLayoutInitialization(
+        await assertPipelineProjectMutationAllowed?.();
+        if (pipelineLayoutInitializationPermit) {
+          await checkpointPipelineLayoutInitialization(
             projectPath,
-            classicLayoutInitializationPermit,
+            pipelineLayoutInitializationPermit,
           );
         }
-        classicOpenSpecRootReady = true;
-      } else if (requiresClassicArtifactRoot) {
+        pipelineOpenSpecRootReady = true;
+      } else if (requiresPipelineArtifactRoot) {
         osFailureReason ??=
           osGlobalStatus === 'skipped'
-            ? 'Classic OpenSpec artifact root initialization skipped because a compatible OpenSpec CLI is unavailable'
-            : 'Classic OpenSpec artifact root initialization failed';
+            ? 'Pipeline OpenSpec artifact root initialization skipped because a compatible OpenSpec CLI is unavailable'
+            : 'Pipeline OpenSpec artifact root initialization failed';
         osGlobalStatus = 'failed';
       }
     } catch (error) {
@@ -938,13 +933,13 @@ export async function initCommand(
     results.push({
       platform,
       openspec:
-        osToolIds.includes(platform.openspecToolId) || requiresClassicArtifactRoot
+        osToolIds.includes(platform.openspecToolId) || requiresPipelineArtifactRoot
           ? osGlobalStatus
           : 'skipped',
       superpowers: plan.spAction !== 'skip' ? spGlobalStatus : 'skipped',
       owner: cmStatus,
       failures: [
-        ...((osToolIds.includes(platform.openspecToolId) || requiresClassicArtifactRoot) &&
+        ...((osToolIds.includes(platform.openspecToolId) || requiresPipelineArtifactRoot) &&
         osGlobalStatus === 'failed'
           ? [
               {
@@ -974,41 +969,41 @@ export async function initCommand(
 
   let projectConfigCreated = false;
   let projectConfigUpdated = false;
-  let nativeArtifactRoot: string | null = null;
+  let loopArtifactRoot: string | null = null;
   let workingDirsCreated = false;
   let finalizationFailure: string | undefined;
   const ownerInstallComplete =
     results.length > 0 && results.every((result) => result.owner !== 'failed');
-  const projectInitializationComplete = ownerInstallComplete && classicOpenSpecRootReady;
+  const projectInitializationComplete = ownerInstallComplete && pipelineOpenSpecRootReady;
   const globalWorkflowConfigReady =
     scope !== 'global' ||
-    !includesWorkflow(workflowSelection, 'classic') ||
+    !includesWorkflow(workflowSelection, 'pipeline') ||
     osGlobalStatus === 'installed';
 
   if (
     scope === 'project' &&
     projectRouterInstalled &&
     projectInitializationComplete &&
-    includesWorkflow(workflowSelection, 'classic')
+    includesWorkflow(workflowSelection, 'pipeline')
   ) {
-    if (await migrateLegacyClassicSelection(projectPath)) {
-      log('  Owner current selection -> migrated Classic v1 to shared v2');
+    if (await migrateLegacyPipelineSelection(projectPath)) {
+      log('  Owner current selection -> migrated Pipeline v1 to shared v2');
     }
   }
 
   try {
     if (scope === 'project' && workflowDecision && projectInitializationComplete) {
-      if (includesWorkflow(workflowSelection, 'native')) {
-        const paths = await nativeProjectPaths(projectPath, workflowDecision.artifactRoot);
-        await ensureNativeDirectories(paths);
-        nativeArtifactRoot = workflowDecision.artifactRoot;
+      if (includesWorkflow(workflowSelection, 'loop')) {
+        const paths = await loopProjectPaths(projectPath, workflowDecision.artifactRoot);
+        await ensureLoopDirectories(paths);
+        loopArtifactRoot = workflowDecision.artifactRoot;
       }
-      if (includesWorkflow(workflowSelection, 'classic')) {
+      if (includesWorkflow(workflowSelection, 'pipeline')) {
         await createWorkingDirs(
           projectPath,
           language.artifactLanguage,
-          workflowDecision.classicArtifactLayout,
-          classicLayoutInitializationPermit,
+          workflowDecision.pipelineArtifactLayout,
+          pipelineLayoutInitializationPermit,
         );
       }
       workingDirsCreated = true;
@@ -1016,7 +1011,7 @@ export async function initCommand(
       await syncOwnerProjectInstructions(
         projectPath,
         language.id,
-        includesWorkflow(workflowSelection, 'native') &&
+        includesWorkflow(workflowSelection, 'loop') &&
           (initialProjectConfigDocument?.ambient_resume ?? true),
       );
 
@@ -1080,14 +1075,14 @@ export async function initCommand(
 
       // The project config activates the selected workflow. Commit it only after
       // every required project artifact has been written successfully so a
-      // partial initialization cannot route later commands into Native.
+      // partial initialization cannot route later commands into Loop.
       const existingDocument = await readWorkflowProjectConfigDocument(projectPath, {
         allowPartialProject: true,
-        allowMissingNativeFields: true,
+        allowMissingLoopFields: true,
       });
       const existing = existingDocument?.config ?? null;
       const selectedWorkflows =
-        workflowSelection === 'both' ? (['native', 'classic'] as const) : [workflowSelection];
+        workflowSelection === 'both' ? (['loop', 'pipeline'] as const) : [workflowSelection];
       {
         const defaults = defaultProjectConfig(
           workflowDecision.artifactRoot,
@@ -1096,41 +1091,44 @@ export async function initCommand(
         const config: WorkflowProjectConfig = existing
           ? {
               ...existing,
-              ...(existing.native ? { native: { ...existing.native } } : {}),
-              ...(existing.classic ? { classic: { ...existing.classic } } : {}),
+              ...(existing.loop ? { loop: { ...existing.loop } } : {}),
+              ...(existing.pipeline ? { pipeline: { ...existing.pipeline } } : {}),
             }
           : {
               schema: 'owner.project.v1',
               default_workflow: workflowDecision.workflow,
               ambient_resume: existingDocument?.ambient_resume ?? true,
-              ...(existingDocument?.classic ? { classic: { ...existingDocument.classic } } : {}),
+              ...(existingDocument?.pipeline ? { pipeline: { ...existingDocument.pipeline } } : {}),
             };
-        if (includesWorkflow(workflowSelection, 'native') && !config.native) {
-          config.native = defaults.native;
+        if (includesWorkflow(workflowSelection, 'loop') && !config.loop) {
+          config.loop = defaults.loop;
         }
         config.default_workflow = workflowDecision.workflow;
         config.workflows = [...selectedWorkflows];
-        if (includesWorkflow(workflowSelection, 'classic')) {
-          config.classic = {
-            ...config.classic,
-            artifact_layout: workflowDecision.classicArtifactLayout,
+        if (includesWorkflow(workflowSelection, 'pipeline')) {
+          config.pipeline = {
+            ...config.pipeline,
+            artifact_layout: workflowDecision.pipelineArtifactLayout,
             language: language.artifactLanguage,
-            context_compression: config.classic?.context_compression ?? 'off',
-            review_mode: config.classic?.review_mode ?? 'standard',
-            auto_transition: config.classic?.auto_transition ?? true,
+            context_compression: config.pipeline?.context_compression ?? 'off',
+            review_mode: config.pipeline?.review_mode ?? 'standard',
+            auto_transition: config.pipeline?.auto_transition ?? true,
           };
-          await assertClassicLayoutInitializationSafe(
+          await assertPipelineLayoutInitializationSafe(
             projectPath,
-            workflowDecision.classicArtifactLayout,
-            classicLayoutInitializationPermit,
+            workflowDecision.pipelineArtifactLayout,
+            pipelineLayoutInitializationPermit,
           );
         }
         await ensureOwnerProjectGitignore(projectPath);
         await writeWorkflowProjectConfig(projectPath, config, {
           expectedIdentity: initialProjectConfigSnapshot?.identity,
         });
-        if (classicLayoutInitializationPermit) {
-          await completeClassicLayoutInitialization(projectPath, classicLayoutInitializationPermit);
+        if (pipelineLayoutInitializationPermit) {
+          await completePipelineLayoutInitialization(
+            projectPath,
+            pipelineLayoutInitializationPermit,
+          );
         }
         projectConfigCreated = initialProjectConfigDocument === null;
         projectConfigUpdated = initialProjectConfigDocument !== null;
@@ -1142,22 +1140,20 @@ export async function initCommand(
       );
       const existingGlobalConfig = await readWorkflowGlobalConfig(baseDir);
       const selectedWorkflows =
-        workflowSelection === 'both' ? (['native', 'classic'] as const) : [workflowSelection];
+        workflowSelection === 'both' ? (['loop', 'pipeline'] as const) : [workflowSelection];
       const config: WorkflowGlobalConfig = {
         schema: 'owner.global.v1',
         default_workflow: workflow,
         workflows: [...selectedWorkflows],
         ambient_resume: existingGlobalConfig?.ambient_resume ?? true,
-        ...(includesWorkflow(workflowSelection, 'native')
+        ...(includesWorkflow(workflowSelection, 'loop')
           ? {
-              native: existingGlobalConfig?.native
-                ? { ...existingGlobalConfig.native }
-                : defaults.native,
+              loop: existingGlobalConfig?.loop ? { ...existingGlobalConfig.loop } : defaults.loop,
             }
           : {}),
-        ...(includesWorkflow(workflowSelection, 'classic')
+        ...(includesWorkflow(workflowSelection, 'pipeline')
           ? {
-              classic: {
+              pipeline: {
                 artifact_layout: 'docs',
                 language: language.artifactLanguage,
                 context_compression: 'off',
@@ -1198,12 +1194,12 @@ export async function initCommand(
           language: language.id,
           workflow,
           initializedWorkflows:
-            workflowSelection === 'both' ? ['native', 'classic'] : [workflowSelection],
+            workflowSelection === 'both' ? ['loop', 'pipeline'] : [workflowSelection],
           workflowSource,
           projectConfigCreated,
           projectConfigUpdated,
-          nativeArtifactRoot,
-          classicArtifactLayout: workflowDecision?.classicArtifactLayout ?? null,
+          loopArtifactRoot,
+          pipelineArtifactLayout: workflowDecision?.pipelineArtifactLayout ?? null,
           selectedPlatforms: selectedPlatformIds,
           results: results.map((result) => ({
             platform: result.platform.id,
@@ -1226,8 +1222,8 @@ export async function initCommand(
     scope,
     lang,
     workflowSelection,
-    nativeArtifactRoot,
-    workflowDecision?.classicArtifactLayout ?? null,
+    loopArtifactRoot,
+    workflowDecision?.pipelineArtifactLayout ?? null,
   );
   return { status: completionStatus };
 }

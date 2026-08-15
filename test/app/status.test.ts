@@ -4,13 +4,10 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { statusCommand } from '../../app/commands/status.js';
-import { ensureClassicRuntimeRun } from '../../domains/owner-classic/classic-runtime-run.js';
-import { createNativeChange } from '../../domains/owner-native/native-change.js';
-import {
-  defaultProjectConfig,
-  writeProjectConfig,
-} from '../../domains/owner-native/native-config.js';
-import { nativeProjectPaths } from '../../domains/owner-native/native-paths.js';
+import { ensurePipelineRuntimeRun } from '../../domains/owner-pipeline/pipeline-runtime-run.js';
+import { createLoopChange } from '../../domains/owner-loop/loop-change.js';
+import { defaultProjectConfig, writeProjectConfig } from '../../domains/owner-loop/loop-config.js';
+import { loopProjectPaths } from '../../domains/owner-loop/loop-paths.js';
 
 const stateScript = path.resolve('assets', 'skills', 'owner', 'scripts', 'owner-state.mjs');
 
@@ -22,15 +19,15 @@ function state(cwd: string, ...args: string[]) {
   });
 }
 
-function classicChangesDir(projectRoot: string): string {
+function pipelineChangesDir(projectRoot: string): string {
   return path.join(projectRoot, 'docs', 'openspec', 'changes');
 }
 
-async function writeClassicProjectConfig(projectRoot: string): Promise<void> {
+async function writePipelineProjectConfig(projectRoot: string): Promise<void> {
   const config = defaultProjectConfig('docs', 'en');
-  config.default_workflow = 'classic';
-  config.workflows = ['classic'];
-  config.classic = {
+  config.default_workflow = 'pipeline';
+  config.workflows = ['pipeline'];
+  config.pipeline = {
     artifact_layout: 'docs',
     language: 'en',
     context_compression: 'off',
@@ -85,7 +82,7 @@ describe('status command', () => {
       `owner-status-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     await fs.mkdir(tmpDir, { recursive: true });
-    await writeClassicProjectConfig(tmpDir);
+    await writePipelineProjectConfig(tmpDir);
   });
 
   afterEach(async () => {
@@ -93,7 +90,7 @@ describe('status command', () => {
   });
 
   it('classifies mixed Owner and OpenSpec changes in sorted JSON output', async () => {
-    const changesDir = classicChangesDir(tmpDir);
+    const changesDir = pipelineChangesDir(tmpDir);
     state(tmpDir, 'init', 'z-owner-ready', 'full');
     state(tmpDir, 'set', 'z-owner-ready', 'phase', 'archive');
     state(tmpDir, 'set', 'z-owner-ready', 'verify_result', 'pass');
@@ -131,13 +128,13 @@ describe('status command', () => {
     expect(payload).toMatchObject({
       schema: 'owner.status.v2',
       defaultEntry: {
-        workflow: 'classic',
-        skill: 'owner-classic',
+        workflow: 'pipeline',
+        skill: 'owner-pipeline',
         source: 'project-config',
       },
       workflows: {
-        native: { changes: [] },
-        classic: {
+        loop: { changes: [] },
+        pipeline: {
           changes: [
             expect.objectContaining({ name: 'b-invalid-owner' }),
             expect.objectContaining({ name: 'z-owner-ready' }),
@@ -160,7 +157,7 @@ describe('status command', () => {
       name: 'a-open-complete',
       ownerManaged: false,
       archiveReady: true,
-      recommendedArchiveCommand: 'owner classic openspec -- archive a-open-complete -y',
+      recommendedArchiveCommand: 'owner pipeline openspec -- archive a-open-complete -y',
       workflow: null,
       phase: null,
       buildMode: null,
@@ -191,7 +188,7 @@ describe('status command', () => {
       name: 'c-open-incomplete',
       ownerManaged: false,
       archiveReady: false,
-      recommendedArchiveCommand: 'owner classic openspec -- archive c-open-incomplete -y',
+      recommendedArchiveCommand: 'owner pipeline openspec -- archive c-open-incomplete -y',
       tasksCompleted: 1,
       tasksTotal: 2,
       commandChecks: null,
@@ -214,7 +211,7 @@ describe('status command', () => {
 
   it('includes latest build and verify command checks for a synchronized Owner Run', async () => {
     state(tmpDir, 'init', 'audited', 'full');
-    await ensureClassicRuntimeRun(path.join(classicChangesDir(tmpDir), 'audited'));
+    await ensurePipelineRuntimeRun(path.join(pipelineChangesDir(tmpDir), 'audited'));
     expect(
       state(
         tmpDir,
@@ -284,7 +281,7 @@ describe('status command', () => {
   });
 
   it('labels mixed text output and recommends archive commands only for ready changes', async () => {
-    const changesDir = classicChangesDir(tmpDir);
+    const changesDir = pipelineChangesDir(tmpDir);
     state(tmpDir, 'init', 'owner-ready', 'full');
     state(tmpDir, 'set', 'owner-ready', 'phase', 'archive');
     state(tmpDir, 'set', 'owner-ready', 'verify_result', 'pass');
@@ -309,17 +306,17 @@ describe('status command', () => {
     expect(output).toContain('open-not-ready [OpenSpec] [plain change [0/1 tasks]]');
     expect(output).toContain('recommended archive: owner archive owner-ready');
     expect(output).toContain(
-      'recommended archive: owner classic openspec -- archive open-ready -y',
+      'recommended archive: owner pipeline openspec -- archive open-ready -y',
     );
     expect(output).not.toContain('recommended archive: owner archive owner-not-ready');
     expect(output).not.toContain(
-      'recommended archive: owner classic openspec -- archive open-not-ready -y',
+      'recommended archive: owner pipeline openspec -- archive open-not-ready -y',
     );
     expect(output.match(/recommended archive:/g)).toHaveLength(2);
   });
 
   it('prints the next command for active changes', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'next-build');
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'next-build');
     state(tmpDir, 'init', 'next-build', 'full');
     state(tmpDir, 'set', 'next-build', 'phase', 'build');
     state(tmpDir, 'set', 'next-build', 'build_mode', 'executing-plans');
@@ -329,7 +326,7 @@ describe('status command', () => {
     state(tmpDir, 'set', 'next-build', 'design_doc', 'docs/superpowers/specs/next-build.md');
     state(tmpDir, 'set', 'next-build', 'plan', 'docs/superpowers/plans/next-build.md');
     await fs.writeFile(path.join(changeDir, 'tasks.md'), '- [x] done\n- [ ] todo\n');
-    await ensureClassicRuntimeRun(changeDir);
+    await ensurePipelineRuntimeRun(changeDir);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     let output: string;
@@ -346,7 +343,7 @@ describe('status command', () => {
   });
 
   it('prints branch-bound workspace modes with bound branch and omits bound suffix for null isolation', async () => {
-    const changesDir = classicChangesDir(tmpDir);
+    const changesDir = pipelineChangesDir(tmpDir);
     state(tmpDir, 'init', 'current-bound', 'full');
     await setOwnerYamlField(path.join(changesDir, 'current-bound'), 'isolation', 'current');
     await setOwnerYamlField(path.join(changesDir, 'current-bound'), 'bound_branch', 'feature-A');
@@ -378,7 +375,7 @@ describe('status command', () => {
   });
 
   it('includes boundBranch in JSON status output', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'current-bound');
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'current-bound');
     state(tmpDir, 'init', 'current-bound', 'full');
     await setOwnerYamlField(changeDir, 'isolation', 'current');
     await setOwnerYamlField(changeDir, 'bound_branch', 'feature-A');
@@ -400,7 +397,7 @@ describe('status command', () => {
   });
 
   it('keeps legacy state without a Run byte-for-byte read-only in text and JSON status', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'next-verify');
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'next-verify');
     state(tmpDir, 'init', 'next-verify', 'full');
     state(tmpDir, 'set', 'next-verify', 'phase', 'verify');
     const yamlPath = path.join(changeDir, '.owner.yaml');
@@ -436,25 +433,25 @@ describe('status command', () => {
   });
 
   it.each([
-    ['an invalid migration marker', 'marker', 'classic_migration must be 1'],
-    ['a mismatched Run skill identity', 'skill', 'Classic Run skill mismatch'],
+    ['an invalid migration marker', 'marker', 'pipeline_migration must be 1'],
+    ['a mismatched Run skill identity', 'skill', 'Pipeline Run skill mismatch'],
   ])(
     'reports %s as invalid without changing the synchronized change',
     async (_label, fault, error) => {
-      const changeDir = path.join(classicChangesDir(tmpDir), `invalid-${fault}`);
+      const changeDir = path.join(pipelineChangesDir(tmpDir), `invalid-${fault}`);
       state(tmpDir, 'init', `invalid-${fault}`, 'full');
-      await ensureClassicRuntimeRun(changeDir);
+      await ensurePipelineRuntimeRun(changeDir);
       if (fault === 'marker') {
         const yamlPath = path.join(changeDir, '.owner.yaml');
         const yaml = (await fs.readFile(yamlPath, 'utf8')).replace(
-          /^classic_migration:.*$/mu,
-          'classic_migration: 999',
+          /^pipeline_migration:.*$/mu,
+          'pipeline_migration: 999',
         );
         await fs.writeFile(yamlPath, yaml);
       } else {
         const runPath = path.join(changeDir, '.owner', 'run-state.json');
         const run = JSON.parse(await fs.readFile(runPath, 'utf8'));
-        run.skill = 'not-owner-classic';
+        run.skill = 'not-owner-pipeline';
         await fs.writeFile(runPath, `${JSON.stringify(run, null, 2)}\n`);
       }
       const before = await snapshotChange(changeDir);
@@ -480,7 +477,7 @@ describe('status command', () => {
   );
 
   it('reports invalid state without modifying it', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'invalid');
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'invalid');
     state(tmpDir, 'init', 'invalid', 'full');
     await fs.appendFile(
       path.join(changeDir, '.owner.yaml'),
@@ -506,7 +503,7 @@ describe('status command', () => {
   });
 
   it('keeps invalid errors visible and only prints the invalid recovery hint for invalid changes', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'invalid');
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'invalid');
     state(tmpDir, 'init', 'invalid', 'full');
     await fs.appendFile(path.join(changeDir, '.owner.yaml'), 'unknown_root_field: true\n');
 
@@ -521,7 +518,7 @@ describe('status command', () => {
       log.mockRestore();
     }
 
-    expect(output).toContain('error: Invalid Classic state: unknown field(s): unknown_root_field');
+    expect(output).toContain('error: Invalid Pipeline state: unknown field(s): unknown_root_field');
     expect(output).toContain('next: inspect .owner.yaml and rerun owner doctor');
     expect(output).toContain('runtime-eval-fail [Owner] [phase: open]');
     expect(output.match(/next: inspect \.owner\.yaml and rerun owner doctor/g)).toHaveLength(1);
@@ -529,7 +526,7 @@ describe('status command', () => {
 
   it('prints actionable runtime-eval recovery guidance for valid changes', async () => {
     state(tmpDir, 'init', 'runtime-eval-fail', 'full');
-    await ensureClassicRuntimeRun(path.join(classicChangesDir(tmpDir), 'runtime-eval-fail'));
+    await ensurePipelineRuntimeRun(path.join(pipelineChangesDir(tmpDir), 'runtime-eval-fail'));
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     let output: string;
@@ -548,13 +545,13 @@ describe('status command', () => {
     );
   });
 
-  it('reports Classic runtime mode from shared diagnostics', async () => {
-    const changeDir = path.join(classicChangesDir(tmpDir), 'demo');
+  it('reports Pipeline runtime mode from shared diagnostics', async () => {
+    const changeDir = path.join(pipelineChangesDir(tmpDir), 'demo');
     state(tmpDir, 'init', 'demo', 'full');
     await fs.writeFile(path.join(changeDir, 'proposal.md'), '# Proposal\n');
     await fs.writeFile(path.join(changeDir, 'design.md'), '# Design\n');
     await fs.writeFile(path.join(changeDir, 'tasks.md'), '- [ ] build\n');
-    await ensureClassicRuntimeRun(changeDir);
+    await ensurePipelineRuntimeRun(changeDir);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     let json: string;
@@ -575,8 +572,8 @@ describe('status command', () => {
 
   it('renders the default entry and workflow partitions in text output', async () => {
     await writeProjectConfig(tmpDir, defaultProjectConfig('docs'));
-    const paths = await nativeProjectPaths(tmpDir, 'docs');
-    await createNativeChange({ paths, name: 'native-text', language: 'en' });
+    const paths = await loopProjectPaths(tmpDir, 'docs');
+    await createLoopChange({ paths, name: 'loop-text', language: 'en' });
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     let output: string;
@@ -587,10 +584,10 @@ describe('status command', () => {
       log.mockRestore();
     }
 
-    expect(output).toContain('Default Entry: native -> /owner-native [project-config]');
-    expect(output).toContain('Native Changes:');
-    expect(output).toContain('native-text [Native] [phase: shape]');
-    expect(output).toContain('Classic Changes:');
+    expect(output).toContain('Default Entry: loop -> /owner-loop [project-config]');
+    expect(output).toContain('Loop Changes:');
+    expect(output).toContain('loop-text [Loop] [phase: shape]');
+    expect(output).toContain('Pipeline Changes:');
     expect(output).toContain('Unmanaged OpenSpec Changes:');
   });
 });

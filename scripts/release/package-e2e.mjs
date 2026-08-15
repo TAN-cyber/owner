@@ -19,10 +19,10 @@ const requiredPackageFiles = [
   'assets/skills/owner/scripts/owner-hook-router.mjs',
   'assets/skills/owner/scripts/owner-runtime.mjs',
   'assets/skills/owner/scripts/owner-state.mjs',
-  'assets/skills/owner-native/SKILL.md',
-  'assets/skills/owner-native/scripts/owner-native-runtime.mjs',
-  'assets/skills/owner-native/scripts/owner-native-new.mjs',
-  'assets/skills/owner-native/scripts/owner-native-status.mjs',
+  'assets/skills/owner-loop/SKILL.md',
+  'assets/skills/owner-loop/scripts/owner-loop-runtime.mjs',
+  'assets/skills/owner-loop/scripts/owner-loop-new.mjs',
+  'assets/skills/owner-loop/scripts/owner-loop-status.mjs',
   'bin/owner.js',
   'bin/fast-runtime-router.js',
   'dist/app/cli/index.js',
@@ -43,14 +43,14 @@ const forbiddenPackagePrefixes = [
   'dist/domains/factory/',
   'eval/',
 ];
-const requiredNativeInstallFiles = [
+const requiredLoopInstallFiles = [
   'owner/SKILL.md',
   'owner/scripts/owner-entry-runtime.mjs',
   'owner/scripts/owner-hook-router.mjs',
-  'owner-native/SKILL.md',
-  'owner-native/scripts/owner-native-runtime.mjs',
-  'owner-native/scripts/owner-native-new.mjs',
-  'owner-native/scripts/owner-native-status.mjs',
+  'owner-loop/SKILL.md',
+  'owner-loop/scripts/owner-loop-runtime.mjs',
+  'owner-loop/scripts/owner-loop-new.mjs',
+  'owner-loop/scripts/owner-loop-status.mjs',
 ];
 
 function run(command, args, options = {}) {
@@ -102,12 +102,12 @@ async function main() {
     const packageDir = path.join(temporaryRoot, 'package');
     const consumerDir = path.join(temporaryRoot, 'consumer');
     const projectDir = path.join(temporaryRoot, 'project');
-    const classicProjectDir = path.join(temporaryRoot, 'classic-project');
+    const pipelineProjectDir = path.join(temporaryRoot, 'pipeline-project');
     const homeDir = path.join(temporaryRoot, 'home');
     const npmCache = path.join(temporaryRoot, 'npm-cache');
     await Promise.all(
-      [packageDir, consumerDir, projectDir, classicProjectDir, homeDir, npmCache].map((directory) =>
-        fs.mkdir(directory, { recursive: true }),
+      [packageDir, consumerDir, projectDir, pipelineProjectDir, homeDir, npmCache].map(
+        (directory) => fs.mkdir(directory, { recursive: true }),
       ),
     );
 
@@ -165,19 +165,17 @@ async function main() {
     }
 
     const init = parseJsonPayload(
-      run(process.execPath, [cli, 'init', projectDir, '--yes', '--workflow', 'native', '--json'], {
+      run(process.execPath, [cli, 'init', projectDir, '--yes', '--workflow', 'loop', '--json'], {
         cwd: consumerDir,
         env: environment,
       }),
     );
     if (init.status !== 'complete' || !Array.isArray(init.results) || init.failures.length > 0) {
-      throw new Error(
-        `Packaged Native init did not complete successfully: ${JSON.stringify(init)}`,
-      );
+      throw new Error(`Packaged Loop init did not complete successfully: ${JSON.stringify(init)}`);
     }
     if (init.results.length !== SUPPORTED_PLATFORMS.length) {
       throw new Error(
-        `Packaged Native init covered ${init.results.length} platforms; expected ${SUPPORTED_PLATFORMS.length}`,
+        `Packaged Loop init covered ${init.results.length} platforms; expected ${SUPPORTED_PLATFORMS.length}`,
       );
     }
 
@@ -188,8 +186,8 @@ async function main() {
       const platform = SUPPORTED_PLATFORMS.find((candidate) => candidate.id === result.platform);
       if (!platform) throw new Error(`Unknown platform in init output: ${result.platform}`);
       const skillsRoot = path.join(projectDir, getPlatformSkillsDir(platform, 'project'), 'skills');
-      for (const relative of requiredNativeInstallFiles) {
-        await assertFile(path.join(skillsRoot, relative), `${platform.name} packaged Native asset`);
+      for (const relative of requiredLoopInstallFiles) {
+        await assertFile(path.join(skillsRoot, relative), `${platform.name} packaged Loop asset`);
       }
     }
 
@@ -199,7 +197,7 @@ async function main() {
         env: environment,
       }),
     );
-    if (resolution.workflow !== 'native' || resolution.skill !== 'owner-native') {
+    if (resolution.workflow !== 'loop' || resolution.skill !== 'owner-loop') {
       throw new Error(`Packaged workflow resolution failed: ${JSON.stringify(resolution)}`);
     }
 
@@ -214,17 +212,17 @@ async function main() {
     }
 
     const installedSkills = path.join(projectDir, '.agents', 'skills');
-    const installedNativeNew = path.join(
+    const installedLoopNew = path.join(
       installedSkills,
-      'owner-native',
+      'owner-loop',
       'scripts',
-      'owner-native-new.mjs',
+      'owner-loop-new.mjs',
     );
-    const installedNativeStatus = path.join(
+    const installedLoopStatus = path.join(
       installedSkills,
-      'owner-native',
+      'owner-loop',
       'scripts',
-      'owner-native-status.mjs',
+      'owner-loop-status.mjs',
     );
     const installedEntryRuntime = path.join(
       installedSkills,
@@ -239,8 +237,8 @@ async function main() {
       'owner-hook-router.mjs',
     );
     for (const [script, description] of [
-      [installedNativeNew, 'Installed Native new runtime'],
-      [installedNativeStatus, 'Installed Native status runtime'],
+      [installedLoopNew, 'Installed Loop new runtime'],
+      [installedLoopStatus, 'Installed Loop status runtime'],
       [installedEntryRuntime, 'Installed Entry runtime'],
       [installedHookRouter, 'Installed Hook Router runtime'],
     ]) {
@@ -250,7 +248,7 @@ async function main() {
     const createdChange = parseJsonPayload(
       run(
         process.execPath,
-        [installedNativeNew, 'package-runtime-change', '--project-root', projectDir, '--json'],
+        [installedLoopNew, 'package-runtime-change', '--project-root', projectDir, '--json'],
         { cwd: projectDir, env: environment },
       ),
     );
@@ -260,14 +258,14 @@ async function main() {
       createdChange.data?.name !== 'package-runtime-change'
     ) {
       throw new Error(
-        `Installed Native runtime could not create a change: ${JSON.stringify(createdChange)}`,
+        `Installed Loop runtime could not create a change: ${JSON.stringify(createdChange)}`,
       );
     }
 
-    const nativeStatus = parseJsonPayload(
+    const loopStatus = parseJsonPayload(
       run(
         process.execPath,
-        [installedNativeStatus, 'package-runtime-change', '--project-root', projectDir, '--json'],
+        [installedLoopStatus, 'package-runtime-change', '--project-root', projectDir, '--json'],
         {
           cwd: projectDir,
           env: environment,
@@ -275,13 +273,13 @@ async function main() {
       ),
     );
     if (
-      nativeStatus.command !== 'status' ||
-      nativeStatus.exitCode !== 0 ||
-      nativeStatus.data?.name !== 'package-runtime-change' ||
-      nativeStatus.data?.phase !== 'shape'
+      loopStatus.command !== 'status' ||
+      loopStatus.exitCode !== 0 ||
+      loopStatus.data?.name !== 'package-runtime-change' ||
+      loopStatus.data?.phase !== 'shape'
     ) {
       throw new Error(
-        `Installed Native runtime returned an invalid status: ${JSON.stringify(nativeStatus)}`,
+        `Installed Loop runtime returned an invalid status: ${JSON.stringify(loopStatus)}`,
       );
     }
 
@@ -291,7 +289,7 @@ async function main() {
         env: environment,
       }),
     );
-    if (installedResolution.workflow !== 'native' || installedResolution.skill !== 'owner-native') {
+    if (installedResolution.workflow !== 'loop' || installedResolution.skill !== 'owner-loop') {
       throw new Error(
         `Installed Entry runtime resolution failed: ${JSON.stringify(installedResolution)}`,
       );
@@ -310,43 +308,43 @@ async function main() {
       throw new Error(`Installed Hook Router did not block a Shape write: ${hookDenial}`);
     }
 
-    await fs.mkdir(path.join(classicProjectDir, '.owner'), { recursive: true });
-    await fs.mkdir(path.join(classicProjectDir, 'openspec'), { recursive: true });
+    await fs.mkdir(path.join(pipelineProjectDir, '.owner'), { recursive: true });
+    await fs.mkdir(path.join(pipelineProjectDir, 'openspec'), { recursive: true });
     await fs.writeFile(
-      path.join(classicProjectDir, '.owner', 'config.yaml'),
+      path.join(pipelineProjectDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
-        'workflows: [classic]',
-        'classic:',
+        'default_workflow: pipeline',
+        'workflows: [pipeline]',
+        'pipeline:',
         '  artifact_layout: legacy',
         '',
       ].join('\n'),
     );
     await fs.writeFile(
-      path.join(classicProjectDir, 'openspec', 'config.yaml'),
+      path.join(pipelineProjectDir, 'openspec', 'config.yaml'),
       'schema: spec-driven\n',
     );
 
     await Promise.all([
-      disableCliFallback(packageRoot, 'dist/domains/owner-native/native-cli.js'),
+      disableCliFallback(packageRoot, 'dist/domains/owner-loop/loop-cli.js'),
       disableCliFallback(packageRoot, 'dist/domains/owner-entry/workflow-resolution.js'),
-      disableCliFallback(packageRoot, 'dist/domains/owner-classic/classic-cli.js'),
+      disableCliFallback(packageRoot, 'dist/domains/owner-pipeline/pipeline-cli.js'),
     ]);
 
-    const fastNativeStatus = parseJsonPayload(
+    const fastLoopStatus = parseJsonPayload(
       run(
         process.execPath,
-        [cli, 'native', 'status', 'package-runtime-change', '--project-root', projectDir, '--json'],
+        [cli, 'loop', 'status', 'package-runtime-change', '--project-root', projectDir, '--json'],
         {
           cwd: consumerDir,
           env: environment,
         },
       ),
     );
-    if (fastNativeStatus.command !== 'status' || fastNativeStatus.exitCode !== 0) {
+    if (fastLoopStatus.command !== 'status' || fastLoopStatus.exitCode !== 0) {
       throw new Error(
-        `CLI did not use the packaged Native fast runtime: ${JSON.stringify(fastNativeStatus)}`,
+        `CLI did not use the packaged Loop fast runtime: ${JSON.stringify(fastLoopStatus)}`,
       );
     }
 
@@ -356,26 +354,26 @@ async function main() {
         env: environment,
       }),
     );
-    if (fastResolution.workflow !== 'native' || fastResolution.skill !== 'owner-native') {
+    if (fastResolution.workflow !== 'loop' || fastResolution.skill !== 'owner-loop') {
       throw new Error(
         `CLI did not use the packaged Entry fast runtime: ${JSON.stringify(fastResolution)}`,
       );
     }
 
-    const classicState = parseJsonPayload(
-      run(process.execPath, [cli, 'state', 'init', 'package-classic-change', 'full', '--json'], {
-        cwd: classicProjectDir,
+    const pipelineState = parseJsonPayload(
+      run(process.execPath, [cli, 'state', 'init', 'package-pipeline-change', 'full', '--json'], {
+        cwd: pipelineProjectDir,
         env: environment,
       }),
     );
-    if (classicState.command !== 'state' || classicState.exitCode !== 0) {
+    if (pipelineState.command !== 'state' || pipelineState.exitCode !== 0) {
       throw new Error(
-        `CLI did not use the packaged Classic fast runtime: ${JSON.stringify(classicState)}`,
+        `CLI did not use the packaged Pipeline fast runtime: ${JSON.stringify(pipelineState)}`,
       );
     }
 
     console.log(
-      `Packaged Owner ${version} installed, routed, and verified across ${SUPPORTED_PLATFORMS.length} Native platform targets.`,
+      `Packaged Owner ${version} installed, routed, and verified across ${SUPPORTED_PLATFORMS.length} Loop platform targets.`,
     );
   } finally {
     await fs.rm(temporaryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

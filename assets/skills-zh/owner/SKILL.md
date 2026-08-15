@@ -1,6 +1,6 @@
 ---
 name: owner
-description: "Owner 工作流入口。当用户明确调用 /owner，或明确要求使用 Owner 但未指定 Native/Classic 时使用；解析项目配置并加载唯一入口。"
+description: "Owner 工作流入口。当用户明确调用 /owner，或明确要求使用 Owner 但未指定 Loop/Pipeline 时使用；解析项目配置并加载唯一入口。"
 ---
 
 # Owner 入口
@@ -18,9 +18,9 @@ description: "Owner 工作流入口。当用户明确调用 /owner，或明确�
    若项目还没有 `.owner/config.yaml`，该命令会将全局默认配置固化到当前项目，并在项目内创建对应产物目录；后续全局默认值变化不会改写已激活项目。若命令返回 `command not found`、`executable not found` 或 `ENOENT`，停止并说明 Owner CLI 安装不完整。不得搜索 Skill 文件、扫描平台配置目录或直接调用内部 bundle。CLI 已启动但返回非零、配置解析失败、输出不是 JSON 或字段无效时，同样停止并原样说明错误，不要回退或猜测。
 2. 解析 JSON。只接受 `schema: owner.workflow-resolution.v1`，且 `skill` 必须是下列两个值之一。
 3. 只按返回的 `skill` 选择下列一个入口。必须立即使用 Skill 工具加载且只加载该入口：
-    - `/owner-native` → **立即执行：** 使用 Skill 工具加载 `owner-native` 技能。禁止跳过此步骤。
-    - `/owner-classic` → **立即执行：** 使用 Skill 工具加载 `owner-classic` 技能。禁止跳过此步骤。
+    - `/owner-loop` → **立即执行：** 使用 Skill 工具加载 `owner-loop` 技能。禁止跳过此步骤。
+    - `/owner-pipeline` → **立即执行：** 使用 Skill 工具加载 `owner-pipeline` 技能。禁止跳过此步骤。
 
    技能加载后，把用户原始请求完整交给已加载的入口 Skill，作为该入口的用户输入。
 
-不根据任务大小、文件数量、活跃 change 或模型判断改选另一套工作流。Native 与 Classic 的 change、状态和产物始终彼此独立。
+不根据任务大小、文件数量、活跃 change 或模型判断改选另一套工作流。Loop 与 Pipeline 的 change、状态和产物始终彼此独立。

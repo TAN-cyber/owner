@@ -16,10 +16,10 @@ import { installOwnerProjectInstructions } from './project-instructions.js';
 import { readJsonObjectFile } from './json-object.js';
 import type { InitWorkflowSelection } from '../owner-entry/types.js';
 import {
-  assertClassicLayoutInitializationSafe,
-  checkpointClassicLayoutInitialization,
-  type ClassicLayoutInitializationPermit,
-} from '../owner-classic/classic-layout-initialization.js';
+  assertPipelineLayoutInitializationSafe,
+  checkpointPipelineLayoutInitialization,
+  type PipelineLayoutInitializationPermit,
+} from '../owner-pipeline/pipeline-layout-initialization.js';
 import {
   parseWorkflowProjectConfigDocument,
   projectConfigComment,
@@ -42,28 +42,28 @@ type Manifest = {
   skills: string[];
   internalSkills?: string[];
   rules?: string[];
-  nativeRules?: string[];
+  loopRules?: string[];
   hooks?: Record<string, HookConfig>;
-  nativeHooks?: Record<string, HookConfig>;
+  loopHooks?: Record<string, HookConfig>;
   languages?: LanguageConfig[];
 };
 
 const HOOK_ROUTER_SCRIPT = 'owner/scripts/owner-hook-router.mjs';
 const LEGACY_HOOK_SCRIPTS = [
   'owner/scripts/owner-hook-guard.mjs',
-  'owner-native/scripts/owner-native-hook-guard.mjs',
+  'owner-loop/scripts/owner-loop-hook-guard.mjs',
 ] as const;
-const LEGACY_RULE_FILES = ['owner-phase-guard.md', 'owner-native-phase-guard.md'] as const;
-const NATIVE_SHARED_SKILL_PATHS = new Set([
+const LEGACY_RULE_FILES = ['owner-phase-guard.md', 'owner-loop-phase-guard.md'] as const;
+const LOOP_SHARED_SKILL_PATHS = new Set([
   'owner/SKILL.md',
   'owner/scripts/owner-entry-runtime.mjs',
   'owner/scripts/owner-hook-router.mjs',
 ]);
 const RETIRED_OWNER_OWNED_SKILL_PATHS = [
-  'owner-native/scripts/owner-native-checkpoint.mjs',
-  'owner-native/scripts/owner-native-check.mjs',
-  'owner-native/scripts/owner-native-evidence.mjs',
-  'owner-native/scripts/owner-native-receipt.mjs',
+  'owner-loop/scripts/owner-loop-checkpoint.mjs',
+  'owner-loop/scripts/owner-loop-check.mjs',
+  'owner-loop/scripts/owner-loop-evidence.mjs',
+  'owner-loop/scripts/owner-loop-receipt.mjs',
 ] as const;
 
 interface HookCommandContext {
@@ -112,17 +112,17 @@ function isManagedSkillPathForSelection(
   workflowSelection: InitWorkflowSelection,
 ): boolean {
   if (workflowSelection === 'both') return true;
-  if (workflowSelection === 'classic') return !skillPath.startsWith('owner-native/');
-  return NATIVE_SHARED_SKILL_PATHS.has(skillPath) || skillPath.startsWith('owner-native/');
+  if (workflowSelection === 'pipeline') return !skillPath.startsWith('owner-loop/');
+  return LOOP_SHARED_SKILL_PATHS.has(skillPath) || skillPath.startsWith('owner-loop/');
 }
 
 /**
  * Derive the workflow selection from the Skills already on disk by checking
- * the two workflow markers (owner-native/SKILL.md and owner-classic/SKILL.md).
+ * the two workflow markers (owner-loop/SKILL.md and owner-pipeline/SKILL.md).
  * This lets `owner update` keep already-installed workflows in sync without
  * expanding the range the user chose at install time:
- *   neither / classic only -> 'classic'  (no Native added)
- *   native only            -> 'native'   (no Classic added)
+ *   neither / pipeline only -> 'pipeline'  (no Loop added)
+ *   loop only            -> 'loop'   (no Pipeline added)
  *   both                   -> 'both'
  * The caller is responsible for computing `skillsRoot` (e.g. base dir +
  * platform skills dir + 'skills'); this function only performs the marker
@@ -131,13 +131,13 @@ function isManagedSkillPathForSelection(
 export async function detectInstalledWorkflowSelection(
   skillsRoot: string,
 ): Promise<InitWorkflowSelection> {
-  const [hasNative, hasClassic] = await Promise.all([
-    fileExists(path.join(skillsRoot, 'owner-native', 'SKILL.md')),
-    fileExists(path.join(skillsRoot, 'owner-classic', 'SKILL.md')),
+  const [hasLoop, hasPipeline] = await Promise.all([
+    fileExists(path.join(skillsRoot, 'owner-loop', 'SKILL.md')),
+    fileExists(path.join(skillsRoot, 'owner-pipeline', 'SKILL.md')),
   ]);
-  if (hasNative && hasClassic) return 'both';
-  if (hasNative) return 'native';
-  return 'classic';
+  if (hasLoop && hasPipeline) return 'both';
+  if (hasLoop) return 'loop';
+  return 'pipeline';
 }
 
 function getManagedSkillPathsForSelection(
@@ -156,7 +156,7 @@ function getManagedSkillReplacementPaths(
   const allowed = new Set<string>();
   const managedPaths = [
     ...getManagedSkillPathsForSelection(manifest, workflowSelection),
-    ...(workflowSelection === 'classic' ? [] : RETIRED_OWNER_OWNED_SKILL_PATHS),
+    ...(workflowSelection === 'pipeline' ? [] : RETIRED_OWNER_OWNED_SKILL_PATHS),
   ];
 
   for (const skillPath of managedPaths) {
@@ -399,7 +399,7 @@ async function prepareManagedSkillCopyTarget(
   }
 }
 
-async function prepareNativeSkillInstallTarget(
+async function prepareLoopSkillInstallTarget(
   baseDir: string,
   platform: Platform,
   scope: InstallScope,
@@ -407,7 +407,7 @@ async function prepareNativeSkillInstallTarget(
   action: 'overwrite' | 'fill' | 'skip',
 ): Promise<void> {
   if (action !== 'skip') {
-    await prepareManagedSkillCopyTarget(baseDir, platform, scope, 'native');
+    await prepareManagedSkillCopyTarget(baseDir, platform, scope, 'loop');
   }
   if (action === 'overwrite') return;
 
@@ -420,13 +420,13 @@ async function prepareNativeSkillInstallTarget(
         relativePath === 'owner/SKILL.md' ||
         relativePath === 'owner/scripts/owner-entry-runtime.mjs' ||
         relativePath === 'owner/scripts/owner-hook-router.mjs' ||
-        relativePath.startsWith('owner-native/'),
+        relativePath.startsWith('owner-loop/'),
     )
     .map((relativePath) => {
       const pathParts = relativePath.split('/');
       const sourceDir = relativePath.includes('/scripts/') ? 'skills' : languageSkillsDir;
       return {
-        label: `the required Native asset ${relativePath}`,
+        label: `the required Loop asset ${relativePath}`,
         destination: path.join(skillsRoot, ...pathParts),
         source: path.join(assetsDir, sourceDir, ...pathParts),
       };
@@ -437,12 +437,12 @@ async function prepareNativeSkillInstallTarget(
     if (!destinationStat) {
       if (action === 'fill') continue;
       throw new Error(
-        `Cannot activate Native while skipping existing Owner files because ${required.label} is missing at ${required.destination}`,
+        `Cannot activate Loop while skipping existing Owner files because ${required.label} is missing at ${required.destination}`,
       );
     }
     if (!destinationStat.isFile()) {
       throw new Error(
-        `Cannot activate Native because ${required.label} is not a regular file at ${required.destination}; rerun with --overwrite after preserving any custom content`,
+        `Cannot activate Loop because ${required.label} is not a regular file at ${required.destination}; rerun with --overwrite after preserving any custom content`,
       );
     }
     const [installed, bundled] = await Promise.all([
@@ -451,7 +451,7 @@ async function prepareNativeSkillInstallTarget(
     ]);
     if (!installed.equals(bundled)) {
       throw new Error(
-        `Cannot activate Native because ${required.label} differs from the bundled routing contract at ${required.destination}; rerun with --overwrite after preserving any custom content`,
+        `Cannot activate Loop because ${required.label} differs from the bundled routing contract at ${required.destination}; rerun with --overwrite after preserving any custom content`,
       );
     }
   }
@@ -564,7 +564,7 @@ async function installSkillsAsSymlink(
     );
   }
 
-  if (failedCount === 0 && workflowSelection !== 'classic') {
+  if (failedCount === 0 && workflowSelection !== 'pipeline') {
     const cleanup = await removeRetiredOwnerOwnedSkillPaths([centralSkillsDir]);
     failedCount += cleanup.failed;
   }
@@ -608,7 +608,7 @@ async function copyOwnerSkillsForPlatform(
   let failedCount = 0;
   const managedSkillPaths = getManagedSkillPathsForSelection(manifest, workflowSelection);
   // Count manifest entries that the workflow selection filters out so the
-  // update summary stays honest: a Classic-only update reports the Native
+  // update summary stays honest: a Pipeline-only update reports the Loop
   // files it intentionally skips instead of pretending they do not exist.
   const filteredCount = getManagedSkillPaths(manifest).length - managedSkillPaths.length;
   skippedCount += filteredCount;
@@ -637,7 +637,7 @@ async function copyOwnerSkillsForPlatform(
     }
   }
 
-  if (failedCount === 0 && workflowSelection !== 'classic') {
+  if (failedCount === 0 && workflowSelection !== 'pipeline') {
     const platformSkillsRoot = path.join(baseDir, getPlatformSkillsDir(platform, scope), 'skills');
     const centralSkillsRoot = path.join(getCentralSkillsDir(baseDir, scope), 'skills');
     const cleanup = await removeRetiredOwnerOwnedSkillPaths([
@@ -721,7 +721,7 @@ async function copyOwnerRulesForPlatform(
   overwrite: boolean,
   languageId: SkillLanguageId,
   scope: InstallScope = 'project',
-  workflowSelection: InitWorkflowSelection = 'classic',
+  workflowSelection: InitWorkflowSelection = 'pipeline',
 ): Promise<{ copied: number; skipped: number; failed: number }> {
   if (!platform.rulesDir || !platform.rulesFormat) {
     return { copied: 0, skipped: 0, failed: 0 };
@@ -814,7 +814,7 @@ async function installOwnerHooksForPlatform(
   baseDir: string,
   platform: Platform,
   scope: InstallScope = 'project',
-  workflowSelection: InitWorkflowSelection = 'classic',
+  workflowSelection: InitWorkflowSelection = 'pipeline',
 ): Promise<HookInstallResult> {
   if (!platform.supportsHooks) {
     return { status: 'skipped', reason: 'platform does not support hooks' };
@@ -1132,8 +1132,8 @@ type ManagedConfigField = {
 
 type ManagedConfigFields = {
   top: readonly ManagedConfigField[];
-  native: readonly ManagedConfigField[];
-  classic: readonly ManagedConfigField[];
+  loop: readonly ManagedConfigField[];
+  pipeline: readonly ManagedConfigField[];
 };
 
 function managedConfigFields(language: string = 'en'): ManagedConfigFields {
@@ -1146,61 +1146,61 @@ function managedConfigFields(language: string = 'en'): ManagedConfigFields {
       comment: projectConfigComment('ambient_resume', commentLanguage),
     },
   ];
-  const classic: ManagedConfigField[] = [
+  const pipeline: ManagedConfigField[] = [
     {
       key: 'artifact_layout',
       def: 'docs',
-      comment: projectConfigComment('classic.artifact_layout', commentLanguage),
+      comment: projectConfigComment('pipeline.artifact_layout', commentLanguage),
     },
     {
       key: 'language',
       def: artifactLanguage.id,
-      comment: projectConfigComment('classic.language', commentLanguage),
+      comment: projectConfigComment('pipeline.language', commentLanguage),
     },
     {
       key: 'context_compression',
       def: 'off',
-      comment: projectConfigComment('classic.context_compression', commentLanguage),
+      comment: projectConfigComment('pipeline.context_compression', commentLanguage),
     },
     {
       key: 'review_mode',
       def: 'standard',
-      comment: projectConfigComment('classic.review_mode', commentLanguage),
+      comment: projectConfigComment('pipeline.review_mode', commentLanguage),
     },
     {
       key: 'auto_transition',
       def: 'true',
-      comment: projectConfigComment('classic.auto_transition', commentLanguage),
+      comment: projectConfigComment('pipeline.auto_transition', commentLanguage),
     },
   ];
-  const native: ManagedConfigField[] = [
+  const loop: ManagedConfigField[] = [
     {
       key: 'artifact_root',
       def: 'docs',
-      comment: projectConfigComment('native.artifact_root', commentLanguage),
+      comment: projectConfigComment('loop.artifact_root', commentLanguage),
     },
     {
       key: 'language',
       def: 'en',
-      comment: projectConfigComment('native.language', commentLanguage),
+      comment: projectConfigComment('loop.language', commentLanguage),
     },
     {
       key: 'clarification_mode',
       def: 'batch',
-      comment: projectConfigComment('native.clarification_mode', commentLanguage),
+      comment: projectConfigComment('loop.clarification_mode', commentLanguage),
     },
     {
       key: 'archive_confirmation',
       def: 'automatic',
-      comment: projectConfigComment('native.archive_confirmation', commentLanguage),
+      comment: projectConfigComment('loop.archive_confirmation', commentLanguage),
     },
     {
       key: 'max_verify_failures',
       def: '5',
-      comment: projectConfigComment('native.max_verify_failures', commentLanguage),
+      comment: projectConfigComment('loop.max_verify_failures', commentLanguage),
     },
   ];
-  return { top, native, classic };
+  return { top, loop, pipeline };
 }
 
 const MANAGED_CONFIG_FIELDS = managedConfigFields();
@@ -1239,7 +1239,7 @@ function coerceConfigScalar(raw: unknown): unknown {
 // `language` is null when the caller has no definitive language selection to assert (e.g.
 // multiple platforms in the same scope disagree and no --language flag was given) — in that
 // case the existing config's language is preserved, falling back to 'en' only when absent.
-// A non-null language always overwrites the managed `classic.language` field: init/update
+// A non-null language always overwrites the managed `pipeline.language` field: init/update
 // pass it specifically to persist the language the user just selected/installed.
 function renderProjectConfig(
   existing: Record<string, string>,
@@ -1249,7 +1249,7 @@ function renderProjectConfig(
   const fields = getManagedConfigFields(resolvedLanguage);
   const managedKeys = new Set<string>([
     ...fields.top.map((f) => f.key),
-    ...fields.classic.map((f) => f.key),
+    ...fields.pipeline.map((f) => f.key),
   ]);
   const root: Record<string, unknown> = {};
   for (const f of fields.top) {
@@ -1258,12 +1258,12 @@ function renderProjectConfig(
   for (const [k, v] of Object.entries(existing)) {
     if (!managedKeys.has(k)) root[k] = coerceConfigScalar(v);
   }
-  const classicBlock: Record<string, unknown> = {};
-  for (const f of fields.classic) {
+  const pipelineBlock: Record<string, unknown> = {};
+  for (const f of fields.pipeline) {
     const value = f.key === 'language' ? resolvedLanguage : (existing[f.key] ?? f.def);
-    classicBlock[f.key] = coerceConfigScalar(value);
+    pipelineBlock[f.key] = coerceConfigScalar(value);
   }
-  root.classic = classicBlock;
+  root.pipeline = pipelineBlock;
   return renderStructuredProjectConfig(root, resolvedLanguage === 'zh-CN' ? 'zh-CN' : 'en');
 }
 
@@ -1272,13 +1272,13 @@ async function mergeProjectConfig(
   language: string | null = null,
   artifactLayoutDefault: 'legacy' | 'docs' = 'docs',
   completeProjectConfig = false,
-  enableClassicWorkflow = completeProjectConfig,
+  enablePipelineWorkflow = completeProjectConfig,
 ): Promise<void> {
   let existing: Record<string, string> = {};
   let parsedRoot: Record<string, unknown> = {};
   const snapshot = await readWorkflowProjectConfigSnapshot(projectPath, {
     allowPartialProject: true,
-    allowMissingNativeFields: true,
+    allowMissingLoopFields: true,
   });
   const parsed = snapshot.document;
   if (parsed) {
@@ -1287,34 +1287,34 @@ async function mergeProjectConfig(
   }
 
   // Preserve the full shared-parser value (including unknown extensions) plus
-  // legacy top-level Classic fields pending migration.
+  // legacy top-level Pipeline fields pending migration.
   const root: Record<string, unknown> = { ...parsedRoot };
   if (completeProjectConfig) {
     root.schema = 'owner.project.v1';
     const inferredDefault =
-      root.default_workflow === 'native' || root.default_workflow === 'classic'
+      root.default_workflow === 'loop' || root.default_workflow === 'pipeline'
         ? root.default_workflow
-        : root.native && typeof root.native === 'object' && !Array.isArray(root.native)
-          ? 'native'
-          : 'classic';
+        : root.loop && typeof root.loop === 'object' && !Array.isArray(root.loop)
+          ? 'loop'
+          : 'pipeline';
     root.default_workflow = inferredDefault;
     const workflows = Array.isArray(root.workflows)
-      ? root.workflows.filter((workflow) => workflow === 'native' || workflow === 'classic')
+      ? root.workflows.filter((workflow) => workflow === 'loop' || workflow === 'pipeline')
       : [inferredDefault];
-    if (enableClassicWorkflow && !workflows.includes('classic')) workflows.push('classic');
+    if (enablePipelineWorkflow && !workflows.includes('pipeline')) workflows.push('pipeline');
     root.workflows = workflows;
   }
-  const prevClassic =
-    root.classic && typeof root.classic === 'object' && !Array.isArray(root.classic)
-      ? { ...(root.classic as Record<string, unknown>) }
+  const prevPipeline =
+    root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline)
+      ? { ...(root.pipeline as Record<string, unknown>) }
       : {};
-  const prevNative =
-    root.native && typeof root.native === 'object' && !Array.isArray(root.native)
-      ? { ...(root.native as Record<string, unknown>) }
+  const prevLoop =
+    root.loop && typeof root.loop === 'object' && !Array.isArray(root.loop)
+      ? { ...(root.loop as Record<string, unknown>) }
       : null;
-  const existingClassicLanguage =
-    typeof prevClassic.language === 'string' ? prevClassic.language : undefined;
-  const resolvedLanguage = language ?? existingClassicLanguage ?? existing.language ?? 'en';
+  const existingPipelineLanguage =
+    typeof prevPipeline.language === 'string' ? prevPipeline.language : undefined;
+  const resolvedLanguage = language ?? existingPipelineLanguage ?? existing.language ?? 'en';
   const fields = getManagedConfigFields(resolvedLanguage);
 
   // Top-level managed field (ambient_resume).
@@ -1322,54 +1322,54 @@ async function mergeProjectConfig(
     root[f.key] = coerceConfigScalar(existing[f.key] ?? f.def);
   }
 
-  // Native settings are managed only when the project already has a Native block. This lets
-  // update add new Native defaults without activating Native in Classic-only installations.
-  if (prevNative) {
-    const nativeBlock = { ...prevNative };
-    for (const f of fields.native) {
-      const value = nativeBlock[f.key] ?? f.def;
+  // Loop settings are managed only when the project already has a Loop block. This lets
+  // update add new Loop defaults without activating Loop in Pipeline-only installations.
+  if (prevLoop) {
+    const loopBlock = { ...prevLoop };
+    for (const f of fields.loop) {
+      const value = loopBlock[f.key] ?? f.def;
       if (f.key === 'clarification_mode' && value !== 'sequential' && value !== 'batch') {
-        throw new Error('native.clarification_mode must be sequential or batch');
+        throw new Error('loop.clarification_mode must be sequential or batch');
       }
       if (f.key === 'archive_confirmation' && value !== 'automatic' && value !== 'required') {
-        throw new Error('native.archive_confirmation must be automatic or required');
+        throw new Error('loop.archive_confirmation must be automatic or required');
       }
       if (
         f.key === 'max_verify_failures' &&
         (!Number.isSafeInteger(coerceConfigScalar(value)) ||
           (coerceConfigScalar(value) as number) < 1)
       ) {
-        throw new Error('native.max_verify_failures must be a positive integer');
+        throw new Error('loop.max_verify_failures must be a positive integer');
       }
-      nativeBlock[f.key] = coerceConfigScalar(value);
+      loopBlock[f.key] = coerceConfigScalar(value);
     }
-    delete nativeBlock.snapshot;
-    root.native = nativeBlock;
+    delete loopBlock.snapshot;
+    root.loop = loopBlock;
   }
 
-  // Classic block: preserve explicit new-format values and unknown extension fields, then migrate legacy top-level values,
+  // Pipeline block: preserve explicit new-format values and unknown extension fields, then migrate legacy top-level values,
   // then apply defaults. An explicit language argument still represents the caller's requested
   // install/update language and therefore overrides both stored forms.
-  const shouldMergeClassic = !completeProjectConfig || enableClassicWorkflow || root.classic;
-  if (shouldMergeClassic) {
-    const classicBlock: Record<string, unknown> = { ...prevClassic };
-    for (const f of fields.classic) {
+  const shouldMergePipeline = !completeProjectConfig || enablePipelineWorkflow || root.pipeline;
+  if (shouldMergePipeline) {
+    const pipelineBlock: Record<string, unknown> = { ...prevPipeline };
+    for (const f of fields.pipeline) {
       let value: unknown;
       if (f.key === 'language') {
         value = resolvedLanguage;
       } else if (f.key === 'artifact_layout') {
-        value = prevClassic[f.key] ?? artifactLayoutDefault;
+        value = prevPipeline[f.key] ?? artifactLayoutDefault;
       } else {
         const legacyTop = root[f.key];
-        if (prevClassic[f.key] !== undefined) value = prevClassic[f.key];
+        if (prevPipeline[f.key] !== undefined) value = prevPipeline[f.key];
         else if (legacyTop !== undefined) value = legacyTop;
         else value = f.def;
       }
-      classicBlock[f.key] = coerceConfigScalar(value);
+      pipelineBlock[f.key] = coerceConfigScalar(value);
     }
-    root.classic = classicBlock;
-    // Remove migrated legacy top-level Classic fields so they don't linger at the root.
-    for (const f of fields.classic) {
+    root.pipeline = pipelineBlock;
+    // Remove migrated legacy top-level Pipeline fields so they don't linger at the root.
+    for (const f of fields.pipeline) {
       delete root[f.key];
     }
   }
@@ -1386,9 +1386,9 @@ async function createWorkingDirs(
   projectPath: string,
   language: string = 'en',
   artifactLayout: 'legacy' | 'docs' = 'docs',
-  initializationPermit?: ClassicLayoutInitializationPermit,
+  initializationPermit?: PipelineLayoutInitializationPermit,
 ): Promise<void> {
-  const layout = await assertClassicLayoutInitializationSafe(
+  const layout = await assertPipelineLayoutInitializationSafe(
     projectPath,
     artifactLayout,
     initializationPermit,
@@ -1405,10 +1405,10 @@ async function createWorkingDirs(
   for (const dir of dirs) {
     const relative = path.relative(layout.projectRoot, dir).replaceAll('\\', '/');
     await ensureProtectedProjectDirectory(layout.projectRoot, relative, {
-      label: `Classic working directory ${relative}`,
+      label: `Pipeline working directory ${relative}`,
     });
   }
-  await checkpointClassicLayoutInitialization(projectPath, layout.initializationPermit);
+  await checkpointPipelineLayoutInitialization(projectPath, layout.initializationPermit);
 
   await installOwnerProjectInstructions(projectPath, language === 'zh-CN' ? 'zh' : 'en');
 }
@@ -1435,7 +1435,7 @@ export {
   getCentralSkillsDir,
   installSkillsAsSymlink,
   prepareManagedSkillCopyTarget,
-  prepareNativeSkillInstallTarget,
+  prepareLoopSkillInstallTarget,
   removeRetiredOwnerOwnedSkillPaths,
   RETIRED_OWNER_OWNED_SKILL_PATHS,
 };

@@ -1,17 +1,17 @@
 # Owner 0.1.0 架构
 
-Owner 只提供两套 vibe coding 工作流：Native 与 Classic。两者共享安装、入口解析、Hook 路由和项目配置契约，但保持独立的状态机、产物目录与阶段守卫。
+Owner 只提供两套 vibe coding 工作流：Loop 与 Pipeline。两者共享安装、入口解析、Hook 路由和项目配置契约，但保持独立的状态机、产物目录与阶段守卫。
 
 ## 产品边界
 
 Owner 支持 Claude Code 与 Codex，不提供其他宿主适配。公开能力包括：
 
 - `owner init/status/workflow/resume-probe/doctor/update/uninstall`
-- `owner native ...` Native 生命周期命令
-- `owner state/guard/handoff/archive ...` Classic 生命周期命令
-- `owner`、`owner-native`、`owner-classic` 以及 Classic 阶段 Skills
+- `owner loop ...` Loop 生命周期命令
+- `owner state/guard/handoff/archive ...` Pipeline 生命周期命令
+- `owner`、`owner-loop`、`owner-pipeline` 以及 Pipeline 阶段 Skills
 
-Native 是自包含工作流。Classic 使用 OpenSpec 管理需求事实，使用 Superpowers 提供设计、计划、TDD、调试和评审方法。
+Loop 是自包含工作流。Pipeline 使用 OpenSpec 管理需求事实，使用 Superpowers 提供设计、计划、TDD、调试和评审方法。
 
 ## 分层
 
@@ -19,8 +19,8 @@ Native 是自包含工作流。Classic 使用 OpenSpec 管理需求事实，使�
 app/commands
     |
     +--> domains/owner-entry ------> 统一入口、workflow selection、恢复探测、Hook Router
-    +--> domains/owner-native -----> Shape -> Build <-> Verify -> Archive
-    +--> domains/owner-classic ----> Open -> Design -> Build -> Verify -> Archive
+    +--> domains/owner-loop -----> Shape -> Build <-> Verify -> Archive
+    +--> domains/owner-pipeline ----> Open -> Design -> Build -> Verify -> Archive
     +--> domains/integrations -----> OpenSpec、Superpowers
     +--> domains/skill ------------> Owner Skills、Rules、Hooks 的安装与卸载
     +--> domains/workflow-contract -> .owner/config.yaml 与安全写入契约
@@ -33,13 +33,13 @@ platform/ -------------------------> 文件系统、进程、路径、宿主安�
 
 ## 统一入口
 
-项目首次激活时写入 `.owner/config.yaml`。`owner workflow resolve --activate` 只读取显式配置并返回 `native` 或 `classic`，不会根据任务大小、文件数量或模型判断自动切换。
+项目首次激活时写入 `.owner/config.yaml`。`owner workflow resolve --activate` 只读取显式配置并返回 `loop` 或 `pipeline`，不会根据任务大小、文件数量或模型判断自动切换。
 
-每个平台只安装一个共享入口和一个 Hook Router。Router 读取 `.owner/current-change.json`，把一次写操作交给当前 change 所属工作流的 Guard。Native 与 Classic 不会同时处理同一次写入。
+每个平台只安装一个共享入口和一个 Hook Router。Router 读取 `.owner/current-change.json`，把一次写操作交给当前 change 所属工作流的 Guard。Loop 与 Pipeline 不会同时处理同一次写入。
 
-## Native
+## Loop
 
-Native 生命周期为：
+Loop 生命周期为：
 
 ```text
 Shape -> Build -> Verify -> Archive
@@ -50,15 +50,15 @@ Shape -> Build -> Verify -> Archive
 主要设计：
 
 - portable state、brief、目标 spec、acceptance 和 verification report 位于配置的 artifact root，默认是 `docs/owner/`。
-- 锁、执行日志、receipt 和 transaction 位于 `.owner/runtime/native/`，属于本机运行状态。
+- 锁、执行日志、receipt 和 transaction 位于 `.owner/runtime/loop/`，属于本机运行状态。
 - 状态写入使用 schema 校验、原子替换和 `state_version` compare-and-swap，避免并发 Agent 覆盖新状态。
 - Build 产生候选版本；Verify 绑定候选身份并逐项判断 acceptance，不能只相信 Builder 的完成声明。
 - 验证失败会回到 Build，但受迭代预算与无进展判断限制，避免无限修复消耗。
 - 恢复记录当前阶段、候选、验收结果与 continuation。换设备后仍需获得代码，并对候选重新验证；状态文件不能恢复从未同步的代码。
 
-## Classic
+## Pipeline
 
-Classic 生命周期为：
+Pipeline 生命周期为：
 
 ```text
 Open -> Design -> Build -> Verify -> Archive
@@ -70,13 +70,13 @@ Open -> Design -> Build -> Verify -> Archive
 - Superpowers 提供 brainstorming、writing-plans、TDD、debugging 与 review 方法，定义如何实现和审查。
 - Owner 的 `.owner.yaml`、handoff、checkpoint、Guard 和 Archive transaction 连接整个生命周期。
 
-Classic 阶段 Skills `owner-open/design/build/verify/archive` 是工作流组成部分；`owner-hotfix` 与 `owner-tweak` 是 Classic 的预设入口，不是独立产品。
+Pipeline 阶段 Skills `owner-open/design/build/verify/archive` 是工作流组成部分；`owner-hotfix` 与 `owner-tweak` 是 Pipeline 的预设入口，不是独立产品。
 
 ## 恢复与上下文压缩
 
 聊天上下文不是事实源。阶段、change、workspace、计划哈希、handoff、候选与验证结果写入磁盘；`resume-probe` 根据这些状态给出可恢复目标。
 
-例如 Build 执行到任务 4 后断网，新会话不需要依赖旧聊天猜测进度。Native 从 portable state、runtime receipt 与 candidate identity 恢复；Classic 从 `.owner.yaml`、OpenSpec tasks、Superpowers plan 和 checkpoint 恢复。如果代码只存在于断线设备且未同步，两套工作流都会明确阻塞，而不是假装能够恢复。
+例如 Build 执行到任务 4 后断网，新会话不需要依赖旧聊天猜测进度。Loop 从 portable state、runtime receipt 与 candidate identity 恢复；Pipeline 从 `.owner.yaml`、OpenSpec tasks、Superpowers plan 和 checkpoint 恢复。如果代码只存在于断线设备且未同步，两套工作流都会明确阻塞，而不是假装能够恢复。
 
 ## 验证模型
 
@@ -94,8 +94,8 @@ Owner 通过可执行检查和独立 Verifier 降低“代码写完但不符合�
 TypeScript 是运行时事实源：
 
 ```text
-domains/owner-classic/* -> assets/skills/owner/scripts/owner-*.mjs
-domains/owner-native/*  -> assets/skills/owner-native/scripts/owner-native-*.mjs
+domains/owner-pipeline/* -> assets/skills/owner/scripts/owner-*.mjs
+domains/owner-loop/*  -> assets/skills/owner-loop/scripts/owner-loop-*.mjs
 domains/owner-entry/*   -> owner-entry-runtime.mjs + owner-hook-router.mjs
 ```
 

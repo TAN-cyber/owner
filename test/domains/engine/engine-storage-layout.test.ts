@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { CLASSIC_RUN_STORAGE, NATIVE_RUN_STORAGE } from '../../../domains/engine/storage-layout.js';
+import { PIPELINE_RUN_STORAGE, LOOP_RUN_STORAGE } from '../../../domains/engine/storage-layout.js';
 import { startRun } from '../../../domains/engine/loop.js';
 import {
   parseStoredRunStateValue,
@@ -16,17 +16,17 @@ import type { SkillPackage } from '../../../domains/skill/types.js';
 
 function runtimePackage(): SkillPackage {
   return {
-    root: '/runtime/owner-native',
+    root: '/runtime/owner-loop',
     packageKind: 'runtime',
     definition: {
       apiVersion: 'owner/v1alpha1',
       kind: 'Skill',
       metadata: {
-        name: 'owner-native-runtime',
+        name: 'owner-loop-runtime',
         version: '1',
-        description: 'Native runtime',
+        description: 'Loop runtime',
       },
-      goal: { statement: 'Advance Native state', inputs: [], outputs: [], success: ['done'] },
+      goal: { statement: 'Advance Loop state', inputs: [], outputs: [], success: ['done'] },
       orchestration: {
         mode: 'deterministic',
         entry: 'shape',
@@ -59,8 +59,8 @@ describe('Engine Run storage layouts', () => {
     await fs.rm(changeDir, { recursive: true, force: true });
   });
 
-  it('publishes stable Classic and Native layouts', () => {
-    expect(CLASSIC_RUN_STORAGE).toEqual({
+  it('publishes stable Pipeline and Loop layouts', () => {
+    expect(PIPELINE_RUN_STORAGE).toEqual({
       stateRef: '.owner/run-state.json',
       pendingRef: '.owner/pending-action.json',
       trajectoryRef: '.owner/trajectory.jsonl',
@@ -69,7 +69,7 @@ describe('Engine Run storage layouts', () => {
       checkpointRef: '.owner/checkpoint.json',
       snapshotsRef: '.owner/skill-snapshots',
     });
-    expect(NATIVE_RUN_STORAGE).toEqual({
+    expect(LOOP_RUN_STORAGE).toEqual({
       stateRef: 'runtime/run-state.json',
       pendingRef: 'runtime/pending-action.json',
       trajectoryRef: 'runtime/trajectory.jsonl',
@@ -80,37 +80,37 @@ describe('Engine Run storage layouts', () => {
     });
   });
 
-  it('keeps the existing startRun function on Classic refs', () => {
-    const state = startRun(runtimePackage(), 'classic-run', 'a'.repeat(64));
+  it('keeps the existing startRun function on Pipeline refs', () => {
+    const state = startRun(runtimePackage(), 'pipeline-run', 'a'.repeat(64));
     expect(state.pendingRef).toBe('.owner/pending-action.json');
     expect(state.trajectoryRef).toBe('.owner/trajectory.jsonl');
     expect(state.checkpointRef).toBe('.owner/checkpoint.json');
   });
 
-  it('writes and removes Native state without creating a .owner directory', async () => {
+  it('writes and removes Loop state without creating a .owner directory', async () => {
     const state = startRunWithStorage(
       runtimePackage(),
-      'native-run',
+      'loop-run',
       'b'.repeat(64),
-      NATIVE_RUN_STORAGE,
+      LOOP_RUN_STORAGE,
     );
 
-    await writeRunStateAt(changeDir, state, NATIVE_RUN_STORAGE);
+    await writeRunStateAt(changeDir, state, LOOP_RUN_STORAGE);
 
-    expect(await readRunStateAt(changeDir, NATIVE_RUN_STORAGE)).toEqual(state);
+    expect(await readRunStateAt(changeDir, LOOP_RUN_STORAGE)).toEqual(state);
     expect(await fs.stat(path.join(changeDir, 'runtime', 'run-state.json'))).toBeDefined();
     await expect(fs.access(path.join(changeDir, '.owner'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
 
-    await removeRunStateAt(changeDir, NATIVE_RUN_STORAGE);
-    expect(await readRunStateAt(changeDir, NATIVE_RUN_STORAGE)).toBeNull();
+    await removeRunStateAt(changeDir, LOOP_RUN_STORAGE);
+    expect(await readRunStateAt(changeDir, LOOP_RUN_STORAGE)).toBeNull();
   });
 
   it('rejects storage refs that escape the Run root', () => {
     expect(() =>
       startRunWithStorage(runtimePackage(), 'bad-run', 'c'.repeat(64), {
-        ...NATIVE_RUN_STORAGE,
+        ...LOOP_RUN_STORAGE,
         stateRef: '../run-state.json',
       }),
     ).toThrow('Run storage ref must stay inside the Run root');
@@ -119,9 +119,9 @@ describe('Engine Run storage layouts', () => {
   it('validates every persisted RunState field before a journal can reuse it', () => {
     const state = startRunWithStorage(
       runtimePackage(),
-      'strict-native-run',
+      'strict-loop-run',
       'd'.repeat(64),
-      NATIVE_RUN_STORAGE,
+      LOOP_RUN_STORAGE,
     );
     expect(parseStoredRunStateValue(state)).toEqual(state);
 

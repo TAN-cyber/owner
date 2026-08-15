@@ -3,10 +3,10 @@ import { getCurrentVersion } from '../../platform/version/version.js';
 import { OWNER_TAGLINE } from './owner-banner.js';
 
 // Command handlers are imported lazily so CLI startup stays proportional to
-// the Native or Classic operation being run.
+// the Loop or Pipeline operation being run.
 
-const PUBLIC_CLASSIC_COMMANDS = ['state', 'guard', 'handoff', 'archive'] as const;
-type PublicClassicCommand = (typeof PUBLIC_CLASSIC_COMMANDS)[number];
+const PUBLIC_PIPELINE_COMMANDS = ['state', 'guard', 'handoff', 'archive'] as const;
+type PublicPipelineCommand = (typeof PUBLIC_PIPELINE_COMMANDS)[number];
 
 const program = new Command();
 
@@ -32,12 +32,12 @@ program
   .addOption(new Option('--language <lang>', 'Language for skills').choices(['en', 'zh']))
   .addOption(
     new Option('--workflow <workflow>', 'Workflows to initialize').choices([
-      'native',
-      'classic',
+      'loop',
+      'pipeline',
       'both',
     ]),
   )
-  .option('--root <artifact-root>', 'Native artifact root relative to the project')
+  .option('--root <artifact-root>', 'Loop artifact root relative to the project')
   .action(async (targetPath = '.', options) => {
     const { initCommand } = await import('../commands/init.js');
     const { exitCodeForCommandResult } = await import('../commands/command-result.js');
@@ -58,7 +58,7 @@ const workflow = program.command('workflow').description('Resolve the configured
 
 workflow
   .command('resolve [path]')
-  .description('Resolve /owner to its permanent Native or Classic entry')
+  .description('Resolve /owner to its permanent Loop or Pipeline entry')
   .option('--activate', 'Create project configuration from global defaults when missing')
   .option('--json', 'Output as JSON')
   .action(async (targetPath = '.', options) => {
@@ -88,7 +88,7 @@ program
   .option('--json', 'Output as JSON')
   .option('--repair', 'Repair managed Hook, Rule, and deterministic selection state')
   .addOption(
-    new Option('--strategy <strategy>', 'Classic root move recovery strategy').choices([
+    new Option('--strategy <strategy>', 'Pipeline root move recovery strategy').choices([
       'continue',
       'rollback',
     ]),
@@ -114,16 +114,17 @@ program
   )
   .addOption(new Option('--language <lang>', 'Language for skills').choices(['en', 'zh']))
   .addOption(
-    new Option('--classic-layout <layout>', 'Classic root to record when both roots exist').choices(
-      ['legacy', 'docs'],
-    ),
+    new Option(
+      '--pipeline-layout <layout>',
+      'Pipeline root to record when both roots exist',
+    ).choices(['legacy', 'docs']),
   )
   .addOption(new Option('--scope <scope>', 'Install scope').choices(['global', 'project']))
   .option('--all-projects', 'Update all indexed project-scope Owner installs')
   .option('--current-project', 'Update only the current project')
   .option(
     '--self-update',
-    'Update the Owner npm package and installed Classic dependencies before refreshing project assets',
+    'Update the Owner npm package and installed Pipeline dependencies before refreshing project assets',
   )
   .option('--skip-self-update', 'Skip the Owner npm package self-update')
   .addOption(new Option('--skip-npm', 'Deprecated alias for --skip-self-update').hideHelp())
@@ -155,63 +156,63 @@ program
     }
   });
 
-const classicDescriptions: Record<PublicClassicCommand, string> = {
-  state: 'Read and update Classic workflow state',
-  guard: 'Check Classic workflow phase guards',
-  handoff: 'Create and inspect Classic workflow handoffs',
-  archive: 'Archive completed Classic workflow changes',
+const pipelineDescriptions: Record<PublicPipelineCommand, string> = {
+  state: 'Read and update Pipeline workflow state',
+  guard: 'Check Pipeline workflow phase guards',
+  handoff: 'Create and inspect Pipeline workflow handoffs',
+  archive: 'Archive completed Pipeline workflow changes',
 };
 
-for (const command of PUBLIC_CLASSIC_COMMANDS) {
+for (const command of PUBLIC_PIPELINE_COMMANDS) {
   program
     .command(`${command} [args...]`)
-    .description(classicDescriptions[command])
+    .description(pipelineDescriptions[command])
     .allowUnknownOption()
     .allowExcessArguments()
     .action(async (args: string[]) => {
-      const { runClassicFacade } = await import('../commands/classic.js');
-      process.exitCode = await runClassicFacade(command as PublicClassicCommand, args);
+      const { runPipelineFacade } = await import('../commands/pipeline.js');
+      process.exitCode = await runPipelineFacade(command as PublicPipelineCommand, args);
     });
 }
 
 program
-  .command('classic [args...]')
-  .description('Manage the Owner Classic workflow and its configured artifact root')
+  .command('pipeline [args...]')
+  .description('Manage the Owner Pipeline workflow and its configured artifact root')
   .allowUnknownOption()
   .allowExcessArguments()
   .helpOption(false)
   .action(async (args: string[]) => {
-    const { runClassicGroupFacade } = await import('../commands/classic.js');
-    process.exitCode = await runClassicGroupFacade(args);
+    const { runPipelineGroupFacade } = await import('../commands/pipeline.js');
+    process.exitCode = await runPipelineGroupFacade(args);
   });
 
 program
-  .command('native [args...]')
-  .description('Manage the self-contained Owner Native workflow')
+  .command('loop [args...]')
+  .description('Manage the self-contained Owner Loop workflow')
   .allowUnknownOption()
   .allowExcessArguments()
   .helpOption(false)
   .action(async (args: string[]) => {
-    const { runNativeFacade } = await import('../commands/native.js');
-    process.exitCode = await runNativeFacade(args);
+    const { runLoopFacade } = await import('../commands/loop.js');
+    process.exitCode = await runLoopFacade(args);
   });
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function classicGroupArgs(argv: readonly string[]): string[] | null {
+function pipelineGroupArgs(argv: readonly string[]): string[] | null {
   const args = argv.slice(2);
-  const classicIndex = args[0] === '--' ? 1 : 0;
-  return args[classicIndex] === 'classic' ? args.slice(classicIndex + 1) : null;
+  const pipelineIndex = args[0] === '--' ? 1 : 0;
+  return args[pipelineIndex] === 'pipeline' ? args.slice(pipelineIndex + 1) : null;
 }
 
 async function runCli(): Promise<void> {
   try {
-    const classicArgs = classicGroupArgs(process.argv);
-    if (classicArgs) {
-      const { runClassicGroupFacade } = await import('../commands/classic.js');
-      process.exitCode = await runClassicGroupFacade(classicArgs);
+    const pipelineArgs = pipelineGroupArgs(process.argv);
+    if (pipelineArgs) {
+      const { runPipelineGroupFacade } = await import('../commands/pipeline.js');
+      process.exitCode = await runPipelineGroupFacade(pipelineArgs);
       return;
     }
 

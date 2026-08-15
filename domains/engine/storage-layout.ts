@@ -10,7 +10,7 @@ export interface RunStorageLayout {
   snapshotsRef: string;
 }
 
-export const CLASSIC_RUN_STORAGE: Readonly<RunStorageLayout> = /* @__PURE__ */ Object.freeze({
+export const PIPELINE_RUN_STORAGE: Readonly<RunStorageLayout> = /* @__PURE__ */ Object.freeze({
   stateRef: '.owner/run-state.json',
   pendingRef: '.owner/pending-action.json',
   trajectoryRef: '.owner/trajectory.jsonl',
@@ -20,7 +20,7 @@ export const CLASSIC_RUN_STORAGE: Readonly<RunStorageLayout> = /* @__PURE__ */ O
   snapshotsRef: '.owner/skill-snapshots',
 });
 
-export const NATIVE_RUN_STORAGE: Readonly<RunStorageLayout> = /* @__PURE__ */ Object.freeze({
+export const LOOP_RUN_STORAGE: Readonly<RunStorageLayout> = /* @__PURE__ */ Object.freeze({
   stateRef: 'runtime/run-state.json',
   pendingRef: 'runtime/pending-action.json',
   trajectoryRef: 'runtime/trajectory.jsonl',

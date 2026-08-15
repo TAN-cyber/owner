@@ -37,30 +37,30 @@ function parseRoot(source: string): Record<string, unknown> {
 }
 
 function toProjectConfig(config: WorkflowGlobalConfig): WorkflowProjectConfig {
-  if (config.native?.pending_root_move) {
-    throw new Error('Global Owner config cannot contain native.pending_root_move');
+  if (config.loop?.pending_root_move) {
+    throw new Error('Global Owner config cannot contain loop.pending_root_move');
   }
-  const native = config.native
-    ? (({ pending_root_move: _pendingRootMove, ...value }) => value)(config.native)
+  const loop = config.loop
+    ? (({ pending_root_move: _pendingRootMove, ...value }) => value)(config.loop)
     : undefined;
   return {
     ...config,
     schema: 'owner.project.v1',
-    ...(native ? { native } : {}),
+    ...(loop ? { loop } : {}),
   };
 }
 
 function toGlobalConfig(config: WorkflowProjectConfig): WorkflowGlobalConfig {
-  if (config.native?.pending_root_move) {
-    throw new Error('Global Owner config cannot contain native.pending_root_move');
+  if (config.loop?.pending_root_move) {
+    throw new Error('Global Owner config cannot contain loop.pending_root_move');
   }
-  const native = config.native
-    ? (({ pending_root_move: _pendingRootMove, ...value }) => value)(config.native)
+  const loop = config.loop
+    ? (({ pending_root_move: _pendingRootMove, ...value }) => value)(config.loop)
     : undefined;
   return {
     ...config,
     schema: 'owner.global.v1',
-    ...(native ? { native } : {}),
+    ...(loop ? { loop } : {}),
   };
 }
 
@@ -75,19 +75,19 @@ function parseCompleteGlobalConfig(value: Record<string, unknown>): WorkflowGlob
 function parseLegacyGlobalConfig(source: string): WorkflowGlobalConfig | null {
   const document = parseWorkflowProjectConfigDocument(source, {
     allowPartialProject: true,
-    allowMissingNativeFields: true,
+    allowMissingLoopFields: true,
   });
-  if (!document.native && !document.classic) return null;
-  const workflow = document.native ? 'native' : 'classic';
-  const language = document.native?.language ?? document.classic?.language ?? 'en';
-  const defaults = defaultWorkflowProjectConfig(document.native?.artifact_root ?? 'docs', language);
+  if (!document.loop && !document.pipeline) return null;
+  const workflow = document.loop ? 'loop' : 'pipeline';
+  const language = document.loop?.language ?? document.pipeline?.language ?? 'en';
+  const defaults = defaultWorkflowProjectConfig(document.loop?.artifact_root ?? 'docs', language);
   return {
     schema: 'owner.global.v1',
     default_workflow: workflow,
     workflows: [workflow],
     ambient_resume: document.ambient_resume,
-    ...(document.native ? { native: { ...defaults.native, ...document.native } } : {}),
-    ...(document.classic ? { classic: document.classic } : {}),
+    ...(document.loop ? { loop: { ...defaults.loop, ...document.loop } } : {}),
+    ...(document.pipeline ? { pipeline: document.pipeline } : {}),
   };
 }
 
@@ -141,7 +141,7 @@ export async function writeWorkflowGlobalConfig(
   );
   merged.schema = 'owner.global.v1';
   const language: ProjectConfigLanguage =
-    config.native?.language === 'zh-CN' || config.classic?.language === 'zh-CN' ? 'zh-CN' : 'en';
+    config.loop?.language === 'zh-CN' || config.pipeline?.language === 'zh-CN' ? 'zh-CN' : 'en';
   const output = renderStructuredProjectConfig(merged, language);
   parseWorkflowGlobalConfig(output);
   await atomicWriteContainedText(configPath, output, { containedRoot: homeDir });

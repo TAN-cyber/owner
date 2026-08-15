@@ -11,14 +11,14 @@ const runTsc = (args = []) => {
   execFileSync(process.execPath, [tscPath, ...args], { stdio: 'inherit' });
 };
 
-const buildClassicRuntime = () => {
-  execFileSync(process.execPath, ['scripts/build/build-classic-runtime.mjs'], {
+const buildPipelineRuntime = () => {
+  execFileSync(process.execPath, ['scripts/build/build-pipeline-runtime.mjs'], {
     stdio: 'inherit',
   });
 };
 
-const buildNativeRuntime = () => {
-  execFileSync(process.execPath, ['scripts/build/build-native-runtime.mjs'], {
+const buildLoopRuntime = () => {
+  execFileSync(process.execPath, ['scripts/build/build-loop-runtime.mjs'], {
     stdio: 'inherit',
   });
 };
@@ -36,11 +36,11 @@ if (existsSync('dist')) {
   rmSync('dist', { recursive: true, force: true });
 }
 
-console.log('Building Classic runtime...');
+console.log('Building Pipeline runtime...');
 try {
-  buildClassicRuntime();
-  console.log('Building Native runtime...');
-  buildNativeRuntime();
+  buildPipelineRuntime();
+  console.log('Building Loop runtime...');
+  buildLoopRuntime();
   console.log('Building entry resolver runtime...');
   buildEntryRuntime();
   console.log('Compiling TypeScript...');

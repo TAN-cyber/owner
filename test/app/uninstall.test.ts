@@ -367,11 +367,11 @@ describe('uninstall', () => {
   describe('removeOwnerSkillsForPlatform', () => {
     const claudePlatform: Platform = PLATFORMS.find((p) => p.id === 'claude')!;
 
-    const retiredNativeBundles = [
-      'owner-native/scripts/owner-native-checkpoint.mjs',
-      'owner-native/scripts/owner-native-check.mjs',
-      'owner-native/scripts/owner-native-evidence.mjs',
-      'owner-native/scripts/owner-native-receipt.mjs',
+    const retiredLoopBundles = [
+      'owner-loop/scripts/owner-loop-checkpoint.mjs',
+      'owner-loop/scripts/owner-loop-check.mjs',
+      'owner-loop/scripts/owner-loop-evidence.mjs',
+      'owner-loop/scripts/owner-loop-receipt.mjs',
     ] as const;
 
     it('removes installed Owner skills', async () => {
@@ -396,16 +396,16 @@ describe('uninstall', () => {
       expect(result.failed).toBe(0);
     });
 
-    it('removes retired Native bundles from copy and central stores without deleting user files', async () => {
+    it('removes retired Loop bundles from copy and central stores without deleting user files', async () => {
       const roots = [
         path.join(tmpDir, '.claude', 'skills'),
         path.join(tmpDir, '.owner', 'skills', 'skills'),
       ];
       for (const root of roots) {
-        const userFile = path.join(root, 'owner-native', 'scripts', 'user-helper.mjs');
+        const userFile = path.join(root, 'owner-loop', 'scripts', 'user-helper.mjs');
         await fs.mkdir(path.dirname(userFile), { recursive: true });
         await fs.writeFile(userFile, 'keep user content\n', 'utf8');
-        for (const relativePath of retiredNativeBundles) {
+        for (const relativePath of retiredLoopBundles) {
           const target = path.join(root, ...relativePath.split('/'));
           await fs.writeFile(target, 'legacy bundle\n', 'utf8');
         }
@@ -414,15 +414,15 @@ describe('uninstall', () => {
       const result = await removeOwnerSkillsForPlatform(tmpDir, claudePlatform, 'project');
 
       expect(result.failed).toBe(0);
-      expect(result.removed).toBe(retiredNativeBundles.length * roots.length);
+      expect(result.removed).toBe(retiredLoopBundles.length * roots.length);
       for (const root of roots) {
-        for (const relativePath of retiredNativeBundles) {
+        for (const relativePath of retiredLoopBundles) {
           await expect(
             fs.access(path.join(root, ...relativePath.split('/'))),
           ).rejects.toMatchObject({ code: 'ENOENT' });
         }
         await expect(
-          fs.readFile(path.join(root, 'owner-native', 'scripts', 'user-helper.mjs'), 'utf8'),
+          fs.readFile(path.join(root, 'owner-loop', 'scripts', 'user-helper.mjs'), 'utf8'),
         ).resolves.toBe('keep user content\n');
       }
     });
@@ -443,13 +443,13 @@ describe('uninstall', () => {
         tmpDir,
         claudePlatform,
         'project',
-        ['classic'],
-        ['native'],
+        ['pipeline'],
+        ['loop'],
       );
 
       expect(result.failed).toBe(0);
-      expect(await fileExists(path.join(skillsDir, 'owner-classic', 'SKILL.md'))).toBe(false);
-      expect(await fileExists(path.join(skillsDir, 'owner-native', 'SKILL.md'))).toBe(true);
+      expect(await fileExists(path.join(skillsDir, 'owner-pipeline', 'SKILL.md'))).toBe(false);
+      expect(await fileExists(path.join(skillsDir, 'owner-loop', 'SKILL.md'))).toBe(true);
       expect(await fileExists(path.join(skillsDir, 'owner', 'SKILL.md'))).toBe(true);
     });
   });
@@ -767,9 +767,9 @@ describe('uninstall', () => {
   });
 
   describe('removeWorkingDirs', () => {
-    async function writeNativeProjectConfig(
+    async function writeLoopProjectConfig(
       artifactRoot: string,
-      workflows: 'native' | 'both' = 'native',
+      workflows: 'loop' | 'both' = 'loop',
     ): Promise<string> {
       const configPath = path.join(tmpDir, '.owner', 'config.yaml');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
@@ -777,11 +777,11 @@ describe('uninstall', () => {
         configPath,
         [
           'schema: owner.project.v1',
-          'default_workflow: native',
-          `workflows: [native${workflows === 'both' ? ', classic' : ''}]`,
-          'native:',
+          'default_workflow: loop',
+          `workflows: [loop${workflows === 'both' ? ', pipeline' : ''}]`,
+          'loop:',
           `  artifact_root: ${artifactRoot}`,
-          ...(workflows === 'both' ? ['classic:', '  artifact_layout: docs'] : []),
+          ...(workflows === 'both' ? ['pipeline:', '  artifact_layout: docs'] : []),
           '',
         ].join('\n'),
         'utf8',
@@ -789,8 +789,8 @@ describe('uninstall', () => {
       return configPath;
     }
 
-    async function createNativeWorkingTree(artifactRoot: string): Promise<string> {
-      const nativeRoot = path.join(tmpDir, ...artifactRoot.split('/'), 'owner');
+    async function createLoopWorkingTree(artifactRoot: string): Promise<string> {
+      const loopRoot = path.join(tmpDir, ...artifactRoot.split('/'), 'owner');
       for (const directory of [
         'specs',
         'changes',
@@ -798,9 +798,9 @@ describe('uninstall', () => {
         'runtime/locks',
         'runtime/transactions',
       ]) {
-        await fs.mkdir(path.join(nativeRoot, ...directory.split('/')), { recursive: true });
+        await fs.mkdir(path.join(loopRoot, ...directory.split('/')), { recursive: true });
       }
-      return nativeRoot;
+      return loopRoot;
     }
 
     it('removes .owner directory', async () => {
@@ -828,7 +828,7 @@ describe('uninstall', () => {
       const configPath = path.join(tmpDir, '.owner', 'config.yaml');
       const docsRoot = path.join(tmpDir, 'docs');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: docs\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: docs\n', 'utf8');
       await fs.mkdir(path.join(docsRoot, 'openspec', 'changes', 'archive'), { recursive: true });
       await fs.mkdir(path.join(docsRoot, 'openspec', 'specs'), { recursive: true });
       await fs.mkdir(path.join(docsRoot, 'superpowers', 'reports'), { recursive: true });
@@ -853,9 +853,9 @@ describe('uninstall', () => {
           configPath,
           [
             'schema: owner.project.v1',
-            'default_workflow: classic',
-            'workflows: [classic]',
-            'classic:',
+            'default_workflow: pipeline',
+            'workflows: [pipeline]',
+            'pipeline:',
             `  artifact_layout: ${artifactLayout}`,
             '',
           ].join('\n'),
@@ -890,32 +890,32 @@ describe('uninstall', () => {
       },
     );
 
-    it('removes the standard empty Native-only docs tree', async () => {
-      await writeNativeProjectConfig('docs');
-      const nativeRoot = await createNativeWorkingTree('docs');
+    it('removes the standard empty Loop-only docs tree', async () => {
+      await writeLoopProjectConfig('docs');
+      const loopRoot = await createLoopWorkingTree('docs');
 
       const result = await removeWorkingDirs(tmpDir);
 
       expect(result).toEqual({ removed: 1, failed: 0 });
       expect(await fileExists(path.join(tmpDir, '.owner'))).toBe(false);
-      expect(await fileExists(nativeRoot)).toBe(false);
+      expect(await fileExists(loopRoot)).toBe(false);
       expect(await fileExists(path.join(tmpDir, 'docs'))).toBe(false);
     });
 
-    it('removes the standard empty Native tree from an explicit artifact root', async () => {
-      await writeNativeProjectConfig('product-artifacts');
-      const nativeRoot = await createNativeWorkingTree('product-artifacts');
+    it('removes the standard empty Loop tree from an explicit artifact root', async () => {
+      await writeLoopProjectConfig('product-artifacts');
+      const loopRoot = await createLoopWorkingTree('product-artifacts');
 
       const result = await removeWorkingDirs(tmpDir);
 
       expect(result).toEqual({ removed: 1, failed: 0 });
       expect(await fileExists(path.join(tmpDir, '.owner'))).toBe(false);
-      expect(await fileExists(nativeRoot)).toBe(false);
+      expect(await fileExists(loopRoot)).toBe(false);
     });
 
-    it('removes the combined empty Classic and Native docs tree', async () => {
-      await writeNativeProjectConfig('docs', 'both');
-      await createNativeWorkingTree('docs');
+    it('removes the combined empty Pipeline and Loop docs tree', async () => {
+      await writeLoopProjectConfig('docs', 'both');
+      await createLoopWorkingTree('docs');
       await fs.mkdir(path.join(tmpDir, 'docs', 'openspec', 'changes', 'archive'), {
         recursive: true,
       });
@@ -930,23 +930,23 @@ describe('uninstall', () => {
     });
 
     it.each(['artifact', 'unknown', 'special'] as const)(
-      'preserves Native working directories containing %s content',
+      'preserves Loop working directories containing %s content',
       async (contentKind) => {
-        const configPath = await writeNativeProjectConfig('docs');
-        const nativeRoot = await createNativeWorkingTree('docs');
-        const external = path.join(tmpDir, 'external-native-content');
+        const configPath = await writeLoopProjectConfig('docs');
+        const loopRoot = await createLoopWorkingTree('docs');
+        const external = path.join(tmpDir, 'external-loop-content');
         await fs.mkdir(external, { recursive: true });
         await fs.writeFile(path.join(external, 'marker.txt'), 'external marker\n', 'utf8');
 
         let retainedPath: string;
         if (contentKind === 'artifact') {
-          retainedPath = path.join(nativeRoot, 'changes', 'active-change.json');
+          retainedPath = path.join(loopRoot, 'changes', 'active-change.json');
           await fs.writeFile(retainedPath, '{}\n', 'utf8');
         } else if (contentKind === 'unknown') {
-          retainedPath = path.join(nativeRoot, 'user-notes');
+          retainedPath = path.join(loopRoot, 'user-notes');
           await fs.mkdir(retainedPath);
         } else {
-          retainedPath = path.join(nativeRoot, 'runtime', 'locks');
+          retainedPath = path.join(loopRoot, 'runtime', 'locks');
           await fs.rmdir(retainedPath);
           await fs.symlink(
             external,
@@ -973,7 +973,7 @@ describe('uninstall', () => {
         } else {
           await expect(fs.stat(configPath)).resolves.toBeDefined();
         }
-        await expect(fs.lstat(nativeRoot)).resolves.toBeDefined();
+        await expect(fs.lstat(loopRoot)).resolves.toBeDefined();
         await expect(fs.lstat(retainedPath)).resolves.toBeDefined();
         await expect(fs.readFile(path.join(external, 'marker.txt'), 'utf8')).resolves.toBe(
           'external marker\n',
@@ -982,10 +982,10 @@ describe('uninstall', () => {
     );
 
     it('rejects a managed-directory replacement after inspection without reading the junction target', async () => {
-      const configPath = await writeNativeProjectConfig('docs');
-      const nativeRoot = await createNativeWorkingTree('docs');
-      const changesDir = path.join(nativeRoot, 'changes');
-      const preservedChanges = path.join(tmpDir, 'preserved-native-changes');
+      const configPath = await writeLoopProjectConfig('docs');
+      const loopRoot = await createLoopWorkingTree('docs');
+      const changesDir = path.join(loopRoot, 'changes');
+      const preservedChanges = path.join(tmpDir, 'preserved-loop-changes');
       const external = path.join(tmpDir, 'external-replacement');
       const marker = path.join(external, 'marker.txt');
       await fs.mkdir(external, { recursive: true });
@@ -1018,7 +1018,7 @@ describe('uninstall', () => {
             .some(([target]) => path.resolve(String(target)) === path.resolve(changesDir)),
         ).toBe(false);
         await expect(fs.stat(configPath)).resolves.toBeDefined();
-        await expect(fs.lstat(nativeRoot)).resolves.toBeDefined();
+        await expect(fs.lstat(loopRoot)).resolves.toBeDefined();
         expect((await fs.lstat(changesDir)).isSymbolicLink()).toBe(true);
         await expect(fs.stat(preservedChanges)).resolves.toBeDefined();
         await expect(fs.readFile(marker, 'utf8')).resolves.toBe('external marker\n');
@@ -1032,7 +1032,7 @@ describe('uninstall', () => {
       const legacyRoot = path.join(tmpDir, 'openspec');
       const specsDir = path.join(tmpDir, 'docs', 'superpowers', 'specs');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: legacy\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: legacy\n', 'utf8');
       await fs.mkdir(path.join(legacyRoot, 'changes', 'archive'), { recursive: true });
       await fs.mkdir(path.join(legacyRoot, 'specs'), { recursive: true });
       await fs.mkdir(specsDir, { recursive: true });
@@ -1067,7 +1067,7 @@ describe('uninstall', () => {
       const legacyRoot = path.join(tmpDir, 'openspec');
       const docsRoot = path.join(tmpDir, 'docs', 'openspec');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: legacy\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: legacy\n', 'utf8');
       await fs.mkdir(path.join(legacyRoot, 'changes', 'archive'), { recursive: true });
       await fs.mkdir(path.join(docsRoot, 'changes', 'archive'), { recursive: true });
 
@@ -1079,13 +1079,13 @@ describe('uninstall', () => {
       await expect(fs.stat(docsRoot)).resolves.toBeDefined();
     });
 
-    it('preserves every working directory while a Classic root move is pending', async () => {
+    it('preserves every working directory while a Pipeline root move is pending', async () => {
       const ownerDir = path.join(tmpDir, '.owner');
       const configPath = path.join(ownerDir, 'config.yaml');
-      const journalPath = path.join(ownerDir, 'classic-root-move.json');
+      const journalPath = path.join(ownerDir, 'pipeline-root-move.json');
       const legacyRoot = path.join(tmpDir, 'openspec');
       await fs.mkdir(ownerDir, { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: legacy\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: legacy\n', 'utf8');
       await fs.writeFile(journalPath, '{}\n', 'utf8');
       await fs.mkdir(path.join(legacyRoot, 'changes', 'archive'), { recursive: true });
       await fs.mkdir(path.join(legacyRoot, 'specs'), { recursive: true });
@@ -1104,7 +1104,7 @@ describe('uninstall', () => {
       const userFile = path.join(ownerDir, 'user-notes.md');
       const legacyRoot = path.join(tmpDir, 'openspec');
       await fs.mkdir(ownerDir, { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: legacy\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: legacy\n', 'utf8');
       await fs.writeFile(userFile, 'keep me\n', 'utf8');
       await fs.mkdir(path.join(legacyRoot, 'changes', 'archive'), { recursive: true });
       await fs.mkdir(path.join(legacyRoot, 'specs'), { recursive: true });
@@ -1117,12 +1117,12 @@ describe('uninstall', () => {
       await expect(fs.stat(legacyRoot)).resolves.toBeDefined();
     });
 
-    it('preserves every working directory when Classic config is invalid', async () => {
+    it('preserves every working directory when Pipeline config is invalid', async () => {
       const configPath = path.join(tmpDir, '.owner', 'config.yaml');
       const legacyRoot = path.join(tmpDir, 'openspec');
       const docsRoot = path.join(tmpDir, 'docs', 'openspec');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, 'classic: invalid\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline: invalid\n', 'utf8');
       await fs.mkdir(legacyRoot, { recursive: true });
       await fs.mkdir(docsRoot, { recursive: true });
 
@@ -1153,7 +1153,7 @@ describe('uninstall', () => {
       const target = path.join(tmpDir, 'user-open-spec-target');
       const link = path.join(tmpDir, 'openspec');
       await fs.mkdir(path.dirname(configPath), { recursive: true });
-      await fs.writeFile(configPath, 'classic:\n  artifact_layout: legacy\n', 'utf8');
+      await fs.writeFile(configPath, 'pipeline:\n  artifact_layout: legacy\n', 'utf8');
       await fs.mkdir(target, { recursive: true });
       await fs.symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
 
@@ -1385,7 +1385,7 @@ describe('uninstallCommand interactive selection', () => {
     homedirSpy.mockRestore();
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     mockedSelect.mockResolvedValue(true as never);
-    mockedCheckbox.mockResolvedValueOnce(['native'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop'] as never);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     try {
@@ -1397,10 +1397,10 @@ describe('uninstallCommand interactive selection', () => {
     expect(mockedCheckbox).toHaveBeenCalledTimes(1);
     for (const project of [projectA, projectB]) {
       await expect(
-        fs.access(path.join(project, '.claude', 'skills', 'owner-native', 'SKILL.md')),
+        fs.access(path.join(project, '.claude', 'skills', 'owner-loop', 'SKILL.md')),
       ).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(
-        fs.access(path.join(project, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+        fs.access(path.join(project, '.claude', 'skills', 'owner-pipeline', 'SKILL.md')),
       ).resolves.toBeUndefined();
     }
   });
@@ -1430,7 +1430,7 @@ describe('uninstallCommand interactive selection', () => {
     homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
     mockedSelect.mockResolvedValue(true as never);
     mockedPlatformSelectPrompt.mockResolvedValueOnce(['claude']);
-    mockedCheckbox.mockResolvedValueOnce(['native'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop'] as never);
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     try {
@@ -1441,10 +1441,10 @@ describe('uninstallCommand interactive selection', () => {
 
     for (const project of [projectA, projectB]) {
       await expect(
-        fs.access(path.join(project, '.claude', 'skills', 'owner-native', 'SKILL.md')),
+        fs.access(path.join(project, '.claude', 'skills', 'owner-loop', 'SKILL.md')),
       ).rejects.toMatchObject({ code: 'ENOENT' });
       await expect(
-        fs.access(path.join(project, '.agents', 'skills', 'owner-native', 'SKILL.md')),
+        fs.access(path.join(project, '.agents', 'skills', 'owner-loop', 'SKILL.md')),
       ).resolves.toBeUndefined();
     }
   });
@@ -1921,7 +1921,7 @@ describe('uninstallCommand interactive selection', () => {
     expect(entries.length).toBe(0);
   });
 
-  it('removes only Classic Skills when the user keeps Native', async () => {
+  it('removes only Pipeline Skills when the user keeps Loop', async () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -1937,15 +1937,15 @@ describe('uninstallCommand interactive selection', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: classic',
+        'default_workflow: pipeline',
         'workflows:',
-        '  - native',
-        '  - classic',
+        '  - loop',
+        '  - pipeline',
         'ambient_resume: true',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '  language: en',
-        'classic:',
+        'pipeline:',
         '  artifact_layout: docs',
         '  language: en',
         '  context_compression: off',
@@ -1955,7 +1955,7 @@ describe('uninstallCommand interactive selection', () => {
       'utf8',
     );
     mockedSelect.mockResolvedValue(true as never);
-    mockedCheckbox.mockResolvedValueOnce(['classic'] as never).mockResolvedValueOnce([] as never);
+    mockedCheckbox.mockResolvedValueOnce(['pipeline'] as never).mockResolvedValueOnce([] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -1965,15 +1965,15 @@ describe('uninstallCommand interactive selection', () => {
     }
 
     const skillsDir = path.join(tmpDir, '.claude', 'skills');
-    expect(await fileExists(path.join(skillsDir, 'owner-native', 'SKILL.md'))).toBe(true);
-    expect(await fileExists(path.join(skillsDir, 'owner-classic', 'SKILL.md'))).toBe(false);
+    expect(await fileExists(path.join(skillsDir, 'owner-loop', 'SKILL.md'))).toBe(true);
+    expect(await fileExists(path.join(skillsDir, 'owner-pipeline', 'SKILL.md'))).toBe(false);
     expect(await fileExists(path.join(skillsDir, 'owner', 'SKILL.md'))).toBe(true);
     const config = await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8');
-    expect(config).toContain('default_workflow: native');
-    expect(config).not.toContain('classic:');
+    expect(config).toContain('default_workflow: loop');
+    expect(config).not.toContain('pipeline:');
   });
 
-  it('removes only Native Skills when the user keeps Classic', async () => {
+  it('removes only Loop Skills when the user keeps Pipeline', async () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -1989,15 +1989,15 @@ describe('uninstallCommand interactive selection', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
-        '  - classic',
+        '  - loop',
+        '  - pipeline',
         'ambient_resume: true',
-        'native:',
-        '  artifact_root: .owner/native',
+        'loop:',
+        '  artifact_root: .owner/loop',
         '  language: en',
-        'classic:',
+        'pipeline:',
         '  artifact_layout: docs',
         '  language: en',
         '  context_compression: off',
@@ -2007,7 +2007,7 @@ describe('uninstallCommand interactive selection', () => {
       'utf8',
     );
     mockedSelect.mockResolvedValue(true as never);
-    mockedCheckbox.mockResolvedValueOnce(['native'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop'] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2017,12 +2017,12 @@ describe('uninstallCommand interactive selection', () => {
     }
 
     const skillsDir = path.join(tmpDir, '.claude', 'skills');
-    expect(await fileExists(path.join(skillsDir, 'owner-native', 'SKILL.md'))).toBe(false);
-    expect(await fileExists(path.join(skillsDir, 'owner-classic', 'SKILL.md'))).toBe(true);
+    expect(await fileExists(path.join(skillsDir, 'owner-loop', 'SKILL.md'))).toBe(false);
+    expect(await fileExists(path.join(skillsDir, 'owner-pipeline', 'SKILL.md'))).toBe(true);
     expect(await fileExists(path.join(skillsDir, 'owner', 'SKILL.md'))).toBe(true);
     const config = await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8');
-    expect(config).toContain('default_workflow: classic');
-    expect(config).not.toContain('native:');
+    expect(config).toContain('default_workflow: pipeline');
+    expect(config).not.toContain('loop:');
   });
 
   it('applies one full workflow selection to every current-project target', async () => {
@@ -2051,15 +2051,15 @@ describe('uninstallCommand interactive selection', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
-        '  - classic',
+        '  - loop',
+        '  - pipeline',
         'ambient_resume: true',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '  language: en',
-        'classic:',
+        'pipeline:',
         '  artifact_layout: docs',
         '  language: en',
         '  context_compression: off',
@@ -2071,7 +2071,7 @@ describe('uninstallCommand interactive selection', () => {
     await installOwnerProjectInstructions(tmpDir, 'en');
     mockedCheckbox
       .mockResolvedValueOnce(['claude:project'] as never)
-      .mockResolvedValueOnce(['native', 'classic'] as never)
+      .mockResolvedValueOnce(['loop', 'pipeline'] as never)
       .mockResolvedValueOnce([] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -2086,10 +2086,10 @@ describe('uninstallCommand interactive selection', () => {
     });
     await expect(fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8')).resolves.toBe('');
     await expect(
-      fs.access(path.join(tmpDir, '.agents', 'skills', 'owner-native', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'owner-loop', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(
-      fs.access(path.join(tmpDir, '.agents', 'skills', 'owner-classic', 'SKILL.md')),
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -2102,18 +2102,18 @@ describe('uninstallCommand interactive selection', () => {
       'skills',
       'project',
       'copy',
-      'native',
+      'loop',
     );
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
+        'default_workflow: loop',
         'workflows:',
-        '  - native',
+        '  - loop',
         'ambient_resume: true',
-        'native:',
+        'loop:',
         '  artifact_root: docs',
         '  language: en',
       ].join('\n'),
@@ -2133,7 +2133,7 @@ describe('uninstallCommand interactive selection', () => {
     );
   });
 
-  it('keeps OpenSpec Skills unless the Classic companion option is selected', async () => {
+  it('keeps OpenSpec Skills unless the Pipeline companion option is selected', async () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -2148,7 +2148,7 @@ describe('uninstallCommand interactive selection', () => {
     await fs.mkdir(path.dirname(openSpecSkill), { recursive: true });
     await fs.writeFile(openSpecSkill, '# OpenSpec', 'utf8');
     mockedSelect.mockResolvedValue(true as never);
-    mockedCheckbox.mockResolvedValueOnce(['classic'] as never).mockResolvedValueOnce([] as never);
+    mockedCheckbox.mockResolvedValueOnce(['pipeline'] as never).mockResolvedValueOnce([] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2160,7 +2160,7 @@ describe('uninstallCommand interactive selection', () => {
     expect(await fileExists(openSpecSkill)).toBe(true);
   });
 
-  it('removes OpenSpec Skills when the Classic companion option is selected', async () => {
+  it('removes OpenSpec Skills when the Pipeline companion option is selected', async () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -2176,7 +2176,7 @@ describe('uninstallCommand interactive selection', () => {
     await fs.writeFile(openSpecSkill, '# OpenSpec', 'utf8');
     mockedSelect.mockResolvedValue(true as never);
     mockedCheckbox
-      .mockResolvedValueOnce(['classic'] as never)
+      .mockResolvedValueOnce(['pipeline'] as never)
       .mockResolvedValueOnce(['openspec'] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -2189,7 +2189,7 @@ describe('uninstallCommand interactive selection', () => {
     expect(await fileExists(openSpecSkill)).toBe(false);
   });
 
-  it('keeps Classic companion Skills during a non-interactive full uninstall', async () => {
+  it('keeps Pipeline companion Skills during a non-interactive full uninstall', async () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(
       tmpDir,
@@ -2218,7 +2218,7 @@ describe('uninstallCommand interactive selection', () => {
     const claudePlatform = PLATFORMS.find((p) => p.id === 'claude')!;
     await copyOwnerSkillsForPlatform(tmpDir, claudePlatform, true, 'skills', 'project');
 
-    mockedCheckbox.mockResolvedValueOnce(['native', 'classic'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop', 'pipeline'] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2239,7 +2239,7 @@ describe('uninstallCommand interactive selection', () => {
     const codexPlatform = PLATFORMS.find((p) => p.id === 'codex')!;
     await copyOwnerSkillsForPlatform(tmpDir, codexPlatform, true, 'skills', 'project');
 
-    mockedCheckbox.mockResolvedValueOnce(['native'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop'] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2251,17 +2251,17 @@ describe('uninstallCommand interactive selection', () => {
     expect(mockedCheckbox).toHaveBeenCalledTimes(1);
     expect(mockedSelect).not.toHaveBeenCalled();
 
+    expect(await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-loop', 'SKILL.md'))).toBe(
+      false,
+    );
     expect(
-      await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md')),
-    ).toBe(false);
-    expect(
-      await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+      await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).toBe(true);
+    expect(await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-loop', 'SKILL.md'))).toBe(
+      false,
+    );
     expect(
-      await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-native', 'SKILL.md')),
-    ).toBe(false);
-    expect(
-      await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-classic', 'SKILL.md')),
+      await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-pipeline', 'SKILL.md')),
     ).toBe(true);
   });
 
@@ -2272,7 +2272,7 @@ describe('uninstallCommand interactive selection', () => {
     await copyOwnerSkillsForPlatform(tmpDir, codexPlatform, true, 'skills', 'project');
 
     mockedPlatformSelectPrompt.mockResolvedValueOnce(['codex']);
-    mockedCheckbox.mockResolvedValueOnce(['native'] as never);
+    mockedCheckbox.mockResolvedValueOnce(['loop'] as never);
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
@@ -2299,12 +2299,12 @@ describe('uninstallCommand interactive selection', () => {
         expect.objectContaining({ name: 'Codex (detected)', value: 'codex', checked: true }),
       ]),
     );
-    expect(
-      await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md')),
-    ).toBe(true);
-    expect(
-      await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-native', 'SKILL.md')),
-    ).toBe(false);
+    expect(await fileExists(path.join(tmpDir, '.claude', 'skills', 'owner-loop', 'SKILL.md'))).toBe(
+      true,
+    );
+    expect(await fileExists(path.join(tmpDir, '.agents', 'skills', 'owner-loop', 'SKILL.md'))).toBe(
+      false,
+    );
   });
 
   it('localizes current-project uninstall output from the project config language', async () => {
@@ -2313,7 +2313,7 @@ describe('uninstallCommand interactive selection', () => {
     await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(tmpDir, '.owner', 'config.yaml'),
-      'config:\n  default_workflow: native\n  workflows: [native]\nnative:\n  artifact_root: .owner\n  language: zh-CN\n',
+      'config:\n  default_workflow: loop\n  workflows: [loop]\nloop:\n  artifact_root: .owner\n  language: zh-CN\n',
       'utf8',
     );
 
@@ -2341,9 +2341,9 @@ describe('uninstallCommand interactive selection', () => {
       path.join(tmpDir, '.owner', 'config.yaml'),
       [
         'config:',
-        '  default_workflow: native',
-        '  workflows: [native]',
-        'native:',
+        '  default_workflow: loop',
+        '  workflows: [loop]',
+        'loop:',
         '  artifact_root: docs/owner',
         '  language: zh-CN',
         '',

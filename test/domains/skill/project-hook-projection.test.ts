@@ -34,12 +34,12 @@ describe('project Hook projection', () => {
     await fs.mkdir(path.join(sourceRoot, '.owner'), { recursive: true });
     await fs.writeFile(
       path.join(sourceRoot, '.owner', 'current-change.json'),
-      '{"schema":"owner.selection.v2","workflow":"native","change":"global"}',
+      '{"schema":"owner.selection.v2","workflow":"loop","change":"global"}',
       'utf8',
     );
 
     await expect(
-      projectOwnerHooksFromInstalledScope(projectRoot, sourceRoot, 'global', 'native', {
+      projectOwnerHooksFromInstalledScope(projectRoot, sourceRoot, 'global', 'loop', {
         globalBaseDir: sourceRoot,
       }),
     ).resolves.toEqual({ installedPlatforms: ['codex'], failures: [] });

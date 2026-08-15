@@ -1,9 +1,9 @@
 import path from 'path';
 import { inspectOwnerProjectStatus } from '../../domains/owner-entry/project-status.js';
 import type { ChangeStatus, OwnerProjectStatus } from '../../domains/owner-entry/types.js';
-import { requiresBranchBinding } from '../../domains/owner-classic/classic-branch-binding.js';
-import type { RecordedCommandCheck } from '../../domains/owner-classic/classic-command-checks.js';
-import type { NativeStatusProjection } from '../../domains/owner-native/native-types.js';
+import { requiresBranchBinding } from '../../domains/owner-pipeline/pipeline-branch-binding.js';
+import type { RecordedCommandCheck } from '../../domains/owner-pipeline/pipeline-command-checks.js';
+import type { LoopStatusProjection } from '../../domains/owner-loop/loop-types.js';
 
 function formatMissingEvidence(missingEvidence: readonly string[]): string {
   return missingEvidence.join(', ');
@@ -84,8 +84,8 @@ function displayChangeSection(title: string, changes: ChangeStatus[]): void {
   }
 }
 
-function displayNativeChanges(section: OwnerProjectStatus['workflows']['native']): void {
-  console.log('Native Changes:\n');
+function displayLoopChanges(section: OwnerProjectStatus['workflows']['loop']): void {
+  console.log('Loop Changes:\n');
   if (section.error) {
     console.log(`  error: ${section.error}\n`);
     return;
@@ -95,8 +95,8 @@ function displayNativeChanges(section: OwnerProjectStatus['workflows']['native']
     return;
   }
   for (let index = 0; index < section.changes.length; index++) {
-    const change: NativeStatusProjection = section.changes[index];
-    console.log(`  ${index + 1}. ${change.name} [Native] [phase: ${change.phase}]`);
+    const change: LoopStatusProjection = section.changes[index];
+    console.log(`  ${index + 1}. ${change.name} [Loop] [phase: ${change.phase}]`);
     console.log(
       `     approval: ${change.approval ?? 'pending'} | verification: ${change.verificationResult} | spec_changes: ${change.specChanges}`,
     );
@@ -119,8 +119,8 @@ function displayDefaultEntry(defaultEntry: OwnerProjectStatus['defaultEntry']): 
 
 function displayStatus(status: OwnerProjectStatus): void {
   displayDefaultEntry(status.defaultEntry);
-  displayNativeChanges(status.workflows.native);
-  displayChangeSection('Classic Changes', status.workflows.classic.changes);
+  displayLoopChanges(status.workflows.loop);
+  displayChangeSection('Pipeline Changes', status.workflows.pipeline.changes);
   displayChangeSection('Unmanaged OpenSpec Changes', status.unmanagedOpenSpec);
 }
 
@@ -134,7 +134,7 @@ export async function statusCommand(
 ): Promise<void> {
   const projectPath = path.resolve(targetPath);
   const status = await inspectOwnerProjectStatus(projectPath);
-  const changes = [...status.workflows.classic.changes, ...status.unmanagedOpenSpec].sort((a, b) =>
+  const changes = [...status.workflows.pipeline.changes, ...status.unmanagedOpenSpec].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
 

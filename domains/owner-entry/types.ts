@@ -1,11 +1,11 @@
-import type { RecordedCommandCheck } from '../owner-classic/classic-command-checks.js';
-import type { NativeStatusProjection } from '../owner-native/native-types.js';
+import type { RecordedCommandCheck } from '../owner-pipeline/pipeline-command-checks.js';
+import type { LoopStatusProjection } from '../owner-loop/loop-types.js';
 
-export type OwnerWorkflow = 'native' | 'classic';
+export type OwnerWorkflow = 'loop' | 'pipeline';
 
 export type InitWorkflowSelection = OwnerWorkflow | 'both';
 
-export type OwnerEntrySkill = 'owner-native' | 'owner-classic';
+export type OwnerEntrySkill = 'owner-loop' | 'owner-pipeline';
 
 export type OwnerEntryResolutionSource =
   | 'project-config'
@@ -56,8 +56,8 @@ export interface OwnerProjectStatus {
   schema: 'owner.status.v2';
   defaultEntry: OwnerEntryResolution | { error: string };
   workflows: {
-    native: { changes: NativeStatusProjection[]; error?: string };
-    classic: { changes: ChangeStatus[]; error?: string };
+    loop: { changes: LoopStatusProjection[]; error?: string };
+    pipeline: { changes: ChangeStatus[]; error?: string };
   };
   unmanagedOpenSpec: ChangeStatus[];
 }

@@ -32,7 +32,7 @@ describe('Owner project activation', () => {
   let homeDir: string;
 
   beforeEach(async () => {
-    projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-activation-'));
+    projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-pipeline-activation-'));
     homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-global-home-'));
     await fs.mkdir(path.join(projectRoot, '.git'));
   });
@@ -42,13 +42,13 @@ describe('Owner project activation', () => {
     await fs.rm(homeDir, { recursive: true, force: true });
   });
 
-  it('initializes project-owned Classic roots from a global Classic default', async () => {
+  it('initializes project-owned Pipeline roots from a global Pipeline default', async () => {
     await writeWorkflowGlobalConfig(homeDir, {
       schema: 'owner.global.v1',
-      default_workflow: 'classic',
-      workflows: ['classic'],
+      default_workflow: 'pipeline',
+      workflows: ['pipeline'],
       ambient_resume: true,
-      classic: {
+      pipeline: {
         artifact_layout: 'docs',
         language: 'zh-CN',
         context_compression: 'off',
@@ -58,8 +58,8 @@ describe('Owner project activation', () => {
     });
 
     await expect(resolveOrActivateOwnerEntry(projectRoot, { homeDir })).resolves.toEqual({
-      workflow: 'classic',
-      skill: 'owner-classic',
+      workflow: 'pipeline',
+      skill: 'owner-pipeline',
       source: 'global-config',
     });
     await expect(
@@ -70,7 +70,7 @@ describe('Owner project activation', () => {
     ).resolves.toBeUndefined();
     await expect(
       fs.readFile(path.join(projectRoot, '.owner', 'config.yaml'), 'utf8'),
-    ).resolves.toContain('default_workflow: classic');
+    ).resolves.toContain('default_workflow: pipeline');
     await expect(fs.readFile(path.join(projectRoot, '.gitignore'), 'utf8')).resolves.toContain(
       '!/.owner/config.yaml',
     );
@@ -79,10 +79,10 @@ describe('Owner project activation', () => {
   it('projects a globally installed Codex Router before publishing project config', async () => {
     await writeWorkflowGlobalConfig(homeDir, {
       schema: 'owner.global.v1',
-      default_workflow: 'native',
-      workflows: ['native'],
+      default_workflow: 'loop',
+      workflows: ['loop'],
       ambient_resume: true,
-      native: {
+      loop: {
         artifact_root: 'artifacts',
         language: 'en',
         clarification_mode: 'sequential',
@@ -126,7 +126,7 @@ describe('Owner project activation', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('preserves legacy Classic ownership instead of applying a global Native default', async () => {
+  it('preserves legacy Pipeline ownership instead of applying a global Loop default', async () => {
     await fs.mkdir(path.join(projectRoot, 'openspec', 'changes', 'legacy-change'), {
       recursive: true,
     });
@@ -137,10 +137,10 @@ describe('Owner project activation', () => {
     );
     await writeWorkflowGlobalConfig(homeDir, {
       schema: 'owner.global.v1',
-      default_workflow: 'native',
-      workflows: ['native'],
+      default_workflow: 'loop',
+      workflows: ['loop'],
       ambient_resume: true,
-      native: {
+      loop: {
         artifact_root: 'artifacts',
         language: 'en',
         clarification_mode: 'sequential',
@@ -157,8 +157,8 @@ describe('Owner project activation', () => {
     });
 
     await expect(resolveOrActivateOwnerEntry(projectRoot, { homeDir })).resolves.toEqual({
-      workflow: 'classic',
-      skill: 'owner-classic',
+      workflow: 'pipeline',
+      skill: 'owner-pipeline',
       source: 'legacy-project',
     });
     await expect(fs.access(path.join(projectRoot, 'artifacts', 'owner'))).rejects.toMatchObject({

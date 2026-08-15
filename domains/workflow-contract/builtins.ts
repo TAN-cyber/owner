@@ -14,7 +14,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'state',
         required: true,
         paths: ['changes/*/.owner.yaml'],
-        pathBase: 'classic-openspec-root',
+        pathBase: 'pipeline-openspec-root',
         validations: ['state-transition'],
       },
     ],
@@ -29,7 +29,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'file',
         required: true,
         paths: ['specs/*.md'],
-        pathBase: 'classic-superpowers-root',
+        pathBase: 'pipeline-superpowers-root',
         validations: ['artifact-exists', 'artifact-structured'],
       },
       {
@@ -37,7 +37,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'file',
         required: true,
         paths: ['changes/*/specs/*/spec.md'],
-        pathBase: 'classic-openspec-root',
+        pathBase: 'pipeline-openspec-root',
         validations: ['artifact-exists', 'artifact-structured'],
       },
     ],
@@ -55,7 +55,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'file',
         required: true,
         paths: ['plans/*.md'],
-        pathBase: 'classic-superpowers-root',
+        pathBase: 'pipeline-superpowers-root',
         validations: ['artifact-exists', 'artifact-structured'],
       },
       {
@@ -63,7 +63,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'file',
         required: false,
         paths: ['changes/*/tasks.md'],
-        pathBase: 'classic-openspec-root',
+        pathBase: 'pipeline-openspec-root',
         validations: ['artifact-exists', 'artifact-structured'],
       },
     ],
@@ -78,7 +78,7 @@ export const BUILTIN_OWNER_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
         kind: 'file',
         required: true,
         paths: ['changes/*/tasks.md'],
-        pathBase: 'classic-openspec-root',
+        pathBase: 'pipeline-openspec-root',
         validations: ['artifact-structured', 'semantic'],
       },
     ],
@@ -234,68 +234,68 @@ export const OWNER_FIVE_PHASE_NODES: WorkflowNodeTemplate[] = [
   },
 ];
 
-export const BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
+export const BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
   {
-    id: 'owner.native.brief.v1',
-    description: 'Native change outcome, scope, acceptance, decisions, and open questions.',
+    id: 'owner.loop.brief.v1',
+    description: 'Loop change outcome, scope, acceptance, decisions, and open questions.',
     artifacts: [
       {
-        id: 'native-brief',
+        id: 'loop-brief',
         kind: 'file',
         required: true,
         paths: ['changes/*/brief.md'],
-        pathBase: 'native-root',
+        pathBase: 'loop-root',
         validations: ['artifact-exists', 'artifact-structured'],
       },
     ],
     evidence: [{ id: 'shape-summary', required: true }],
   },
   {
-    id: 'owner.native.spec-change.v1',
+    id: 'owner.loop.spec-change.v1',
     description: 'Complete target capability specs and their canonical base hashes.',
     artifacts: [
       {
-        id: 'native-target-specs',
+        id: 'loop-target-specs',
         kind: 'directory',
         required: false,
         paths: ['changes/*/specs'],
-        pathBase: 'native-root',
+        pathBase: 'loop-root',
         validations: ['artifact-structured', 'semantic'],
       },
     ],
     evidence: [{ id: 'spec-change-summary', required: false }],
   },
   {
-    id: 'owner.native.implementation.v1',
+    id: 'owner.loop.implementation.v1',
     description: 'Implementation or explicit no-code outcome evidence.',
     artifacts: [],
     evidence: [{ id: 'implementation-summary', required: true }],
   },
   {
-    id: 'owner.native.verify.v1',
+    id: 'owner.loop.verify.v1',
     description: 'Acceptance, command, risk, and spec-consistency verification evidence.',
     artifacts: [
       {
-        id: 'native-verification',
+        id: 'loop-verification',
         kind: 'report',
         required: true,
         paths: ['changes/*/verification.md'],
-        pathBase: 'native-root',
+        pathBase: 'loop-root',
         validations: ['artifact-exists', 'artifact-structured', 'semantic'],
       },
     ],
     evidence: [{ id: 'verification-result', required: true }],
   },
   {
-    id: 'owner.native.archive.v1',
-    description: 'Conflict-safe canonical spec update and frozen Native change history.',
+    id: 'owner.loop.archive.v1',
+    description: 'Conflict-safe canonical spec update and frozen Loop change history.',
     artifacts: [
       {
-        id: 'native-archive',
+        id: 'loop-archive',
         kind: 'directory',
         required: true,
         paths: ['archive/*'],
-        pathBase: 'native-root',
+        pathBase: 'loop-root',
         validations: ['artifact-exists', 'state-transition'],
       },
     ],
@@ -303,19 +303,19 @@ export const BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS: WorkflowOutputSchema[] = [
   },
 ];
 
-export const OWNER_NATIVE_NODES: WorkflowNodeTemplate[] = [
+export const OWNER_LOOP_NODES: WorkflowNodeTemplate[] = [
   {
     id: 'shape',
     label: 'Shape',
     kind: 'control',
-    responsibility: 'Resolve the decision frontier and establish the Native change contract.',
-    implementation: { skill: 'owner-native', operation: 'default', scope: 'main' },
+    responsibility: 'Resolve the decision frontier and establish the Loop change contract.',
+    implementation: { skill: 'owner-loop', operation: 'default', scope: 'main' },
     operations: ['require', 'augment'],
-    outputSchemas: ['owner.native.brief.v1', 'owner.native.spec-change.v1'],
+    outputSchemas: ['owner.loop.brief.v1', 'owner.loop.spec-change.v1'],
     guardrails: [
       {
-        id: 'native-shape-ready',
-        label: 'Native brief and target specs are ready',
+        id: 'loop-shape-ready',
+        label: 'Loop brief and target specs are ready',
         validation: 'artifact-structured',
       },
     ],
@@ -324,13 +324,13 @@ export const OWNER_NATIVE_NODES: WorkflowNodeTemplate[] = [
     id: 'build',
     label: 'Build',
     kind: 'control',
-    responsibility: 'Implement the Native change using the host model’s native capabilities.',
-    implementation: { skill: 'owner-native', operation: 'default', scope: 'main' },
+    responsibility: 'Implement the Loop change using the host model’s loop capabilities.',
+    implementation: { skill: 'owner-loop', operation: 'default', scope: 'main' },
     operations: ['require', 'augment'],
-    outputSchemas: ['owner.native.implementation.v1'],
+    outputSchemas: ['owner.loop.implementation.v1'],
     guardrails: [
       {
-        id: 'native-build-ready',
+        id: 'loop-build-ready',
         label: 'Implementation evidence is recorded',
         validation: 'semantic',
       },
@@ -341,13 +341,13 @@ export const OWNER_NATIVE_NODES: WorkflowNodeTemplate[] = [
     label: 'Verify',
     kind: 'control',
     responsibility: 'Prove acceptance scenarios and target-spec consistency with evidence.',
-    implementation: { skill: 'owner-native', operation: 'default', scope: 'main' },
+    implementation: { skill: 'owner-loop', operation: 'default', scope: 'main' },
     operations: ['require', 'augment'],
-    outputSchemas: ['owner.native.verify.v1'],
+    outputSchemas: ['owner.loop.verify.v1'],
     guardrails: [
       {
-        id: 'native-verification-ready',
-        label: 'Native verification report is complete',
+        id: 'loop-verification-ready',
+        label: 'Loop verification report is complete',
         validation: 'semantic',
       },
     ],
@@ -357,14 +357,14 @@ export const OWNER_NATIVE_NODES: WorkflowNodeTemplate[] = [
     label: 'Archive',
     kind: 'control',
     responsibility:
-      'Apply target specs and freeze the Native change through a recoverable transaction.',
-    implementation: { skill: 'owner-native', operation: 'default', scope: 'main' },
+      'Apply target specs and freeze the Loop change through a recoverable transaction.',
+    implementation: { skill: 'owner-loop', operation: 'default', scope: 'main' },
     operations: ['require', 'augment'],
-    outputSchemas: ['owner.native.archive.v1'],
+    outputSchemas: ['owner.loop.archive.v1'],
     guardrails: [
       {
-        id: 'native-archive-ready',
-        label: 'Native archive transaction completed',
+        id: 'loop-archive-ready',
+        label: 'Loop archive transaction completed',
         validation: 'state-transition',
       },
     ],
@@ -382,9 +382,9 @@ export function builtinOwnerFivePhaseWorkflow(options: {
   };
 }
 
-export function builtinOwnerNativeWorkflow(options: {
+export function builtinOwnerLoopWorkflow(options: {
   name: string;
   goal: string;
 }): WorkflowDefinitionInput {
-  return { kind: 'owner-native', name: options.name, goal: options.goal };
+  return { kind: 'owner-loop', name: options.name, goal: options.goal };
 }

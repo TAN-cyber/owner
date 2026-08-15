@@ -1,5 +1,5 @@
 interface:
-  display_name: "Owner Classic Preset: Tweak"
+  display_name: "Owner Pipeline Preset: Tweak"
   short_description: "Handle a lightweight or medium change in one OpenSpec change"
 policy:
   allow_implicit_invocation: false

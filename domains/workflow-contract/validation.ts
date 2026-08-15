@@ -1,8 +1,8 @@
 import {
-  BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS,
+  BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS,
   BUILTIN_OWNER_OUTPUT_SCHEMAS,
   OWNER_FIVE_PHASE_NODES,
-  OWNER_NATIVE_NODES,
+  OWNER_LOOP_NODES,
 } from './builtins.js';
 import type {
   WorkflowBindingOperation,
@@ -16,8 +16,8 @@ function templatesFor(input: WorkflowDefinitionInput): WorkflowNodeTemplate[] {
   if (input.kind === 'owner-five-phase-overlay') {
     return [...OWNER_FIVE_PHASE_NODES, ...(input.customNodes ?? [])];
   }
-  if (input.kind === 'owner-native') {
-    return [...OWNER_NATIVE_NODES, ...(input.customNodes ?? [])];
+  if (input.kind === 'owner-loop') {
+    return [...OWNER_LOOP_NODES, ...(input.customNodes ?? [])];
   }
   return input.customNodes ?? [];
 }
@@ -26,8 +26,8 @@ function schemaIdsFor(input: WorkflowDefinitionInput): Set<string> {
   const schemas =
     input.kind === 'owner-five-phase-overlay'
       ? BUILTIN_OWNER_OUTPUT_SCHEMAS
-      : input.kind === 'owner-native'
-        ? BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS
+      : input.kind === 'owner-loop'
+        ? BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS
         : [];
   return new Set([...schemas, ...(input.outputSchemas ?? [])].map((schema) => schema.id));
 }
@@ -204,8 +204,8 @@ export function validateWorkflowDefinition(
   const builtinSchemas = new Set(
     (input.kind === 'owner-five-phase-overlay'
       ? BUILTIN_OWNER_OUTPUT_SCHEMAS
-      : input.kind === 'owner-native'
-        ? BUILTIN_OWNER_NATIVE_OUTPUT_SCHEMAS
+      : input.kind === 'owner-loop'
+        ? BUILTIN_OWNER_LOOP_OUTPUT_SCHEMAS
         : []
     ).map((schema) => schema.id),
   );

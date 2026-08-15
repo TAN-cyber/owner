@@ -1,11 +1,11 @@
 ---
 name: owner-build
-description: "Phase 3 of Owner Classic — recover or create the implementation plan and execute its tasks."
+description: "Phase 3 of Owner Pipeline — recover or create the implementation plan and execute its tasks."
 ---
 
 # Owner Phase 3: Plan and Build (Build)
 
-Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+Before starting or recovering, read and follow `owner-pipeline/reference/pipeline-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<pipeline-*>` logical roots bound by that protocol.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ Before starting or recovering, read and follow `owner-classic/reference/classic-
 
 ### 0. Entry State Verification (Entry Check)
 
-Use the stable `owner` CLI described in `owner-classic/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-classic/reference/context-recovery.md`:
+Use the stable `owner` CLI described in `owner-pipeline/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-pipeline/reference/context-recovery.md`:
 
 ```bash
 owner state select <change-name>
@@ -25,7 +25,7 @@ owner state check <name> build
 
 Proceed to Step 1 after verification passes. The script outputs specific failure reasons when verification fails.
 
-If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-classic/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
+If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-pipeline/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
 
 **Idempotency**: All build phase operations can be safely re-executed. Read `.owner.yaml` `phase` to confirm build, read the plan header `base-ref`, then parse tasks.md checkboxes in document order and resume from the first unchecked task. Already-committed tasks must not be re-committed.
 
@@ -39,7 +39,7 @@ You are an implementation planning expert. Create an implementation plan based o
 
 1. **Immediately execute:** Use the Skill tool to load the Superpowers `writing-plans` skill. Skipping this step is prohibited. After the skill loads, ARGUMENTS must include: `Language: Use the configured Owner artifact language from owner state get <name> language`
 2. Read the Design Doc (technical design document under `docs/superpowers/specs/`)
-3. Read `<classic-change-dir>/tasks.md` (task boundaries)
+3. Read `<pipeline-change-dir>/tasks.md` (task boundaries)
 4. Follow the skill's guidance to create the plan
 
 Plan requirements:
@@ -86,9 +86,9 @@ After recording the plan, provide exactly **one joint decision point** that coll
 | Option | Behavior | Description |
 |--------|----------|-------------|
 | A | Continue with configuration | Provide all Step 3 execution, TDD, and review choices in the same response |
-| B | Pause to switch model | Record `build_pause: plan-ready`, stop this `/owner-build` invocation, and allow the user to resume later from `/owner-classic` or `/owner-build` |
+| B | Pause to switch model | Record `build_pause: plan-ready`, stop this `/owner-build` invocation, and allow the user to resume later from `/owner-pipeline` or `/owner-build` |
 
-This is a user decision point. **Follow `owner-classic/reference/decision-point.md` once and show the plan summary, pause option, and every executable Step 3 setting together**. Do not auto-select or write the pause into `build_mode`.
+This is a user decision point. **Follow `owner-pipeline/reference/decision-point.md` once and show the plan summary, pause option, and every executable Step 3 setting together**. Do not auto-select or write the pause into `build_mode`.
 
 When the user chooses to continue and supplies complete configuration:
 
@@ -179,19 +179,19 @@ Without `direct_override: true`, `build_mode=direct` in full workflow is blocked
 
 **Execution location**:
 
-Open has already prepared the current directory, branch, or Worktree according to `isolation` and returned the actual `projectRoot`. On resume, run `owner classic workspace resolve <name> --json`, enter the returned directory, then run `owner state select <change-name>`; do not create a Worktree, switch branches, commit a plan to transfer it across Worktrees, or rebind isolation in Build.
+Open has already prepared the current directory, branch, or Worktree according to `isolation` and returned the actual `projectRoot`. On resume, run `owner pipeline workspace resolve <name> --json`, enter the returned directory, then run `owner state select <change-name>`; do not create a Worktree, switch branches, commit a plan to transfer it across Worktrees, or rebind isolation in Build.
 
 **Execute plan**: Must handle execution according to the actual runtime of `build_mode`.
 
 - `build_mode: executing-plans`: **Immediately execute:** Use the Skill tool to load the Superpowers `executing-plans` skill. Skipping this step is prohibited. If loading fails, stop and report the error; do not substitute with normal conversation. After the skill loads, ARGUMENTS must include the same Language constraint as Step 1: `Language: Use the configured Owner artifact language from owner state get <name> language`. Execute according to plan.
-- `build_mode: subagent-driven-development`: The main session only coordinates and must not write implementation code directly. **Immediately execute:** Use the Skill tool to load the Superpowers `subagent-driven-development` skill. After the skill loads, read `owner-classic/reference/subagent-dispatch.md` for Owner-specific extensions (subagent dispatch, task isolation, checkoff verification, TDD constraints, continuous execution, context recovery) and apply them alongside the skill's workflow. If they conflict, the more specific Owner extensions take precedence.
-- If subagent dispatch fails, follow `owner-classic/reference/subagent-dispatch.md` to record the current task as `BLOCKED` with the failure reason; the main session must not take over implementation.
+- `build_mode: subagent-driven-development`: The main session only coordinates and must not write implementation code directly. **Immediately execute:** Use the Skill tool to load the Superpowers `subagent-driven-development` skill. After the skill loads, read `owner-pipeline/reference/subagent-dispatch.md` for Owner-specific extensions (subagent dispatch, task isolation, checkoff verification, TDD constraints, continuous execution, context recovery) and apply them alongside the skill's workflow. If they conflict, the more specific Owner extensions take precedence.
+- If subagent dispatch fails, follow `owner-pipeline/reference/subagent-dispatch.md` to record the current task as `BLOCKED` with the failure reason; the main session must not take over implementation.
 
 **TDD Mode Execution Constraints**:
 
 If `tdd_mode: tdd`:
 - `build_mode: executing-plans`: After loading the execution skill and before executing the first task, **Immediately execute:** Use the Skill tool to load the Superpowers `test-driven-development` skill once. Skipping this step is prohibited. After the skill loads, start from the first unchecked task and follow the loaded TDD Red-Green-Refactor cycle for each task. Must not skip the failing test verification phase. Do not reload this skill for subsequent tasks; follow the already-loaded flow. If resuming after context compaction, re-run this step to load the TDD skill once, then continue from the first unchecked task.
-- `build_mode: subagent-driven-development`: The main session does not load the TDD skill. TDD constraints and evidence thresholds are defined in `owner-classic/reference/subagent-dispatch.md`; every background implementer and fix agent must use the Skill tool to load the Superpowers `test-driven-development` skill and follow the Owner-injected TDD hard constraint.
+- `build_mode: subagent-driven-development`: The main session does not load the TDD skill. TDD constraints and evidence thresholds are defined in `owner-pipeline/reference/subagent-dispatch.md`; every background implementer and fix agent must use the Skill tool to load the Superpowers `test-driven-development` skill and follow the Owner-injected TDD hard constraint.
 
 If `tdd_mode: direct`: Follow normal flow, no enforced TDD.
 
@@ -213,7 +213,7 @@ Requirements (apply to `standard` and `thorough`):
 
 During task execution, whenever a crash, unexpected behavior, test failure, or build failure appears while running the program, tests, build, or manual verification, must use the Skill tool to load the Superpowers `systematic-debugging` skill. Before root-cause investigation is complete, must not propose or implement source-code fixes.
 
-For specific investigation, minimal failing test, fix verification, and keeping the current change verification loop, follow `owner-classic/reference/debug-gate.md`.
+For specific investigation, minimal failing test, fix verification, and keeping the current change verification loop, follow `owner-pipeline/reference/debug-gate.md`.
 
 ### 4. Spec Incremental Updates
 
@@ -225,7 +225,7 @@ When the initial spec is found incomplete during implementation, handle by scale
 | Medium | Interface changes, new components, data flow changes | **Pause, present the choice, and wait for the user to explicitly confirm**, then must use Skill tool to load the Superpowers `brainstorming` skill to update Design Doc + delta spec |
 | Large | Brand-new capability requirements | **Pause, present the split choice, and wait for the user to explicitly confirm**; after user confirms, create independent change through `/owner-open` |
 
-**50% Threshold Determination**: Using initial task count in tasks.md as baseline, if new tasks exceed half of that total, it's considered outside original plan scope, **must follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for the user to decide whether to split into a new change**.
+**50% Threshold Determination**: Using initial task count in tasks.md as baseline, if new tasks exceed half of that total, it's considered outside original plan scope, **must follow the `owner-pipeline/reference/decision-point.md` protocol to pause and wait for the user to decide whether to split into a new change**.
 
 When creating an independent change, must invoke `/owner-open`, not `/opsx:new` directly. `/owner-open` creates both OpenSpec artifacts and `.owner.yaml`, preventing the new change from leaving the Owner state machine.
 
@@ -244,8 +244,8 @@ When creating an independent change, must invoke `/owner-open`, not `/opsx:new` 
 Build is the longest phase and may span many tasks. To support resume after context compaction:
 
 - **After each task**: complete acceptance per the current execution branch and `review_mode` before checking off and committing. `subagent-driven-development` dispatches no per-task reviewer under `off`; under `standard`, a per-task reviewer fires only when the task hits a risk signal; under `thorough`, every task gets a per-task reviewer. All modes must perform targeted verification by unique task text. Parse tasks.md checkboxes to count remaining work without rereading unrelated task bodies
-- **Context compression recovery**: Follow `owner-classic/reference/context-recovery.md` with phase set to `build`.
-- **User manual-change resume**: handle uncommitted changes through `owner-classic/reference/dirty-worktree.md`. That protocol defines checks, attribution, and prohibitions. Build-specific handling:
+- **Context compression recovery**: Follow `owner-pipeline/reference/context-recovery.md` with phase set to `build`.
+- **User manual-change resume**: handle uncommitted changes through `owner-pipeline/reference/dirty-worktree.md`. That protocol defines checks, attribution, and prohibitions. Build-specific handling:
   1. After attribution, if the diff implies plan or spec changes, handle it through Step 4 "Spec Incremental Updates"
 - **Long task split**: if a single task exceeds 200 lines of code changes, consider splitting it into multiple subtasks and commits
 
@@ -281,7 +281,7 @@ State file is automatically updated to `phase: verify`, `verify_result: pending`
 
 ## Automatic Handoff to Next Phase
 
-Follow `owner-classic/reference/auto-transition.md`. Key command:
+Follow `owner-pipeline/reference/auto-transition.md`. Key command:
 
 ```bash
 owner state next <change-name>

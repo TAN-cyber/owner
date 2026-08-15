@@ -9,7 +9,7 @@ import { writeWorkflowGlobalConfig } from '../../../domains/workflow-contract/gl
 import {
   defaultProjectConfig,
   writeProjectConfig,
-} from '../../../domains/owner-native/native-config.js';
+} from '../../../domains/owner-loop/loop-config.js';
 
 describe('Owner entry resolution', () => {
   let projectRoot: string;
@@ -22,7 +22,7 @@ describe('Owner entry resolution', () => {
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('does not guess a Classic workflow when project config is absent', async () => {
+  it('does not guess a Pipeline workflow when project config is absent', async () => {
     const before = await fs.readdir(projectRoot);
 
     await expect(resolveOwnerEntry(projectRoot)).rejects.toThrow(
@@ -39,7 +39,7 @@ describe('Owner entry resolution', () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-global-home-'));
     await fs.mkdir(path.join(projectRoot, '.git'));
     const globalConfig = defaultProjectConfig('artifacts', 'zh-CN');
-    globalConfig.workflows = ['native'];
+    globalConfig.workflows = ['loop'];
     await writeWorkflowGlobalConfig(homeDir, {
       ...globalConfig,
       schema: 'owner.global.v1',
@@ -47,8 +47,8 @@ describe('Owner entry resolution', () => {
 
     try {
       await expect(resolveOrActivateOwnerEntry(projectRoot, { homeDir })).resolves.toEqual({
-        workflow: 'native',
-        skill: 'owner-native',
+        workflow: 'loop',
+        skill: 'owner-loop',
         source: 'global-config',
       });
 
@@ -75,16 +75,16 @@ describe('Owner entry resolution', () => {
     try {
       await resolveOrActivateOwnerEntry(projectRoot, { homeDir });
       const changed = defaultProjectConfig('other-root');
-      changed.default_workflow = 'classic';
-      changed.workflows = ['classic'];
+      changed.default_workflow = 'pipeline';
+      changed.workflows = ['pipeline'];
       await writeWorkflowGlobalConfig(homeDir, {
         ...changed,
         schema: 'owner.global.v1',
       });
 
       await expect(resolveOrActivateOwnerEntry(projectRoot, { homeDir })).resolves.toEqual({
-        workflow: 'native',
-        skill: 'owner-native',
+        workflow: 'loop',
+        skill: 'owner-loop',
         source: 'project-config',
       });
       await expect(
@@ -95,13 +95,13 @@ describe('Owner entry resolution', () => {
     }
   });
 
-  it('uses a built-in Native default when no global template exists', async () => {
+  it('uses a built-in Loop default when no global template exists', async () => {
     const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-empty-home-'));
     await fs.mkdir(path.join(projectRoot, '.git'));
     try {
       await expect(resolveOrActivateOwnerEntry(projectRoot, { homeDir })).resolves.toEqual({
-        workflow: 'native',
-        skill: 'owner-native',
+        workflow: 'loop',
+        skill: 'owner-loop',
         source: 'built-in-default',
       });
       await expect(
@@ -131,8 +131,8 @@ describe('Owner entry resolution', () => {
   });
 
   it.each([
-    ['native', 'owner-native'],
-    ['classic', 'owner-classic'],
+    ['loop', 'owner-loop'],
+    ['pipeline', 'owner-pipeline'],
   ] as const)('obeys an explicit %s project default', async (workflow, skill) => {
     const config = defaultProjectConfig('docs');
     config.default_workflow = workflow;
@@ -157,13 +157,13 @@ describe('Owner entry resolution', () => {
     await writeProjectConfig(projectRoot, defaultProjectConfig('docs'));
 
     await expect(resolveOwnerEntry(nested)).resolves.toMatchObject({
-      workflow: 'native',
-      skill: 'owner-native',
+      workflow: 'loop',
+      skill: 'owner-loop',
       source: 'project-config',
     });
   });
 
-  it('fails closed for malformed YAML instead of using the Classic fallback', async () => {
+  it('fails closed for malformed YAML instead of using the Pipeline fallback', async () => {
     await fs.mkdir(path.join(projectRoot, '.owner'));
     await fs.writeFile(path.join(projectRoot, '.owner', 'config.yaml'), 'schema: [', 'utf8');
 
@@ -176,8 +176,8 @@ describe('Owner entry resolution', () => {
       path.join(projectRoot, '.owner', 'config.yaml'),
       [
         'schema: owner.project.v1',
-        'default_workflow: native',
-        'native:',
+        'default_workflow: loop',
+        'loop:',
         '  artifact_root: .',
         '  unexpected: true',
         '',
@@ -186,7 +186,7 @@ describe('Owner entry resolution', () => {
     );
 
     await expect(resolveOwnerEntry(projectRoot)).resolves.toMatchObject({
-      workflow: 'native',
+      workflow: 'loop',
       source: 'project-config',
     });
   });

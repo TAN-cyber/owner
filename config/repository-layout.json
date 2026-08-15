@@ -5,17 +5,17 @@
     "en": "assets/skills",
     "zh": "assets/skills-zh"
   },
-  "classicRuntime": {
+  "pipelineRuntime": {
     "entries": {
-      "runtime": "domains/owner-classic/classic-cli.ts",
-      "state": "domains/owner-classic/classic-state-entry.ts",
-      "validate": "domains/owner-classic/classic-validate-entry.ts",
-      "guard": "domains/owner-classic/classic-guard-entry.ts",
-      "handoff": "domains/owner-classic/classic-handoff-entry.ts",
-      "archive": "domains/owner-classic/classic-archive-entry.ts",
-      "hookGuard": "domains/owner-classic/classic-hook-guard-entry.ts",
-      "intent": "domains/owner-classic/classic-intent-entry.ts",
-      "resume-probe": "domains/owner-classic/classic-resume-probe-entry.ts"
+      "runtime": "domains/owner-pipeline/pipeline-cli.ts",
+      "state": "domains/owner-pipeline/pipeline-state-entry.ts",
+      "validate": "domains/owner-pipeline/pipeline-validate-entry.ts",
+      "guard": "domains/owner-pipeline/pipeline-guard-entry.ts",
+      "handoff": "domains/owner-pipeline/pipeline-handoff-entry.ts",
+      "archive": "domains/owner-pipeline/pipeline-archive-entry.ts",
+      "hookGuard": "domains/owner-pipeline/pipeline-hook-guard-entry.ts",
+      "intent": "domains/owner-pipeline/pipeline-intent-entry.ts",
+      "resume-probe": "domains/owner-pipeline/pipeline-resume-probe-entry.ts"
     },
     "outputs": {
       "runtime": "assets/skills/owner/scripts/owner-runtime.mjs",
@@ -29,34 +29,34 @@
       "resume-probe": "assets/skills/owner/scripts/owner-resume-probe.mjs"
     }
   },
-  "nativeRuntime": {
+  "loopRuntime": {
     "entries": {
-      "runtime": "domains/owner-native/native-cli-entry.ts",
-      "hookGuard": "domains/owner-native/native-hook-guard-entry.ts",
-      "init": "domains/owner-native/native-init-entry.ts",
-      "root": "domains/owner-native/native-root-entry.ts",
-      "new": "domains/owner-native/native-new-entry.ts",
-      "spec": "domains/owner-native/native-spec-entry.ts",
-      "show": "domains/owner-native/native-show-entry.ts",
-      "status": "domains/owner-native/native-status-entry.ts",
-      "select": "domains/owner-native/native-select-entry.ts",
-      "next": "domains/owner-native/native-next-entry.ts",
-      "archive": "domains/owner-native/native-archive-entry.ts",
-      "doctor": "domains/owner-native/native-doctor-entry.ts"
+      "runtime": "domains/owner-loop/loop-cli-entry.ts",
+      "hookGuard": "domains/owner-loop/loop-hook-guard-entry.ts",
+      "init": "domains/owner-loop/loop-init-entry.ts",
+      "root": "domains/owner-loop/loop-root-entry.ts",
+      "new": "domains/owner-loop/loop-new-entry.ts",
+      "spec": "domains/owner-loop/loop-spec-entry.ts",
+      "show": "domains/owner-loop/loop-show-entry.ts",
+      "status": "domains/owner-loop/loop-status-entry.ts",
+      "select": "domains/owner-loop/loop-select-entry.ts",
+      "next": "domains/owner-loop/loop-next-entry.ts",
+      "archive": "domains/owner-loop/loop-archive-entry.ts",
+      "doctor": "domains/owner-loop/loop-doctor-entry.ts"
     },
     "outputs": {
-      "runtime": "assets/skills/owner-native/scripts/owner-native-runtime.mjs",
-      "hookGuard": "assets/skills/owner-native/scripts/owner-native-hook-guard.mjs",
-      "init": "assets/skills/owner-native/scripts/owner-native-init.mjs",
-      "root": "assets/skills/owner-native/scripts/owner-native-root.mjs",
-      "new": "assets/skills/owner-native/scripts/owner-native-new.mjs",
-      "spec": "assets/skills/owner-native/scripts/owner-native-spec.mjs",
-      "show": "assets/skills/owner-native/scripts/owner-native-show.mjs",
-      "status": "assets/skills/owner-native/scripts/owner-native-status.mjs",
-      "select": "assets/skills/owner-native/scripts/owner-native-select.mjs",
-      "next": "assets/skills/owner-native/scripts/owner-native-next.mjs",
-      "archive": "assets/skills/owner-native/scripts/owner-native-archive.mjs",
-      "doctor": "assets/skills/owner-native/scripts/owner-native-doctor.mjs"
+      "runtime": "assets/skills/owner-loop/scripts/owner-loop-runtime.mjs",
+      "hookGuard": "assets/skills/owner-loop/scripts/owner-loop-hook-guard.mjs",
+      "init": "assets/skills/owner-loop/scripts/owner-loop-init.mjs",
+      "root": "assets/skills/owner-loop/scripts/owner-loop-root.mjs",
+      "new": "assets/skills/owner-loop/scripts/owner-loop-new.mjs",
+      "spec": "assets/skills/owner-loop/scripts/owner-loop-spec.mjs",
+      "show": "assets/skills/owner-loop/scripts/owner-loop-show.mjs",
+      "status": "assets/skills/owner-loop/scripts/owner-loop-status.mjs",
+      "select": "assets/skills/owner-loop/scripts/owner-loop-select.mjs",
+      "next": "assets/skills/owner-loop/scripts/owner-loop-next.mjs",
+      "archive": "assets/skills/owner-loop/scripts/owner-loop-archive.mjs",
+      "doctor": "assets/skills/owner-loop/scripts/owner-loop-doctor.mjs"
     }
   },
   "entryRuntime": {
@@ -124,9 +124,9 @@
   "domainModules": [
     "engine",
     "integrations",
-    "owner-classic",
     "owner-entry",
-    "owner-native",
+    "owner-loop",
+    "owner-pipeline",
     "skill",
     "workflow-contract"
   ],

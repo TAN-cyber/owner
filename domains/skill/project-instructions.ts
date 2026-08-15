@@ -29,13 +29,13 @@ export function renderOwnerAmbientResumeContent(languageId: SkillLanguageId): st
       '',
       '在这个仓库中，开始处理需要改动或调查的任务前，如果可能存在活跃 Owner workflow，把当前用户请求传入只读探针：`owner resume-probe . --stdin --json`。',
       '',
-      '- 如果用户通过宿主明确调用任意 Owner Skill（例如 `@owner`、`/owner`、`@owner-native` 或 `/owner-hotfix`），显式调用优先于本恢复协议；不要运行 resume probe，直接进入被调用的 Skill。',
+      '- 如果用户通过宿主明确调用任意 Owner Skill（例如 `@owner`、`/owner`、`@owner-loop` 或 `/owner-hotfix`），显式调用优先于本恢复协议；不要运行 resume probe，直接进入被调用的 Skill。',
       '- 只信任返回的 `workflow`、`skill` 和 `entrySource`；它们只由项目配置或无配置兼容回退决定。不得扫描或切换另一套 workflow。',
       '- 如果 probe 返回 `auto_resume`，简短说明选中的 active change，并进入 `nextCommand` 指向的永久入口。不要把状态命令当作恢复入口直接推进。',
       '- 如果 probe 返回 `ask_user`，只问一个简短问题并等待用户回复。',
       '- 如果当前请求未明确调用 Owner Skill，且 probe 返回 `out_of_scope` 或 `none`，不要进入 Owner workflow。',
       '- 如果配置或状态无效且没有 `nextCommand`，停止并报告原因；不要猜测另一个 workflow。',
-      '- 不能只因为存在 active change 就把无关任务挂到该 change。Native 的未提交改动由 Native 入口检查，不由探针自动归因。',
+      '- 不能只因为存在 active change 就把无关任务挂到该 change。Loop 的未提交改动由 Loop 入口检查，不由探针自动归因。',
       '',
     ].join('\n');
   }
@@ -48,13 +48,13 @@ export function renderOwnerAmbientResumeContent(languageId: SkillLanguageId): st
     '',
     'In this repository, before starting work that may need code changes or investigation, pass the current user request to the read-only probe when a Owner workflow may already be active: `owner resume-probe . --stdin --json`.',
     '',
-    '- If the user explicitly invokes any Owner Skill through the host (for example, `@owner`, `/owner`, `@owner-native`, or `/owner-hotfix`), that explicit invocation takes precedence over this resume protocol; do not run the resume probe, and enter the invoked Skill directly.',
+    '- If the user explicitly invokes any Owner Skill through the host (for example, `@owner`, `/owner`, `@owner-loop`, or `/owner-hotfix`), that explicit invocation takes precedence over this resume protocol; do not run the resume probe, and enter the invoked Skill directly.',
     '- Trust only the returned `workflow`, `skill`, and `entrySource`; project configuration or the no-config compatibility fallback alone selects them. Do not scan or switch to the other workflow.',
     '- If the probe returns `auto_resume`, briefly state the selected active change and enter the permanent entry in `nextCommand`. Do not treat a state command as the resume entry or advance it blindly.',
     '- If the probe returns `ask_user`, ask one short question and wait.',
     '- If the current request did not explicitly invoke a Owner Skill and the probe returns `out_of_scope` or `none`, do not enter the Owner workflow.',
     '- If configuration or state is invalid and `nextCommand` is absent, stop and report the reason; do not guess another workflow.',
-    '- Never attach unrelated work merely because an active change exists. The Native entry inspects uncommitted work; the probe does not attribute it automatically.',
+    '- Never attach unrelated work merely because an active change exists. The Loop entry inspects uncommitted work; the probe does not attribute it automatically.',
     '',
   ].join('\n');
 }

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Owner Pipeline"
+  short_description: "Owner Pipeline workflow:OpenSpec + Superpowers"

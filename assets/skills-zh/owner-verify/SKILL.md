@@ -1,11 +1,11 @@
 ---
 name: owner-verify
-description: "Owner Classic 阶段 4 —— 验证 change、记录证据并驱动修复循环。"
+description: "Owner Pipeline 阶段 4 —— 验证 change、记录证据并驱动修复循环。"
 ---
 
 # Owner 阶段 4：验证（Verify）
 
-开始或恢复前必须先读取并执行 `owner-classic/reference/classic-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<classic-*>` 逻辑根。
+开始或恢复前必须先读取并执行 `owner-pipeline/reference/pipeline-layout.md`；本文件中的 OpenSpec CLI 调用必须使用 adapter，文件路径必须使用该协议绑定的 `<pipeline-*>` 逻辑根。
 
 ## 前置条件
 
@@ -20,7 +20,7 @@ description: "Owner Classic 阶段 4 —— 验证 change、记录证据并驱�
 
 ### 0b. 入口状态验证（Entry Check）
 
-按 `owner-classic/reference/scripts.md` 使用稳定 `owner` CLI，然后执行入口验证；从任意入口恢复时先按 `owner-classic/reference/context-recovery.md` 运行恢复检查：
+按 `owner-pipeline/reference/scripts.md` 使用稳定 `owner` CLI，然后执行入口验证；从任意入口恢复时先按 `owner-pipeline/reference/context-recovery.md` 运行恢复检查：
 
 ```bash
 owner state select <change-name>
@@ -29,7 +29,7 @@ owner state check <change-name> verify
 
 验证通过后继续 Step 1。验证失败时脚本会输出具体失败原因。
 
-若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-classic/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
+若上述 `select` / `check` 输出 `BLOCKED`，且原因是 `bound_branch` 与当前分支不一致，立即按 `owner-pipeline/reference/decision-point.md` 暂停，让用户单选：切回绑定分支后重新运行入口验证，或在用户明确确认当前分支应接管该 change 后运行 `owner state rebind <change-name>` 并重新入口验证。不得自行切换分支，不得自行换绑。
 
 **幂等性**：verify 阶段所有检查可安全重复执行。如 `verify_result` 已为 `pass`，说明验证已完成并应进入 archive；`branch_status` 在归档提交和最终分支处理完成前保持 `pending`。如 `verify_result` 为 `pending`，从头开始验证。
 
@@ -43,7 +43,7 @@ owner state scale <change-name>
 
 脚本自动统计任务数、增量规格数、变更文件数，判断使用 light 或 full 验证模式，并设置 verify_mode 字段。判定规则（满足任一即 full）：任务数 > 3、delta spec 能力数 > 1、变更文件数 > 8。
 
-验证开始前，按 `owner-classic/reference/dirty-worktree.md` 协议检查并处理未提交改动。verify 阶段的特殊处理：
+验证开始前，按 `owner-pipeline/reference/dirty-worktree.md` 协议检查并处理未提交改动。verify 阶段的特殊处理：
 
 1. 若 dirty diff 明确属于当前 change，它就是本次验证输入；继续验证，但不在 verify 阶段修改或提交实现、测试、tasks、delta spec 或 Design Doc
 2. 若 dirty diff 只是 verify 本阶段产物（例如验证报告草稿），可继续在 verify 阶段完成并记录状态
@@ -86,7 +86,7 @@ owner state set <change-name> verify_mode full
 
 按以下方式处理：
 - **CRITICAL/IMPORTANT 或范围内可明确修复的问题**：未达到上限时自动回到 build 修复；不得创建“是否修复”的伪决策，也不允许接受偏差
-- **WARNING/SUGGESTION 且修复会引入行为、范围或风险取舍**：按 `owner-classic/reference/decision-point.md` 让用户选择修复或接受偏差；接受时必须在验证报告中记录原因和影响范围
+- **WARNING/SUGGESTION 且修复会引入行为、范围或风险取舍**：按 `owner-pipeline/reference/decision-point.md` 让用户选择修复或接受偏差；接受时必须在验证报告中记录原因和影响范围
 - **WARNING/SUGGESTION 且修复安全、局部、无取舍**：未达到上限时自动修复，不因级别较低而强制停顿
 
 只有接受 WARNING/SUGGESTION 偏差或第 4 次失败后的策略选择才是用户决策点。当前 `verify_failures >= 3` 时不得自动执行下一次 `verify-fail`；按协议只提供「继续修复」或「停止当前 workflow 并寻求外部决策」两个选项。用户选择继续后才记录下一次失败并回到 build。CRITICAL/IMPORTANT 始终不可豁免。
@@ -155,11 +155,11 @@ owner state transition <change-name> verify-fail
 **立即执行：** 使用 Skill 工具加载 `openspec-verify-change` 技能。禁止跳过此步骤。
 
 <!-- external-openspec-skill-override -->
-**外部 OpenSpec Skill 覆写：** 加载后只采用其验证语义；其中任何直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径都必须替换为 `owner classic openspec -- <args...>` 与 resolver 返回的 `<classic-*>` 逻辑根。
+**外部 OpenSpec Skill 覆写：** 加载后只采用其验证语义；其中任何直接官方 CLI、固定 cwd 或固定物理 OpenSpec 路径都必须替换为 `owner pipeline openspec -- <args...>` 与 resolver 返回的 `<pipeline-*>` 逻辑根。
 
 技能加载后，按其指引验证。检查项：
 1. tasks.md 全部任务已完成（`[x]`）
-2. 实现符合 `<classic-change-dir>/design.md` 高层设计决策
+2. 实现符合 `<pipeline-change-dir>/design.md` 高层设计决策
 3. 实现符合 Design Doc（`docs/superpowers/specs/` 下的技术设计文档）
 4. 能力规格场景全部通过
 5. proposal.md 目标已满足
@@ -205,11 +205,11 @@ owner guard <change-name> verify --apply
 
 ## 上下文压缩恢复
 
-按 `owner-classic/reference/context-recovery.md` 执行，phase 参数为 `verify`。
+按 `owner-pipeline/reference/context-recovery.md` 执行，phase 参数为 `verify`。
 
 ## 自动衔接下一阶段
 
-按 `owner-classic/reference/auto-transition.md` 执行。关键命令：
+按 `owner-pipeline/reference/auto-transition.md` 执行。关键命令：
 
 ```bash
 owner state next <change-name>

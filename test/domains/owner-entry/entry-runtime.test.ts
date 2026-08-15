@@ -23,13 +23,13 @@ describe('Owner entry runtime', () => {
   it('formats a human-readable workflow resolution by default', async () => {
     const output = io();
     vi.mocked(resolveOwnerWorkflowResolution).mockResolvedValue({} as never);
-    vi.mocked(formatOwnerWorkflowResolution).mockReturnValue('classic: demo');
+    vi.mocked(formatOwnerWorkflowResolution).mockReturnValue('pipeline: demo');
 
     await expect(runOwnerEntryRuntime([], output)).resolves.toBe(0);
 
     expect(resolveOwnerWorkflowResolution).toHaveBeenCalledWith(process.cwd());
     expect(formatOwnerWorkflowResolution).toHaveBeenCalledWith({});
-    expect(output.stdout).toHaveBeenCalledWith('classic: demo\n');
+    expect(output.stdout).toHaveBeenCalledWith('pipeline: demo\n');
     expect(output.stderr).not.toHaveBeenCalled();
   });
 
@@ -52,7 +52,7 @@ describe('Owner entry runtime', () => {
 
   it('prints JSON for an explicit target path', async () => {
     const output = io();
-    const resolution = { workflow: 'native', change: 'demo' };
+    const resolution = { workflow: 'loop', change: 'demo' };
     vi.mocked(resolveOwnerWorkflowResolution).mockResolvedValue(resolution as never);
 
     await expect(runOwnerEntryRuntime(['--json', 'project'], output)).resolves.toBe(0);

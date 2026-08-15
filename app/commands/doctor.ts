@@ -35,20 +35,20 @@ import {
 import { hasSkills } from '../../platform/install/detect.js';
 import { resolveCanonicalSkillRootOwners } from '../../platform/install/skill-root-owner.js';
 import type { InstallScope } from '../../platform/install/types.js';
-import { inspectClassicChangeReadOnly } from '../../domains/owner-classic/classic-diagnostics.js';
+import { inspectPipelineChangeReadOnly } from '../../domains/owner-pipeline/pipeline-diagnostics.js';
 import {
-  inspectClassicLayout,
-  resolveClassicLayout,
-} from '../../domains/owner-classic/classic-layout.js';
-import { assertClassicOpenSpecRootHealthy } from '../../domains/owner-classic/classic-openspec-root.js';
+  inspectPipelineLayout,
+  resolvePipelineLayout,
+} from '../../domains/owner-pipeline/pipeline-layout.js';
+import { assertPipelineOpenSpecRootHealthy } from '../../domains/owner-pipeline/pipeline-openspec-root.js';
 import {
-  inspectClassicRootMove,
-  repairClassicRootMove,
-} from '../../domains/owner-classic/classic-root-move.js';
+  inspectPipelineRootMove,
+  repairPipelineRootMove,
+} from '../../domains/owner-pipeline/pipeline-root-move.js';
 import {
-  inspectClassicLayoutInitialization,
-  repairClassicLayoutInitialization,
-} from '../../domains/owner-classic/classic-layout-initialization.js';
+  inspectPipelineLayoutInitialization,
+  repairPipelineLayoutInitialization,
+} from '../../domains/owner-pipeline/pipeline-layout-initialization.js';
 import { getCurrentVersion } from '../../platform/version/version.js';
 import { repairOwnerCurrentSelection } from '../../domains/owner-entry/current-selection-repair.js';
 import { readWorkflowProjectConfig } from '../../domains/workflow-contract/project-config-reader.js';
@@ -98,21 +98,21 @@ const SUPERPOWERS_SENTINELS = [
   'writing-plans/SKILL.md',
 ] as const;
 const HOOK_ROUTER_RUNTIME = 'owner/scripts/owner-hook-router.mjs';
-const CLASSIC_PLATFORM_TOOL_SCAN_MAX_ENTRIES = 4096;
-const CLASSIC_PLATFORM_TOOL_SCAN_MAX_DEPTH = 8;
-const CLASSIC_PLATFORM_TOOL_SCAN_MAX_FINDINGS = 128;
-const CLASSIC_PLATFORM_TOOL_ROOTS = [
+const PIPELINE_PLATFORM_TOOL_SCAN_MAX_ENTRIES = 4096;
+const PIPELINE_PLATFORM_TOOL_SCAN_MAX_DEPTH = 8;
+const PIPELINE_PLATFORM_TOOL_SCAN_MAX_FINDINGS = 128;
+const PIPELINE_PLATFORM_TOOL_ROOTS = [
   ...new Set(SUPPORTED_PLATFORMS.flatMap((platform) => getPlatformSkillsDirs(platform, 'project'))),
 ].sort();
 const OPEN_SPEC_COMMAND_CONTAINER_NAMES = new Set(['command', 'commands', 'prompts', 'workflows']);
 
-function configuredWorkflows(config: WorkflowProjectConfig | null): Array<'native' | 'classic'> {
-  return config?.workflows ?? (config ? [config.default_workflow] : ['classic']);
+function configuredWorkflows(config: WorkflowProjectConfig | null): Array<'loop' | 'pipeline'> {
+  return config?.workflows ?? (config ? [config.default_workflow] : ['pipeline']);
 }
 
 function configuredSkillLanguage(
   config: WorkflowProjectConfig | null,
-  workflows: Array<'native' | 'classic'>,
+  workflows: Array<'loop' | 'pipeline'>,
 ): 'zh' | 'en' {
   if (!config) return 'en';
   const ordered = [
@@ -121,7 +121,7 @@ function configuredSkillLanguage(
   ];
   for (const workflow of ordered) {
     if (!workflows.includes(workflow)) continue;
-    const language = workflow === 'native' ? config.native?.language : config.classic?.language;
+    const language = workflow === 'loop' ? config.loop?.language : config.pipeline?.language;
     if (language) return language === 'zh-CN' ? 'zh' : 'en';
   }
   return 'en';
@@ -197,7 +197,7 @@ function checkScopeMode(
 async function checkWorkingDirs(projectPath: string): Promise<CheckResult> {
   let layout;
   try {
-    layout = await resolveClassicLayout(projectPath);
+    layout = await resolvePipelineLayout(projectPath);
   } catch (error) {
     return {
       check: 'working directories',
@@ -221,7 +221,7 @@ async function checkWorkingDirs(projectPath: string): Promise<CheckResult> {
           projectPath,
           path.relative(projectPath, directory).replaceAll('\\', '/'),
           {
-            label: `Classic working directory ${path
+            label: `Pipeline working directory ${path
               .relative(projectPath, directory)
               .replaceAll('\\', '/')}`,
             expected: 'directory',
@@ -263,13 +263,13 @@ async function checkWorkingDirs(projectPath: string): Promise<CheckResult> {
   };
 }
 
-async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
+async function checkPipelineLayout(projectPath: string): Promise<CheckResult> {
   let transaction;
   try {
-    transaction = await inspectClassicRootMove(projectPath);
+    transaction = await inspectPipelineRootMove(projectPath);
   } catch (error) {
     return {
-      check: 'Classic artifact layout',
+      check: 'Pipeline artifact layout',
       status: 'fail',
       message: `invalid root move journal; allowed strategies: none (${
         error instanceof Error ? error.message : String(error)
@@ -280,7 +280,7 @@ async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
     const allowed =
       transaction.allowedStrategies.length > 0 ? transaction.allowedStrategies.join(', ') : 'none';
     return {
-      check: 'Classic artifact layout',
+      check: 'Pipeline artifact layout',
       status: 'fail',
       message: `root move ${transaction.id} is incomplete at ${transaction.stage}; source ${transaction.source}; target ${transaction.target}; staging ${transaction.staging}; plan ${transaction.planId}; allowed strategies: ${allowed}${
         transaction.reason ? ` (${transaction.reason})` : ''
@@ -289,10 +289,10 @@ async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
   }
   let inspection;
   try {
-    inspection = await inspectClassicLayout(projectPath);
+    inspection = await inspectPipelineLayout(projectPath);
   } catch (error) {
     return {
-      check: 'Classic artifact layout',
+      check: 'Pipeline artifact layout',
       status: 'fail',
       message: error instanceof Error ? error.message : String(error),
     };
@@ -305,7 +305,7 @@ async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
       .relative(projectPath, inspection.alternateRoot)
       .replaceAll('\\', '/');
     return {
-      check: 'Classic artifact layout',
+      check: 'Pipeline artifact layout',
       status: 'pass',
       message: `${inspection.paths.artifactLayout}: configured ${configuredRoot}/ present; standalone OpenSpec root ${alternateRoot}/ also present and ignored by Owner`,
     };
@@ -316,15 +316,15 @@ async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
   const alternateRoot = path.relative(projectPath, inspection.alternateRoot).replaceAll('\\', '/');
   if (!inspection.configuredRootExists) {
     return {
-      check: 'Classic artifact layout',
+      check: 'Pipeline artifact layout',
       status: 'fail',
       message: `${inspection.paths.artifactLayout}: configured ${configuredRoot}/ missing; alternate ${alternateRoot}/ ${
         inspection.alternateRootExists ? 'present' : 'missing'
-      } — run: owner classic root show, then restore the configured root or use owner classic root move`,
+      } — run: owner pipeline root show, then restore the configured root or use owner pipeline root move`,
     };
   }
   return {
-    check: 'Classic artifact layout',
+    check: 'Pipeline artifact layout',
     status: 'pass',
     message: `${inspection.paths.artifactLayout}: configured ${configuredRoot}/ present; alternate ${alternateRoot}/ ${
       inspection.alternateRootExists ? 'present' : 'missing'
@@ -332,19 +332,19 @@ async function checkClassicLayout(projectPath: string): Promise<CheckResult> {
   };
 }
 
-async function checkClassicInitialization(projectPath: string): Promise<CheckResult | null> {
+async function checkPipelineInitialization(projectPath: string): Promise<CheckResult | null> {
   try {
-    const initialization = await inspectClassicLayoutInitialization(projectPath);
+    const initialization = await inspectPipelineLayoutInitialization(projectPath);
     if (!initialization) return null;
     const location = initialization.quarantine ? `; preserved at ${initialization.quarantine}` : '';
     return {
-      check: 'Classic initialization',
+      check: 'Pipeline initialization',
       status: 'warn',
       message: `${initialization.id} at ${initialization.stage}${location}; allowed strategies: ${initialization.allowedStrategies.join(', ')}`,
     };
   } catch (error) {
     return {
-      check: 'Classic initialization',
+      check: 'Pipeline initialization',
       status: 'fail',
       message: error instanceof Error ? error.message : String(error),
     };
@@ -371,17 +371,17 @@ async function checkProjectConfigWriteTransaction(
   }
 }
 
-async function checkClassicOpenSpecRoot(projectPath: string): Promise<CheckResult> {
+async function checkPipelineOpenSpecRoot(projectPath: string): Promise<CheckResult> {
   try {
-    const health = await assertClassicOpenSpecRootHealthy(projectPath);
+    const health = await assertPipelineOpenSpecRootHealthy(projectPath);
     return {
-      check: 'Classic OpenSpec root',
+      check: 'Pipeline OpenSpec root',
       status: 'pass',
       message: `${health.configPath} is valid (${health.schema})`,
     };
   } catch (error) {
     return {
-      check: 'Classic OpenSpec root',
+      check: 'Pipeline OpenSpec root',
       status: 'fail',
       message: error instanceof Error ? error.message : String(error),
     };
@@ -425,7 +425,7 @@ async function readDoctorPlatformDirectory(
   relativeDirectory: string,
   maxEntries: number,
 ): Promise<Dirent[] | null> {
-  const label = `Classic platform tool directory ${relativeDirectory}`;
+  const label = `Pipeline platform tool directory ${relativeDirectory}`;
   const inspection = await inspectProtectedProjectPath(projectPath, relativeDirectory, {
     label,
     expected: 'directory',
@@ -445,7 +445,7 @@ async function readDoctorPlatformDirectory(
       entries.push(entry);
       if (entries.length > maxEntries) {
         throw new Error(
-          `Classic platform tool scan exceeds ${CLASSIC_PLATFORM_TOOL_SCAN_MAX_ENTRIES} entries`,
+          `Pipeline platform tool scan exceeds ${PIPELINE_PLATFORM_TOOL_SCAN_MAX_ENTRIES} entries`,
         );
       }
     }
@@ -494,12 +494,12 @@ function isOpenSpecPlatformToolSentinel(relativePath: string, kind: 'file' | 'di
   return /^(?:opsx|openspec)-[a-z0-9-]+\.[a-z0-9.]+$/iu.test(name) || segments.includes('opsx');
 }
 
-async function findClassicArtifactPlatformTools(
+async function findPipelineArtifactPlatformTools(
   projectPath: string,
   artifactBaseRelative: string,
 ): Promise<string[]> {
   const findings = new Set<string>();
-  const queue = CLASSIC_PLATFORM_TOOL_ROOTS.map((platformRoot) => ({
+  const queue = PIPELINE_PLATFORM_TOOL_ROOTS.map((platformRoot) => ({
     relative: path.posix.join(artifactBaseRelative, platformRoot.replaceAll('\\', '/')),
     depth: 0,
   }));
@@ -510,41 +510,41 @@ async function findClassicArtifactPlatformTools(
     const entries = await readDoctorPlatformDirectory(
       projectPath,
       current.relative,
-      CLASSIC_PLATFORM_TOOL_SCAN_MAX_ENTRIES - inspectedEntries,
+      PIPELINE_PLATFORM_TOOL_SCAN_MAX_ENTRIES - inspectedEntries,
     );
     if (!entries) continue;
 
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       inspectedEntries += 1;
-      if (inspectedEntries > CLASSIC_PLATFORM_TOOL_SCAN_MAX_ENTRIES) {
+      if (inspectedEntries > PIPELINE_PLATFORM_TOOL_SCAN_MAX_ENTRIES) {
         throw new Error(
-          `Classic platform tool scan exceeds ${CLASSIC_PLATFORM_TOOL_SCAN_MAX_ENTRIES} entries`,
+          `Pipeline platform tool scan exceeds ${PIPELINE_PLATFORM_TOOL_SCAN_MAX_ENTRIES} entries`,
         );
       }
       const relative = path.posix.join(current.relative, entry.name);
       const inspection = await inspectProtectedProjectPath(projectPath, relative, {
-        label: `Classic platform tool candidate ${relative}`,
+        label: `Pipeline platform tool candidate ${relative}`,
         expected: 'any',
       });
       if (!inspection.exists) {
         throw new Error(
-          `Classic platform tool candidate ${relative} changed while being inspected`,
+          `Pipeline platform tool candidate ${relative} changed while being inspected`,
         );
       }
       const kind = inspection.kind === 'directory' ? 'directory' : 'file';
       if (isOpenSpecPlatformToolSentinel(relative, kind)) {
         findings.add(relative);
-        if (findings.size > CLASSIC_PLATFORM_TOOL_SCAN_MAX_FINDINGS) {
+        if (findings.size > PIPELINE_PLATFORM_TOOL_SCAN_MAX_FINDINGS) {
           throw new Error(
-            `Classic platform tool scan exceeds ${CLASSIC_PLATFORM_TOOL_SCAN_MAX_FINDINGS} findings`,
+            `Pipeline platform tool scan exceeds ${PIPELINE_PLATFORM_TOOL_SCAN_MAX_FINDINGS} findings`,
           );
         }
         continue;
       }
       if (kind === 'directory') {
-        if (current.depth >= CLASSIC_PLATFORM_TOOL_SCAN_MAX_DEPTH) {
+        if (current.depth >= PIPELINE_PLATFORM_TOOL_SCAN_MAX_DEPTH) {
           throw new Error(
-            `Classic platform tool scan exceeds depth ${CLASSIC_PLATFORM_TOOL_SCAN_MAX_DEPTH} at ${relative}`,
+            `Pipeline platform tool scan exceeds depth ${PIPELINE_PLATFORM_TOOL_SCAN_MAX_DEPTH} at ${relative}`,
           );
         }
         queue.push({ relative, depth: current.depth + 1 });
@@ -555,10 +555,10 @@ async function findClassicArtifactPlatformTools(
   return [...findings].sort();
 }
 
-async function checkClassicPlatformToolAssets(projectPath: string): Promise<CheckResult | null> {
+async function checkPipelinePlatformToolAssets(projectPath: string): Promise<CheckResult | null> {
   let layout;
   try {
-    layout = await resolveClassicLayout(projectPath);
+    layout = await resolvePipelineLayout(projectPath);
   } catch {
     // The dedicated layout check already reports why the configured layout
     // cannot be trusted. Do not guess whether the docs-only check applies.
@@ -570,16 +570,16 @@ async function checkClassicPlatformToolAssets(projectPath: string): Promise<Chec
     .relative(projectPath, layout.openSpecBase)
     .replaceAll('\\', '/');
   try {
-    const findings = await findClassicArtifactPlatformTools(projectPath, artifactBaseRelative);
+    const findings = await findPipelineArtifactPlatformTools(projectPath, artifactBaseRelative);
     if (findings.length === 0) {
       return {
-        check: 'Classic platform tool assets',
+        check: 'Pipeline platform tool assets',
         status: 'pass',
         message: 'no OpenSpec platform tool assets under docs/',
       };
     }
     return {
-      check: 'Classic platform tool assets',
+      check: 'Pipeline platform tool assets',
       status: 'fail',
       message: `found OpenSpec platform tool assets under the docs artifact root: ${findings.join(
         ', ',
@@ -587,7 +587,7 @@ async function checkClassicPlatformToolAssets(projectPath: string): Promise<Chec
     };
   } catch (error) {
     return {
-      check: 'Classic platform tool assets',
+      check: 'Pipeline platform tool assets',
       status: 'fail',
       message: `could not safely inspect platform tool assets under docs/: ${
         error instanceof Error ? error.message : String(error)
@@ -869,7 +869,7 @@ async function checkSkillCompleteness(
   for (const base of getScopeBases(projectPath, scope, context)) {
     const managedSkills = getManagedSkillPathsForSelection(
       manifest,
-      base.scope === 'global' ? 'classic' : workflowSelection,
+      base.scope === 'global' ? 'pipeline' : workflowSelection,
     );
     const total = managedSkills.length;
     const platforms = await getPlatformsForSkillInspection(base.baseDir, base.scope, scope);
@@ -929,7 +929,7 @@ async function checkSkillCompleteness(
             base.baseDir,
             platform,
             base.scope,
-            base.scope === 'global' ? 'classic' : workflowSelection,
+            base.scope === 'global' ? 'pipeline' : workflowSelection,
           )),
         );
       }
@@ -944,7 +944,7 @@ async function checkSkillCompleteness(
           base.baseDir,
           platform,
           base.scope,
-          base.scope === 'global' ? 'classic' : workflowSelection,
+          base.scope === 'global' ? 'pipeline' : workflowSelection,
         )),
       );
     }
@@ -1008,14 +1008,14 @@ function formatRuntimeEvalRecovery(
 async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[]> {
   let changesDir: string;
   try {
-    const inspection = await inspectClassicLayout(projectPath);
+    const inspection = await inspectPipelineLayout(projectPath);
     if (!inspection.configuredRootExists) return [];
     changesDir = inspection.paths.changesDir;
     const changesInspection = await inspectProtectedProjectPath(
       projectPath,
       path.relative(projectPath, changesDir).replaceAll('\\', '/'),
       {
-        label: 'Classic changes directory',
+        label: 'Pipeline changes directory',
         expected: 'directory',
       },
     );
@@ -1039,7 +1039,7 @@ async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[
         projectPath,
         path.relative(projectPath, changeDir).replaceAll('\\', '/'),
         {
-          label: `Classic change ${entry}`,
+          label: `Pipeline change ${entry}`,
           expected: 'directory',
         },
       );
@@ -1048,7 +1048,7 @@ async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[
         projectPath,
         path.relative(projectPath, yamlPath).replaceAll('\\', '/'),
         {
-          label: `Classic state ${entry}`,
+          label: `Pipeline state ${entry}`,
           expected: 'file',
         },
       );
@@ -1057,7 +1057,7 @@ async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[
         projectPath,
         path.relative(projectPath, runtimePath).replaceAll('\\', '/'),
         {
-          label: `Classic runtime directory ${entry}`,
+          label: `Pipeline runtime directory ${entry}`,
           expected: 'directory',
         },
       );
@@ -1070,7 +1070,7 @@ async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[
       continue;
     }
 
-    const diagnostic = await inspectClassicChangeReadOnly(changeDir, entry);
+    const diagnostic = await inspectPipelineChangeReadOnly(changeDir, entry);
     if (diagnostic.valid) {
       const step =
         diagnostic.currentStep ??
@@ -1096,7 +1096,7 @@ async function checkOwnerYamlValidity(projectPath: string): Promise<CheckResult[
     results.push({
       check: `.owner.yaml: ${entry}`,
       status: 'fail',
-      message: diagnostic.error ?? 'invalid Classic state',
+      message: diagnostic.error ?? 'invalid Pipeline state',
     });
     results.push({
       check: `next: ${entry}`,
@@ -1116,7 +1116,7 @@ async function inspectManagedInstallAvailability(
   const manifest = await readManifest();
   const managedSkills = getManagedSkillPathsForSelection(
     manifest,
-    scope === 'global' ? 'classic' : workflowSelection,
+    scope === 'global' ? 'pipeline' : workflowSelection,
   );
   let partial = false;
   for (const platform of SUPPORTED_PLATFORMS) {
@@ -1156,7 +1156,7 @@ async function inspectDoctorRuntime(
         )
       : currentProjectInstall;
   const globalFallbackReady =
-    (await inspectManagedInstallAvailability(context.homeDir, 'global', 'classic')) === 'ready';
+    (await inspectManagedInstallAvailability(context.homeDir, 'global', 'pipeline')) === 'ready';
   const effectiveScope =
     currentProjectInstall !== 'missing' ? 'project' : globalFallbackReady ? 'global' : 'none';
   const remediation =
@@ -1228,14 +1228,14 @@ async function collectResultsWithContext(
       configError = error instanceof Error ? error.message : String(error);
     }
   }
-  const workflows = configError ? ['native', 'classic'] : configuredWorkflows(config);
+  const workflows = configError ? ['loop', 'pipeline'] : configuredWorkflows(config);
   const workflowSelection: InitWorkflowSelection =
-    workflows.includes('native') && workflows.includes('classic')
+    workflows.includes('loop') && workflows.includes('pipeline')
       ? 'both'
-      : workflows.includes('native')
-        ? 'native'
-        : 'classic';
-  const classicEnabled = workflowSelection !== 'native';
+      : workflows.includes('loop')
+        ? 'loop'
+        : 'pipeline';
+  const pipelineEnabled = workflowSelection !== 'loop';
   const runtime = await inspectDoctorRuntime(projectPath, context, workflowSelection);
   const worktreeCheck = worktreeRuntimeCheck(runtime);
   if (worktreeCheck) results.push(worktreeCheck);
@@ -1247,10 +1247,10 @@ async function collectResultsWithContext(
   results.push(checkEnvironment(projectPath, context));
   results.push(checkOwnerCli());
   if (scope !== 'global') {
-    const classicInitialization = await checkClassicInitialization(projectPath);
-    if (classicInitialization) results.push(classicInitialization);
+    const pipelineInitialization = await checkPipelineInitialization(projectPath);
+    if (pipelineInitialization) results.push(pipelineInitialization);
   }
-  if (classicEnabled) {
+  if (pipelineEnabled) {
     results.push(await checkOpenSpecCli());
     results.push(
       await checkSuperpowers(
@@ -1262,11 +1262,11 @@ async function collectResultsWithContext(
       ),
     );
     if (scope !== 'global') {
-      const classicLayout = await checkClassicLayout(projectPath);
-      results.push(classicLayout);
-      const platformToolAssets = await checkClassicPlatformToolAssets(projectPath);
+      const pipelineLayout = await checkPipelineLayout(projectPath);
+      results.push(pipelineLayout);
+      const platformToolAssets = await checkPipelinePlatformToolAssets(projectPath);
       if (platformToolAssets) results.push(platformToolAssets);
-      results.push(await checkClassicOpenSpecRoot(projectPath));
+      results.push(await checkPipelineOpenSpecRoot(projectPath));
       results.push(await checkWorkingDirs(projectPath));
     }
   }
@@ -1287,7 +1287,7 @@ async function collectResultsWithContext(
   }
   results.push(...skillResults);
   results.push(await checkScriptsPresent());
-  if (classicEnabled && !configError && config && workflows.includes('classic')) {
+  if (pipelineEnabled && !configError && config && workflows.includes('pipeline')) {
     results.push(...(await checkOwnerYamlValidity(projectPath)));
   }
   if (scope !== 'global') {
@@ -1373,11 +1373,11 @@ async function repairDoctorState(
   const workflows = configuredWorkflows(config);
   const language = configuredSkillLanguage(config, workflows);
   const workflowSelection: InitWorkflowSelection =
-    workflows.includes('native') && workflows.includes('classic')
+    workflows.includes('loop') && workflows.includes('pipeline')
       ? 'both'
-      : workflows.includes('native')
-        ? 'native'
-        : 'classic';
+      : workflows.includes('loop')
+        ? 'loop'
+        : 'pipeline';
   const projectedProjectPlatforms = new Set<string>();
   if (scope !== 'global') {
     const worktree = inspectGitWorktree(projectPath);
@@ -1488,16 +1488,16 @@ async function repairDoctorState(
 
   if (scope !== 'global' && projectRouterReady) {
     const selectionRepair = await repairOwnerCurrentSelection(projectPath, {
-      migrateLegacyClassic: workflows.includes('classic'),
+      migrateLegacyPipeline: workflows.includes('pipeline'),
     });
-    if (selectionRepair.migratedLegacyClassic) repaired.push('Classic selection v1');
+    if (selectionRepair.migratedLegacyPipeline) repaired.push('Pipeline selection v1');
     if (selectionRepair.clearedStaleSelection) repaired.push('stale current selection');
   }
   if (scope !== 'global' && strategy) {
-    if (await repairClassicLayoutInitialization(projectPath, strategy)) {
-      repaired.push('Classic initialization');
-    } else if (await repairClassicRootMove(projectPath, strategy)) {
-      repaired.push('Classic root move');
+    if (await repairPipelineLayoutInitialization(projectPath, strategy)) {
+      repaired.push('Pipeline initialization');
+    } else if (await repairPipelineRootMove(projectPath, strategy)) {
+      repaired.push('Pipeline root move');
     }
   }
 

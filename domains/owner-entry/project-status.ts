@@ -1,21 +1,21 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-import { latestCommandCheck } from '../owner-classic/classic-command-checks.js';
-import { inspectClassicChangeReadOnly } from '../owner-classic/classic-diagnostics.js';
-import { assertClassicLayoutReadable } from '../owner-classic/classic-layout.js';
+import { latestCommandCheck } from '../owner-pipeline/pipeline-command-checks.js';
+import { inspectPipelineChangeReadOnly } from '../owner-pipeline/pipeline-diagnostics.js';
+import { assertPipelineLayoutReadable } from '../owner-pipeline/pipeline-layout.js';
 import {
-  inspectClassicActiveChangeDirectory,
+  inspectPipelineActiveChangeDirectory,
   openSpecChangeNameError,
-} from '../owner-classic/classic-paths.js';
+} from '../owner-pipeline/pipeline-paths.js';
 import {
-  inspectClassicProjectTarget,
-  readClassicProjectFile,
-} from '../owner-classic/classic-protected-path.js';
-import { readClassicState } from '../owner-classic/classic-store.js';
-import { assertNoPendingNativeRootMove } from '../owner-native/native-config.js';
-import { listNativeStatus } from '../owner-native/native-diagnostics.js';
-import { discoverNativeProject, nativeProjectPaths } from '../owner-native/native-paths.js';
+  inspectPipelineProjectTarget,
+  readPipelineProjectFile,
+} from '../owner-pipeline/pipeline-protected-path.js';
+import { readPipelineState } from '../owner-pipeline/pipeline-store.js';
+import { assertNoPendingLoopRootMove } from '../owner-loop/loop-config.js';
+import { listLoopStatus } from '../owner-loop/loop-diagnostics.js';
+import { discoverLoopProject, loopProjectPaths } from '../owner-loop/loop-paths.js';
 import { readWorkflowProjectConfig } from '../workflow-contract/project-config-reader.js';
 import { resolveOwnerEntry } from './resolve-entry.js';
 import type { ChangeStatus, OwnerEntryResolution, OwnerProjectStatus } from './types.js';
@@ -26,8 +26,8 @@ async function countTasks(
 ): Promise<{ done: number; total: number }> {
   let content: string;
   try {
-    content = await readClassicProjectFile(projectRoot, tasksPath, {
-      label: 'Classic tasks artifact',
+    content = await readPipelineProjectFile(projectRoot, tasksPath, {
+      label: 'Pipeline tasks artifact',
     });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException | undefined)?.code;
@@ -46,7 +46,7 @@ function unmanagedChange(name: string, done: number, total: number): ChangeStatu
     name,
     ownerManaged: false,
     archiveReady: total > 0 && done === total,
-    recommendedArchiveCommand: `owner classic openspec -- archive ${name} -y`,
+    recommendedArchiveCommand: `owner pipeline openspec -- archive ${name} -y`,
     workflow: null,
     phase: null,
     buildMode: null,
@@ -66,7 +66,7 @@ function unmanagedChange(name: string, done: number, total: number): ChangeStatu
   };
 }
 
-function invalidClassicChange(name: string, error: unknown, done = 0, total = 0): ChangeStatus {
+function invalidPipelineChange(name: string, error: unknown, done = 0, total = 0): ChangeStatus {
   return {
     name,
     ownerManaged: true,
@@ -94,27 +94,27 @@ function invalidClassicChange(name: string, error: unknown, done = 0, total = 0)
 
 async function inspectOpenSpecChanges(
   projectRoot: string,
-): Promise<{ classic: ChangeStatus[]; unmanaged: ChangeStatus[]; error?: string }> {
+): Promise<{ pipeline: ChangeStatus[]; unmanaged: ChangeStatus[]; error?: string }> {
   let changesDir: string;
   try {
-    changesDir = (await assertClassicLayoutReadable(projectRoot)).changesDir;
-    const inspection = await inspectClassicProjectTarget(projectRoot, changesDir, {
-      label: 'Classic changes root',
+    changesDir = (await assertPipelineLayoutReadable(projectRoot)).changesDir;
+    const inspection = await inspectPipelineProjectTarget(projectRoot, changesDir, {
+      label: 'Pipeline changes root',
       expected: 'directory',
     });
-    if (!inspection.exists) return { classic: [], unmanaged: [] };
+    if (!inspection.exists) return { pipeline: [], unmanaged: [] };
   } catch (error) {
     return {
-      classic: [],
+      pipeline: [],
       unmanaged: [],
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  const classic: ChangeStatus[] = [];
+  const pipeline: ChangeStatus[] = [];
   const unmanaged: ChangeStatus[] = [];
   const names = (await fs.readdir(changesDir)).sort();
-  await inspectClassicProjectTarget(projectRoot, changesDir, {
-    label: 'Classic changes root',
+  await inspectPipelineProjectTarget(projectRoot, changesDir, {
+    label: 'Pipeline changes root',
     expected: 'directory',
   });
   for (const name of names) {
@@ -122,9 +122,9 @@ async function inspectOpenSpecChanges(
     if (openSpecChangeNameError(name)) continue;
     let change;
     try {
-      change = await inspectClassicActiveChangeDirectory(name, projectRoot);
+      change = await inspectPipelineActiveChangeDirectory(name, projectRoot);
     } catch (error) {
-      classic.push(invalidClassicChange(name, error));
+      pipeline.push(invalidPipelineChange(name, error));
       continue;
     }
     if (!change.exists) continue;
@@ -134,7 +134,7 @@ async function inspectOpenSpecChanges(
     try {
       ({ done, total } = await countTasks(projectRoot, path.join(changeDir, 'tasks.md')));
     } catch (error) {
-      classic.push(invalidClassicChange(name, error));
+      pipeline.push(invalidPipelineChange(name, error));
       continue;
     }
     if (!change.stateExists) {
@@ -143,27 +143,27 @@ async function inspectOpenSpecChanges(
     }
 
     try {
-      await inspectClassicProjectTarget(projectRoot, path.join(changeDir, '.owner'), {
-        label: `Classic runtime directory for ${name}`,
+      await inspectPipelineProjectTarget(projectRoot, path.join(changeDir, '.owner'), {
+        label: `Pipeline runtime directory for ${name}`,
         expected: 'directory',
       });
-      const projection = await readClassicState(changeDir, { migrate: false });
+      const projection = await readPipelineState(changeDir, { migrate: false });
       const unknownKeys = Array.from(new Set(projection.unknownKeys)).sort();
       if (unknownKeys.length > 0) {
-        classic.push({
+        pipeline.push({
           name,
           ownerManaged: true,
           archiveReady: false,
           recommendedArchiveCommand: `owner archive ${name}`,
           workflow: 'unknown',
           phase: 'invalid',
-          buildMode: projection.classic?.buildMode ?? null,
-          isolation: projection.classic?.isolation ?? null,
-          boundBranch: projection.classic?.boundBranch ?? null,
-          verifyMode: projection.classic?.verifyMode ?? null,
-          verifyResult: projection.classic?.verifyResult ?? 'pending',
-          designDoc: projection.classic?.designDoc ?? null,
-          plan: projection.classic?.plan ?? null,
+          buildMode: projection.pipeline?.buildMode ?? null,
+          isolation: projection.pipeline?.isolation ?? null,
+          boundBranch: projection.pipeline?.boundBranch ?? null,
+          verifyMode: projection.pipeline?.verifyMode ?? null,
+          verifyResult: projection.pipeline?.verifyResult ?? 'pending',
+          designDoc: projection.pipeline?.designDoc ?? null,
+          plan: projection.pipeline?.plan ?? null,
           tasksCompleted: done,
           tasksTotal: total,
           nextCommand: null,
@@ -171,32 +171,32 @@ async function inspectOpenSpecChanges(
           runtimeMode: 'invalid',
           runtimeEval: null,
           commandChecks: null,
-          error: `Invalid Classic state: unknown field(s): ${unknownKeys.join(', ')}`,
+          error: `Invalid Pipeline state: unknown field(s): ${unknownKeys.join(', ')}`,
         });
         continue;
       }
 
-      const diagnostic = await inspectClassicChangeReadOnly(changeDir, name);
-      if (diagnostic.valid && projection.classic) {
-        if (projection.classic.archived) continue;
+      const diagnostic = await inspectPipelineChangeReadOnly(changeDir, name);
+      if (diagnostic.valid && projection.pipeline) {
+        if (projection.pipeline.archived) continue;
         const run = projection.run;
-        classic.push({
+        pipeline.push({
           name,
           ownerManaged: true,
           archiveReady:
-            projection.classic.phase === 'archive' &&
-            projection.classic.verifyResult === 'pass' &&
-            !projection.classic.archived,
+            projection.pipeline.phase === 'archive' &&
+            projection.pipeline.verifyResult === 'pass' &&
+            !projection.pipeline.archived,
           recommendedArchiveCommand: `owner archive ${name}`,
           workflow: diagnostic.workflow,
           phase: diagnostic.phase,
-          buildMode: projection.classic.buildMode,
-          isolation: projection.classic.isolation,
-          boundBranch: projection.classic.boundBranch,
-          verifyMode: projection.classic.verifyMode,
-          verifyResult: projection.classic.verifyResult,
-          designDoc: projection.classic.designDoc,
-          plan: projection.classic.plan,
+          buildMode: projection.pipeline.buildMode,
+          isolation: projection.pipeline.isolation,
+          boundBranch: projection.pipeline.boundBranch,
+          verifyMode: projection.pipeline.verifyMode,
+          verifyResult: projection.pipeline.verifyResult,
+          designDoc: projection.pipeline.designDoc,
+          plan: projection.pipeline.plan,
           tasksCompleted: done,
           tasksTotal: total,
           nextCommand: diagnostic.nextCommand,
@@ -213,20 +213,20 @@ async function inspectOpenSpecChanges(
         continue;
       }
 
-      classic.push({
+      pipeline.push({
         name,
         ownerManaged: true,
         archiveReady: false,
         recommendedArchiveCommand: `owner archive ${name}`,
         workflow: diagnostic.workflow,
         phase: diagnostic.phase,
-        buildMode: projection.classic?.buildMode ?? null,
-        isolation: projection.classic?.isolation ?? null,
-        boundBranch: projection.classic?.boundBranch ?? null,
-        verifyMode: projection.classic?.verifyMode ?? null,
-        verifyResult: projection.classic?.verifyResult ?? 'pending',
-        designDoc: projection.classic?.designDoc ?? null,
-        plan: projection.classic?.plan ?? null,
+        buildMode: projection.pipeline?.buildMode ?? null,
+        isolation: projection.pipeline?.isolation ?? null,
+        boundBranch: projection.pipeline?.boundBranch ?? null,
+        verifyMode: projection.pipeline?.verifyMode ?? null,
+        verifyResult: projection.pipeline?.verifyResult ?? 'pending',
+        designDoc: projection.pipeline?.designDoc ?? null,
+        plan: projection.pipeline?.plan ?? null,
         tasksCompleted: done,
         tasksTotal: total,
         nextCommand: diagnostic.nextCommand,
@@ -237,14 +237,14 @@ async function inspectOpenSpecChanges(
         error: diagnostic.error,
       });
     } catch (error) {
-      classic.push(invalidClassicChange(name, error, done, total));
+      pipeline.push(invalidPipelineChange(name, error, done, total));
     }
   }
-  return { classic, unmanaged };
+  return { pipeline, unmanaged };
 }
 
 export async function inspectOwnerProjectStatus(startPath: string): Promise<OwnerProjectStatus> {
-  const projectRoot = await discoverNativeProject(startPath);
+  const projectRoot = await discoverLoopProject(startPath);
   let defaultEntry: OwnerEntryResolution | { error: string };
   let configError: string | null = null;
   let config = null;
@@ -256,42 +256,42 @@ export async function inspectOwnerProjectStatus(startPath: string): Promise<Owne
     defaultEntry = { error: configError };
   }
   const configuredWorkflows =
-    config?.workflows ?? (config ? [config.default_workflow] : ['classic']);
-  const classicEnabled = configuredWorkflows.includes('classic');
-  const nativeEnabled = configuredWorkflows.includes('native');
+    config?.workflows ?? (config ? [config.default_workflow] : ['pipeline']);
+  const pipelineEnabled = configuredWorkflows.includes('pipeline');
+  const loopEnabled = configuredWorkflows.includes('loop');
   const openSpec = configError
-    ? { classic: [], unmanaged: [], error: configError }
-    : classicEnabled
+    ? { pipeline: [], unmanaged: [], error: configError }
+    : pipelineEnabled
       ? await inspectOpenSpecChanges(projectRoot)
-      : { classic: [], unmanaged: [] };
+      : { pipeline: [], unmanaged: [] };
 
-  let native: OwnerProjectStatus['workflows']['native'];
+  let loop: OwnerProjectStatus['workflows']['loop'];
   if (configError) {
-    native = { changes: [], error: configError };
-  } else if (nativeEnabled && config?.native) {
+    loop = { changes: [], error: configError };
+  } else if (loopEnabled && config?.loop) {
     try {
-      await assertNoPendingNativeRootMove(projectRoot);
-      const paths = await nativeProjectPaths(projectRoot, config.native.artifact_root);
-      native = {
-        changes: await listNativeStatus(paths, {
-          clarificationMode: config.native.clarification_mode,
-          maxVerifyFailures: config.native.max_verify_failures,
+      await assertNoPendingLoopRootMove(projectRoot);
+      const paths = await loopProjectPaths(projectRoot, config.loop.artifact_root);
+      loop = {
+        changes: await listLoopStatus(paths, {
+          clarificationMode: config.loop.clarification_mode,
+          maxVerifyFailures: config.loop.max_verify_failures,
         }),
       };
     } catch (error) {
-      native = { changes: [], error: error instanceof Error ? error.message : String(error) };
+      loop = { changes: [], error: error instanceof Error ? error.message : String(error) };
     }
   } else {
-    native = { changes: [] };
+    loop = { changes: [] };
   }
 
   return {
     schema: 'owner.status.v2',
     defaultEntry,
     workflows: {
-      native,
-      classic: {
-        changes: openSpec.classic,
+      loop,
+      pipeline: {
+        changes: openSpec.pipeline,
         ...(openSpec.error ? { error: openSpec.error } : {}),
       },
     },
