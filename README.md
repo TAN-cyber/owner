@@ -31,6 +31,17 @@ npm install @redv/owner
 npx owner --version
 ```
 
+You can also clone the [TAN-cyber](https://github.com/TAN-cyber) repository and build locally:
+
+```bash
+git clone https://github.com/TAN-cyber/owner.git
+cd owner
+corepack enable
+pnpm install
+pnpm build
+npm link
+```
+
 Installing the CLI does not modify a host configuration. Owner writes Skills, Rules, and Hooks only after the user explicitly runs `npx owner init`.
 
 ## Initialize

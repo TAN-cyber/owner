@@ -53,10 +53,10 @@ npm install @redv/owner
 npx owner --version
 ```
 
-也可以克隆后本地构建：
+也可以从 [TAN-cyber](https://github.com/TAN-cyber) 仓库克隆后本地构建：
 
 ```bash
-git clone https://github.com/<YOUR_GITHUB_USER>/owner.git
+git clone https://github.com/TAN-cyber/owner.git
 cd owner
 corepack enable
 pnpm install
@@ -148,7 +148,7 @@ $owner 实现订单取消与幂等退款
 统一入口执行：
 
 ```bash
-owner workflow resolve . --activate --json
+npx owner workflow resolve . --activate --json
 ```
 
 它只返回 `owner-loop` 或 `owner-pipeline`，不会根据文件数或模型临场判断切换工作流。
@@ -183,12 +183,12 @@ docs/owner/
 常用 Runtime 命令：
 
 ```bash
-owner loop new <change> --isolation current --json
-owner loop status [change] --details --json
-owner loop show <change> --json
-owner loop next <change> [required inputs] --json
-owner loop doctor [change] --json
-owner loop archive <change> --preview --json
+npx owner loop new <change> --isolation current --json
+npx owner loop status [change] --details --json
+npx owner loop show <change> --json
+npx owner loop next <change> [required inputs] --json
+npx owner loop doctor [change] --json
+npx owner loop archive <change> --preview --json
 ```
 
 Loop 使用：

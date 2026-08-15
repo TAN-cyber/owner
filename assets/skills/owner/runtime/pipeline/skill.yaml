@@ -1,0 +1,122 @@
+apiVersion: owner/v1alpha1
+kind: Skill
+metadata:
+  name: owner-pipeline
+  version: "1"
+  description: Internal compatibility orchestration for pipeline Owner full, hotfix, and tweak workflows
+goal:
+  statement: Advance or restore a pipeline Owner Run without changing the user command surface
+  inputs:
+    - name: pipeline-state
+      description: Validated PipelineState consistent with the Run projection
+      required: true
+    - name: evidence
+      description: Structured evidence produced by the Pipeline Evidence collector
+      required: true
+  outputs:
+    - name: run-state
+      description: Atomically synchronized Pipeline and Run state
+      required: true
+  success:
+    - Legacy fields and Run fields remain consistent
+    - Every step invokes only a declared public Owner Skill
+    - The completed state passes its completion eval
+orchestration:
+  mode: deterministic
+  entry: full.open
+  steps:
+    - id: full.open
+      action: { type: invoke_skill, ref: owner-open }
+      next: full.design.handoff
+    - id: full.design.handoff
+      action: { type: invoke_skill, ref: owner-design }
+      next: full.design.document
+    - id: full.design.document
+      action: { type: invoke_skill, ref: owner-design }
+      next: full.build.plan
+    - id: full.build.plan
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.build.plan-ready
+    - id: full.build.plan-ready
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.build.configure
+    - id: full.build.configure
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.build.execute
+    - id: full.build.execute
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.build.complete
+    - id: full.build.complete
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.verify.run
+    - id: full.build.fix
+      action: { type: invoke_skill, ref: owner-build }
+      next: full.build.execute
+    - id: full.verify.run
+      action: { type: invoke_skill, ref: owner-verify }
+      next: full.verify.branch
+    - id: full.verify.branch
+      action: { type: invoke_skill, ref: owner-verify }
+      next: full.archive.confirm
+    - id: full.archive.confirm
+      action: { type: invoke_skill, ref: owner-archive }
+      next: full.archive.execute
+    - id: full.archive.execute
+      action: { type: invoke_skill, ref: owner-archive }
+      next: completed
+    - id: hotfix.open
+      action: { type: invoke_skill, ref: owner-hotfix }
+      next: hotfix.build.execute
+    - id: hotfix.build.execute
+      action: { type: invoke_skill, ref: owner-build }
+      next: hotfix.build.complete
+    - id: hotfix.build.complete
+      action: { type: invoke_skill, ref: owner-build }
+      next: hotfix.verify.run
+    - id: hotfix.verify.run
+      action: { type: invoke_skill, ref: owner-verify }
+      next: hotfix.verify.branch
+    - id: hotfix.verify.branch
+      action: { type: invoke_skill, ref: owner-verify }
+      next: hotfix.archive.confirm
+    - id: hotfix.archive.confirm
+      action: { type: invoke_skill, ref: owner-archive }
+      next: hotfix.archive.execute
+    - id: hotfix.archive.execute
+      action: { type: invoke_skill, ref: owner-archive }
+      next: completed
+    - id: tweak.open
+      action: { type: invoke_skill, ref: owner-tweak }
+      next: tweak.build.execute
+    - id: tweak.build.execute
+      action: { type: invoke_skill, ref: owner-build }
+      next: tweak.build.complete
+    - id: tweak.build.complete
+      action: { type: invoke_skill, ref: owner-build }
+      next: tweak.verify.run
+    - id: tweak.verify.run
+      action: { type: invoke_skill, ref: owner-verify }
+      next: tweak.verify.branch
+    - id: tweak.verify.branch
+      action: { type: invoke_skill, ref: owner-verify }
+      next: tweak.archive.confirm
+    - id: tweak.archive.confirm
+      action: { type: invoke_skill, ref: owner-archive }
+      next: tweak.archive.execute
+    - id: tweak.archive.execute
+      action: { type: invoke_skill, ref: owner-archive }
+      next: completed
+    - id: completed
+      action: { type: checkpoint }
+      completionEvals:
+        - pipeline-completed
+skills:
+  - id: owner-open
+  - id: owner-design
+  - id: owner-build
+  - id: owner-verify
+  - id: owner-archive
+  - id: owner-hotfix
+  - id: owner-tweak
+agents: []
+tools: []

@@ -1,0 +1,9 @@
+{
+  "owner-archive.sh": "13929d4ce1fc8ccd054e7342f979a7879e15fb46c0d8b6853b4f934860f7fb70",
+  "owner-env.sh": "faa912f2549faa6b1a2bfbddb26822240c72dbb89bc46a0d7d3d86ba4a61991f",
+  "owner-guard.sh": "9df2a69781cffb3c38a0beab2b698b4bdceadac4aaca8b13e4a348cb1331de1d",
+  "owner-handoff.sh": "52453c698c7d795ccd6ced303a09534636fa745ebae40a9bc44e815fba65cb06",
+  "owner-hook-guard.sh": "0edfe1ac6bee8a97dd67130310fd2c54a3cc55731bfa4e268f8f959cb7e90c46",
+  "owner-state.sh": "c0b2990bf7ae6bef2a70069cc84df6e11df81b06ccbd7622b50667b9ae76b561",
+  "owner-yaml-validate.sh": "8c8c61220e5b2513115a8694390cc1eea33a54c6f1d2c1921221668e15344860"
+}

@@ -8,6 +8,10 @@ All notable changes to `owner` are documented here.
 
 - **Workflow naming**: Standardized the public workflow names across the CLI, Skills, project configuration, Hook routing, Runtime assets, and documentation. Loop remains the compact Shape → Build ↔ Verify → Archive workflow; Pipeline remains the staged Open → Design → Build → Verify → Archive workflow.
 
+### Security
+
+- **Transitive dependency**: Updated `nanoid` to `3.3.18` in both npm and pnpm lockfiles to address the published high-severity advisory without forcing unrelated major upgrades.
+
 ## What's Changed [0.1.0] - 2026-08-15
 
 ### Added
