@@ -1,0 +1,18 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+
+# Build output
+target/
+build/
+.gradle/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and operating system files
+*.log
+.DS_Store
