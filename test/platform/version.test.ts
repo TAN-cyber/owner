@@ -101,7 +101,7 @@ describe('checkForUpdate', () => {
     expect(result.latestVersion).toBe('99.99.99');
     expect(result.currentVersion).toBe(getCurrentVersion());
     expect(https.get).toHaveBeenCalledWith(
-      'https://registry.npmjs.org/owner/latest',
+      'https://registry.npmjs.org/@redv%2fowner/latest',
       { timeout: 5000 },
       expect.any(Function),
     );
@@ -151,7 +151,7 @@ describe('printVersionInfo', () => {
 
     expect(logs[0]).toMatch(/^  Owner v\d+\.\d+\.\d+(?:-.+)?$/);
     expect(logs[1]).toContain('99.99.99');
-    expect(logs[1]).toContain('npm update -g owner');
+    expect(logs[1]).toContain('npm install @redv/owner@latest');
   });
 
   it('prints latest version confirmation when on latest', async () => {

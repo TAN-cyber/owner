@@ -24,23 +24,21 @@ Owner is distributed under the MIT License. See [LICENSE](./LICENSE).
 - Claude Code or Codex
 - Network access for Pipeline dependencies (OpenSpec and Superpowers)
 
-## Install from GitHub
-
-After publishing the repository, replace `<YOUR_GITHUB_USER>`:
+## Install from npm
 
 ```bash
-npm install -g git+https://github.com/<YOUR_GITHUB_USER>/owner.git
-owner --version
+npm install @redv/owner
+npx owner --version
 ```
 
-Installing the CLI does not modify a host configuration. Owner writes Skills, Rules, and Hooks only after the user explicitly runs `owner init`.
+Installing the CLI does not modify a host configuration. Owner writes Skills, Rules, and Hooks only after the user explicitly runs `npx owner init`.
 
 ## Initialize
 
 Codex with both workflows:
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --scope project \
   --platform codex \
   --workflow both
@@ -49,7 +47,7 @@ owner init /path/to/project \
 Claude Code with Loop:
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --scope project \
   --platform claude \
   --workflow loop
@@ -58,8 +56,8 @@ owner init /path/to/project \
 Global installation is explicit:
 
 ```bash
-owner init --scope global --platform codex --workflow both
-owner init --scope global --platform claude --workflow both
+npx owner init --scope global --platform codex --workflow both
+npx owner init --scope global --platform claude --workflow both
 ```
 
 `--platform` accepts only `claude` or `codex`.
@@ -90,7 +88,7 @@ $owner implement order cancellation with idempotent refunds
 The unified entry runs:
 
 ```bash
-owner workflow resolve . --activate --json
+npx owner workflow resolve . --activate --json
 ```
 
 It loads exactly one of `owner-loop` or `owner-pipeline` from `.owner/config.yaml`. It never switches workflows based on task size or model judgment.
@@ -98,20 +96,20 @@ It loads exactly one of `owner-loop` or `owner-pipeline` from `.owner/config.yam
 ## Core commands
 
 ```bash
-owner status [project] --json
-owner resume-probe [project] --utterance "continue yesterday's task" --json
-owner doctor [project] --json
+npx owner status [project] --json
+npx owner resume-probe [project] --utterance "continue yesterday's task" --json
+npx owner doctor [project] --json
 
-owner loop new <change> --json
-owner loop status [change] --details --json
-owner loop next <change> [required inputs] --json
-owner loop archive <change> --preview --json
+npx owner loop new <change> --json
+npx owner loop status [change] --details --json
+npx owner loop next <change> [required inputs] --json
+npx owner loop archive <change> --preview --json
 
-owner state init <change> full --isolation current
-owner state next <change>
-owner guard <change> <phase> --apply
-owner handoff <change> design --write
-owner archive <change> --dry-run
+npx owner state init <change> full --isolation current
+npx owner state next <change>
+npx owner guard <change> <phase> --apply
+npx owner handoff <change> design --write
+npx owner archive <change> --dry-run
 ```
 
 Loop portable artifacts live under `docs/owner/`; local locks, logs, receipts, and transactions live under `.owner/runtime/loop/`. Pipeline state lives in `docs/openspec/changes/<change>/.owner.yaml` by default.
@@ -130,10 +128,11 @@ pnpm test:package-e2e
 ## Publish
 
 1. Push this repository to GitHub.
-2. Replace `<YOUR_GITHUB_USER>` in both READMEs.
-3. Test the GitHub install command in a clean environment.
-4. Test both hosts and all three workflow selections: `loop`, `pipeline`, and `both`.
-5. Keep LICENSE and NOTICE intact.
+2. Run `npm login` with an npm account that owns the `redv` scope.
+3. Publish the public package with `npm publish --access public`.
+4. Test `npm install @redv/owner` in a clean project.
+5. Test both hosts and all three workflow selections: `loop`, `pipeline`, and `both`.
+6. Keep LICENSE and NOTICE intact.
 
 ## Boundaries
 

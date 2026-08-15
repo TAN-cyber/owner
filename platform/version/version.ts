@@ -21,8 +21,8 @@ function readCurrentVersion(): string {
 // so a single memoized read is sufficient.
 let cachedVersion: string | null = null;
 
-const PACKAGE_NAME = 'owner';
-const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`;
+const PACKAGE_NAME = '@redv/owner';
+const REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME.replace('/', '%2f')}/latest`;
 
 export interface VersionCheckResult {
   currentVersion: string;
@@ -149,7 +149,7 @@ export async function printVersionInfo(
 
   if (result.hasUpdate) {
     log(
-      `  New version v${result.latestVersion} available. Run 'npm update -g ${PACKAGE_NAME}' to upgrade.`,
+      `  New version v${result.latestVersion} available. Run 'npm install ${PACKAGE_NAME}@latest' to upgrade.`,
     );
   } else {
     log(`  You are on the latest version.`);

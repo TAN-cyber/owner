@@ -35,7 +35,7 @@ async function main() {
   try {
     if (shouldSkip()) return;
     if (!(await distExists())) return;
-    console.log(`\nTip: Run 'owner init' to set up Owner workflow in your project`);
+    console.log(`\nTip: Run 'npx owner init' to set up Owner workflow in your project`);
   } catch {
     // Never break npm install
   }

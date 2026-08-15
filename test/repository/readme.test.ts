@@ -36,16 +36,19 @@ describe('Owner README contract', () => {
   it('makes host mutation conditional on explicit init', async () => {
     const [english, chinese] = await readBoth();
 
-    expect(english).toContain('only after the user explicitly runs `owner init`');
-    expect(chinese).toContain('只有用户显式执行 `owner init`');
+    expect(english).toContain('only after the user explicitly runs `npx owner init`');
+    expect(chinese).toContain('只有用户显式执行 `npx owner init`');
     expect(chinese).toContain('不会把可分发仓库本身安装到仓库作者当前的 Codex 环境');
   });
 
-  it('documents GitHub distribution without claiming an unpublished repository URL', async () => {
+  it('documents public npm distribution with the scoped package name', async () => {
     const [english, chinese] = await readBoth();
 
     for (const content of [english, chinese]) {
-      expect(content).toContain('git+https://github.com/<YOUR_GITHUB_USER>/owner.git');
+      expect(content).toContain('npm install @redv/owner');
+      expect(content).toContain('npx owner init');
+      expect(content).not.toContain('npm install -g @redv/owner');
+      expect(content).not.toContain('git+https://github.com/<YOUR_GITHUB_USER>/owner.git');
     }
   });
 

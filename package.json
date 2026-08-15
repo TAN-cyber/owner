@@ -1,5 +1,5 @@
 {
-  "name": "owner",
+  "name": "@redv/owner",
   "version": "0.1.1",
   "description": "Resumable Loop and Pipeline vibe coding for Claude Code and Codex",
   "keywords": [
@@ -19,7 +19,8 @@
   "author": "Owner contributors",
   "type": "module",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "bin": {
     "owner": "bin/owner.js"

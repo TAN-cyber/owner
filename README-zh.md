@@ -46,13 +46,11 @@ Owner 用磁盘状态、阶段守卫、候选版本、Runtime check receipt、�
 - Claude Code 或 Codex
 - Pipeline 模式需要网络安装 OpenSpec 与 Superpowers
 
-## 从 GitHub 安装
-
-仓库发布到 GitHub 后，把下面的 `<YOUR_GITHUB_USER>` 替换为真实账号：
+## 从 npm 安装
 
 ```bash
-npm install -g git+https://github.com/<YOUR_GITHUB_USER>/owner.git
-owner --version
+npm install @redv/owner
+npx owner --version
 ```
 
 也可以克隆后本地构建：
@@ -66,7 +64,7 @@ pnpm build
 npm link
 ```
 
-下载或安装 CLI **不会自动修改 Claude Code 或 Codex 配置**。只有用户显式执行 `owner init` 后，Owner 才会把 Skills、Rules 和 Hooks 写入用户选择的宿主和范围。
+下载或安装 CLI **不会自动修改 Claude Code 或 Codex 配置**。只有用户显式执行 `npx owner init` 后，Owner 才会把 Skills、Rules 和 Hooks 写入用户选择的宿主和范围。
 
 ## 初始化
 
@@ -75,7 +73,7 @@ npm link
 Codex + Loop：
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --scope project \
   --platform codex \
   --workflow loop
@@ -84,7 +82,7 @@ owner init /path/to/project \
 Claude Code + Pipeline：
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --scope project \
   --platform claude \
   --workflow pipeline
@@ -93,7 +91,7 @@ owner init /path/to/project \
 同时安装 Loop 和 Pipeline：
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --scope project \
   --platform codex \
   --workflow both
@@ -102,8 +100,8 @@ owner init /path/to/project \
 ### 安装到用户范围
 
 ```bash
-owner init --scope global --platform codex --workflow both
-owner init --scope global --platform claude --workflow both
+npx owner init --scope global --platform codex --workflow both
+npx owner init --scope global --platform claude --workflow both
 ```
 
 项目配置首次激活后写入 `<project>/.owner/config.yaml`。后续全局默认变化不会静默修改已经激活的项目。
@@ -111,7 +109,7 @@ owner init --scope global --platform claude --workflow both
 ### 非交互安装
 
 ```bash
-owner init /path/to/project \
+npx owner init /path/to/project \
   --yes \
   --scope project \
   --platform codex \
@@ -233,22 +231,22 @@ docs/superpowers/
 Pipeline 常用 Runtime 命令：
 
 ```bash
-owner state init <change> full --isolation current
-owner state get <change> phase
-owner state next <change>
-owner guard <change> <phase> --apply
-owner handoff <change> design --write
-owner archive <change> --dry-run
-owner pipeline openspec -- status --change <change> --json
+npx owner state init <change> full --isolation current
+npx owner state get <change> phase
+npx owner state next <change>
+npx owner guard <change> <phase> --apply
+npx owner handoff <change> design --write
+npx owner archive <change> --dry-run
+npx owner pipeline openspec -- status --change <change> --json
 ```
 
 ## 恢复与诊断
 
 ```bash
-owner status /path/to/project --json
-owner resume-probe /path/to/project --utterance "继续昨天的任务" --json
-owner doctor /path/to/project --json
-owner doctor /path/to/project --repair --yes
+npx owner status /path/to/project --json
+npx owner resume-probe /path/to/project --utterance "继续昨天的任务" --json
+npx owner doctor /path/to/project --json
+npx owner doctor /path/to/project --repair --yes
 ```
 
 恢复只承诺已经保存并同步的状态与代码。未提交、未 push、未同步的旧设备代码不能通过状态文件凭空恢复。
@@ -256,8 +254,8 @@ owner doctor /path/to/project --repair --yes
 ## 更新与卸载
 
 ```bash
-owner update /path/to/project --platform codex --scope project
-owner uninstall /path/to/project --scope project --force
+npx owner update /path/to/project --platform codex --scope project
+npx owner uninstall /path/to/project --scope project --force
 ```
 
 更新和卸载只处理 Owner 管理的文件，保留用户已有 Skills、Rules 和非 Owner Hooks。
@@ -282,14 +280,15 @@ pnpm check:generated
 npm pack --dry-run
 ```
 
-## 发布到 GitHub
+## 发布到 npm
 
-1. 将仓库推送到你的 `owner` GitHub 仓库。
-2. 把 README 中的 `<YOUR_GITHUB_USER>` 替换为真实账号。
-3. 在干净机器或容器运行 GitHub 安装命令。
-4. 分别验证 `--platform claude` 与 `--platform codex`。
-5. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
-6. 保留 LICENSE 与 NOTICE，不要删除上游版权声明。
+1. 将仓库推送到 GitHub。
+2. 使用拥有 `redv` 作用域的 npm 账号执行 `npm login`。
+3. 使用 `npm publish --access public` 发布公开包。
+4. 在干净项目运行 `npm install @redv/owner`。
+5. 分别验证 `--platform claude` 与 `--platform codex`。
+6. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
+7. 保留 LICENSE 与 NOTICE，不要删除授权文件。
 
 ## 安全边界
 

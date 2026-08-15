@@ -73,8 +73,13 @@ import { t, type TranslationKey } from './i18n.js';
 import { assertProjectScopeOptions, resolveProjectScopeMode } from './project-scope-selection.js';
 import type { CommandExecutionResult } from './command-result.js';
 
-const PACKAGE_NAME = 'owner';
+const PACKAGE_NAME = '@redv/owner';
+const PACKAGE_PATH = PACKAGE_NAME.split('/');
 const OFFICIAL_REGISTRY = 'https://registry.npmjs.org';
+
+function packagePath(...roots: string[]): string {
+  return path.join(...roots, ...PACKAGE_PATH);
+}
 
 interface UpdateOptions {
   json?: boolean;
@@ -468,7 +473,7 @@ async function detectOwnerPackageScope(
   projectPath: string,
   packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
 ): Promise<InstallScope> {
-  const localPackageRoot = path.join(projectPath, 'node_modules', 'owner');
+  const localPackageRoot = packagePath(projectPath, 'node_modules');
   if (isSameOrInside(packageRoot, localPackageRoot)) return 'project';
 
   const packageJsonPath = path.join(projectPath, 'package.json');
@@ -809,7 +814,7 @@ async function readInstalledOwnerPackage(
     ]);
     const npmRoot = parseNpmAbsolutePath(rootResult, 'npm root');
     const npmPrefix = parseNpmAbsolutePath(prefixResult, 'npm prefix');
-    const installedPackage = await readOwnerPackage(path.join(npmRoot, 'owner'));
+    const installedPackage = await readOwnerPackage(packagePath(npmRoot));
     return {
       ...installedPackage,
       projectMetadataRoots: [...new Set([path.resolve(projectPath), npmPrefix])],
@@ -818,7 +823,7 @@ async function readInstalledOwnerPackage(
 
   const rootResult = await runNpmCli(npmCliPath, ['root', '--global'], projectPath);
   const npmRoot = parseNpmAbsolutePath(rootResult, 'npm root --global');
-  return readOwnerPackage(path.join(npmRoot, 'owner'));
+  return readOwnerPackage(packagePath(npmRoot));
 }
 
 function parseNpmAbsolutePath(result: CapturedProcessResult, command: string): string {
@@ -921,7 +926,7 @@ async function validateRegistryOwnerPackage(
         reason: `candidate package install failed: ${install.reason ?? 'unknown error'}`,
       };
     } else {
-      const candidate = await readOwnerPackage(path.join(validationDir, 'node_modules', 'owner'));
+      const candidate = await readOwnerPackage(packagePath(validationDir, 'node_modules'));
       if (candidate.version !== version) {
         result = {
           success: false,

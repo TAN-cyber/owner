@@ -79,6 +79,12 @@ const mockedInstallSuperpowers = vi.mocked(installSuperpowersForPlatforms);
 const claudePlatform = PLATFORMS.find((platform) => platform.id === 'claude')!;
 
 const manifestPath = path.resolve('assets', 'manifest.json');
+const PACKAGE_NAME = '@redv/owner';
+const PACKAGE_PATH = PACKAGE_NAME.split('/');
+
+function packagePath(...roots: string[]): string {
+  return path.join(...roots, ...PACKAGE_PATH);
+}
 
 const RETIRED_LOOP_BUNDLES = [
   'owner-loop/scripts/owner-loop-checkpoint.mjs',
@@ -97,7 +103,7 @@ async function writeFakeOwnerPackage(packageRoot: string, version: string): Prom
   await fs.mkdir(path.join(packageRoot, 'bin'), { recursive: true });
   await fs.writeFile(
     path.join(packageRoot, 'package.json'),
-    JSON.stringify({ name: 'owner', version, bin: { owner: 'bin/owner.js' } }),
+    JSON.stringify({ name: PACKAGE_NAME, version, bin: { owner: 'bin/owner.js' } }),
   );
   await fs.writeFile(path.join(packageRoot, 'bin', 'owner.js'), '#!/usr/bin/env node\n');
 }
@@ -210,7 +216,7 @@ describe('update command helpers', () => {
     );
     await fs.mkdir(tmpDir, { recursive: true });
     fakeGlobalNpmRoot = path.join(tmpDir, 'global node_modules & safe');
-    await writeFakeOwnerPackage(path.join(fakeGlobalNpmRoot, 'owner'), '0.4.0-beta.7');
+    await writeFakeOwnerPackage(packagePath(fakeGlobalNpmRoot), '0.4.0-beta.7');
     candidateVersionOverride = null;
     candidateCommandFailure = null;
     candidateCommandHang = false;
@@ -282,21 +288,21 @@ describe('update command helpers', () => {
           } else if (npmArgs[0] === 'install' && npmArgs.includes('--prefix')) {
             if (candidateInstallHang) return;
             const prefix = npmArgs[npmArgs.indexOf('--prefix') + 1];
-            const packageSpec = npmArgs.find((arg) => arg.startsWith('owner@'))!;
-            const requestedVersion = packageSpec.slice('owner@'.length);
+            const packageSpec = npmArgs.find((arg) => arg.startsWith(`${PACKAGE_NAME}@`))!;
+            const requestedVersion = packageSpec.slice(`${PACKAGE_NAME}@`.length);
             await writeFakeOwnerPackage(
-              path.join(prefix, 'node_modules', 'owner'),
+              packagePath(prefix, 'node_modules'),
               candidateVersionOverride ?? requestedVersion,
             );
             if (candidateBinEscapesPackage) {
-              const packageRoot = path.join(prefix, 'node_modules', 'owner');
+              const packageRoot = packagePath(prefix, 'node_modules');
               const outsideDir = path.join(tmpDir, 'candidate-bin-outside');
               await fs.mkdir(outsideDir, { recursive: true });
               await fs.writeFile(path.join(outsideDir, 'owner.js'), '#!/usr/bin/env node\n');
               await fs.writeFile(
                 path.join(packageRoot, 'package.json'),
                 JSON.stringify({
-                  name: 'owner',
+                  name: PACKAGE_NAME,
                   version: candidateVersionOverride ?? requestedVersion,
                   bin: { owner: 'linked/owner.js' },
                 }),
@@ -330,11 +336,11 @@ describe('update command helpers', () => {
                   : 'Usage: owner loop <command> [options]\n';
             child.stdout.emit('data', Buffer.from(output));
           } else if (npmArgs[0] === 'install') {
-            const packageSpec = npmArgs.find((arg) => arg.startsWith('owner@'))!;
-            const requestedVersion = packageSpec.slice('owner@'.length);
+            const packageSpec = npmArgs.find((arg) => arg.startsWith(`${PACKAGE_NAME}@`))!;
+            const requestedVersion = packageSpec.slice(`${PACKAGE_NAME}@`.length);
             const packageRoot = npmArgs.includes('-g')
-              ? path.join(fakeGlobalNpmRoot, 'owner')
-              : path.join(projectNpmRootOverride ?? path.join(cwd, 'node_modules'), 'owner');
+              ? packagePath(fakeGlobalNpmRoot)
+              : packagePath(projectNpmRootOverride ?? path.join(cwd, 'node_modules'));
             if (targetInstallFailureVersion === requestedVersion) {
               if (mutateProjectMetadataOnFailure && !npmArgs.includes('-g')) {
                 await fs.writeFile(path.join(cwd, 'package.json'), '{"mutated":true}\n');
@@ -880,7 +886,7 @@ describe('update command helpers', () => {
 
   it('detects project package scope from local node_modules install path', async () => {
     const projectDir = path.join(tmpDir, 'project');
-    const packageRoot = path.join(projectDir, 'node_modules', 'owner');
+    const packageRoot = packagePath(projectDir, 'node_modules');
 
     await expect(detectOwnerPackageScope(projectDir, packageRoot)).resolves.toBe('project');
   });
@@ -890,7 +896,7 @@ describe('update command helpers', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await fs.writeFile(
       path.join(projectDir, 'package.json'),
-      JSON.stringify({ devDependencies: { owner: '^0.2.4' } }),
+      JSON.stringify({ devDependencies: { [PACKAGE_NAME]: '^0.2.4' } }),
       'utf-8',
     );
 
@@ -908,13 +914,13 @@ describe('update command helpers', () => {
     expect(buildNpmUpdateArgs('global')).toEqual([
       'install',
       '-g',
-      'owner@latest',
+      `${PACKAGE_NAME}@latest`,
       '--registry',
       'https://registry.npmjs.org',
     ]);
     expect(buildNpmUpdateArgs('project')).toEqual([
       'install',
-      'owner@latest',
+      `${PACKAGE_NAME}@latest`,
       '--registry',
       'https://registry.npmjs.org',
     ]);
@@ -946,14 +952,14 @@ describe('update command helpers', () => {
     });
 
     const project = path.join(tmpDir, 'package-scope');
-    await fs.mkdir(path.join(project, 'node_modules', 'owner'), { recursive: true });
+    await fs.mkdir(packagePath(project, 'node_modules'), { recursive: true });
     await expect(
-      detectOwnerPackageScope(project, path.join(project, 'node_modules', 'owner')),
+      detectOwnerPackageScope(project, packagePath(project, 'node_modules')),
     ).resolves.toBe('project');
     await fs.rm(path.join(project, 'node_modules'), { recursive: true, force: true });
     await fs.writeFile(
       path.join(project, 'package.json'),
-      JSON.stringify({ optionalDependencies: { owner: '^0.4.0' } }),
+      JSON.stringify({ optionalDependencies: { [PACKAGE_NAME]: '^0.4.0' } }),
     );
     await expect(detectOwnerPackageScope(project, path.join(tmpDir, 'other'))).resolves.toBe(
       'project',
@@ -1038,7 +1044,7 @@ describe('update command helpers', () => {
   it('compares against the actual installed global package instead of the running CLI version', async () => {
     await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
-    await writeFakeOwnerPackage(path.join(fakeGlobalNpmRoot, 'owner'), '0.4.0-beta.9');
+    await writeFakeOwnerPackage(packagePath(fakeGlobalNpmRoot), '0.4.0-beta.9');
     mockedGetLatestVersion.mockResolvedValue('0.4.0-beta.8');
 
     const fakeHome = path.join(tmpDir, 'fake-home-actual-global-version');
@@ -1074,7 +1080,7 @@ describe('update command helpers', () => {
       expect(result.npm).toMatchObject({
         scope: 'global',
         status: 'updated',
-        command: 'npm install -g owner@0.4.0-beta.8 --registry https://registry.npmjs.org',
+        command: 'npm install -g @redv/owner@0.4.0-beta.8 --registry https://registry.npmjs.org',
       });
     } finally {
       log.mockRestore();
@@ -1086,7 +1092,7 @@ describe('update command helpers', () => {
     expect(mockedSpawn.mock.calls.at(-1)?.[1]?.slice(1)).toEqual([
       'install',
       '-g',
-      'owner@0.4.0-beta.8',
+      '@redv/owner@0.4.0-beta.8',
       '--registry',
       'https://registry.npmjs.org',
     ]);
@@ -1330,20 +1336,20 @@ describe('update command helpers', () => {
       return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
     });
     expect(installCalls.map((call) => call[1]?.[3])).toEqual([
-      'owner@0.4.0-beta.8',
-      'owner@0.4.0-beta.7',
+      '@redv/owner@0.4.0-beta.8',
+      '@redv/owner@0.4.0-beta.7',
     ]);
   });
 
   it('restores project package metadata byte-for-byte after a failed project install', async () => {
     const projectDir = path.join(tmpDir, 'project with spaces & metadata');
-    const packageJson = '{\n  "devDependencies": { "owner": "^0.4.0-beta.7" }\n}\n';
+    const packageJson = '{\n  "devDependencies": { "@redv/owner": "^0.4.0-beta.7" }\n}\n';
     const packageLock = '{"lockfileVersion":3,"name":"before"}\n';
     await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
     await fs.writeFile(path.join(projectDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
     await fs.writeFile(path.join(projectDir, 'package.json'), packageJson);
     await fs.writeFile(path.join(projectDir, 'package-lock.json'), packageLock);
-    await writeFakeOwnerPackage(path.join(projectDir, 'node_modules', 'owner'), '0.4.0-beta.7');
+    await writeFakeOwnerPackage(packagePath(projectDir, 'node_modules'), '0.4.0-beta.7');
     targetInstallFailureVersion = '0.4.0-beta.8';
     mutateProjectMetadataOnFailure = true;
 
@@ -1379,7 +1385,7 @@ describe('update command helpers', () => {
   it('reads a hoisted project package and restores workspace-root metadata after failure', async () => {
     const workspaceRoot = path.join(tmpDir, 'workspace with spaces');
     const projectDir = path.join(workspaceRoot, 'packages', 'app');
-    const projectPackageJson = '{\n  "devDependencies": { "owner": "^0.4.0-beta.7" }\n}\n';
+    const projectPackageJson = '{\n  "devDependencies": { "@redv/owner": "^0.4.0-beta.7" }\n}\n';
     const rootPackageJson = '{\n  "private": true, "workspaces": ["packages/*"]\n}\n';
     const rootPackageLock = '{"lockfileVersion":3,"name":"workspace-before"}\n';
     const config = defaultProjectConfig('.');
@@ -1394,7 +1400,7 @@ describe('update command helpers', () => {
     await fs.writeFile(path.join(workspaceRoot, 'package-lock.json'), rootPackageLock);
     projectNpmRootOverride = path.join(workspaceRoot, 'node_modules');
     projectNpmPrefixOverride = workspaceRoot;
-    await writeFakeOwnerPackage(path.join(projectNpmRootOverride, 'owner'), '0.4.0-beta.7');
+    await writeFakeOwnerPackage(packagePath(projectNpmRootOverride), '0.4.0-beta.7');
     targetInstallFailureVersion = '0.4.0-beta.8';
     mutateProjectMetadataOnFailure = true;
 
@@ -1464,10 +1470,10 @@ describe('update command helpers', () => {
 
   it('formats the npm update command for friendly console output', () => {
     expect(formatNpmUpdateCommand('global')).toBe(
-      'npm install -g owner@latest --registry https://registry.npmjs.org',
+      'npm install -g @redv/owner@latest --registry https://registry.npmjs.org',
     );
     expect(formatNpmUpdateCommand('project')).toBe(
-      'npm install owner@latest --registry https://registry.npmjs.org',
+      'npm install @redv/owner@latest --registry https://registry.npmjs.org',
     );
   });
 
@@ -1639,7 +1645,7 @@ describe('update command helpers', () => {
     expect(installCalls[0][1]?.slice(1)).toEqual([
       'install',
       '-g',
-      'owner@0.4.0-beta.8',
+      '@redv/owner@0.4.0-beta.8',
       '--registry',
       'https://registry.npmjs.org',
     ]);
