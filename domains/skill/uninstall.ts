@@ -1,0 +1,1217 @@
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { execFileSync } from 'child_process';
+import type { BigIntStats } from 'fs';
+import { homedir } from 'os';
+import {
+  hasComparableFileObject,
+  sameFileObject,
+  type FileObjectIdentity,
+} from '../../platform/fs/file-identity.js';
+import { classicLayoutPaths } from '../owner-classic/classic-layout.js';
+import { nativeProjectPaths } from '../owner-native/native-paths.js';
+import {
+  readWorkflowProjectConfigIdentity,
+  readWorkflowProjectConfigSnapshot,
+  workflowProjectConfigIdentityEquals,
+  type WorkflowProjectConfigIdentity,
+} from '../workflow-contract/project-config-reader.js';
+import { lstat, realpath, rename, rmdir, unlink } from 'fs/promises';
+
+import {
+  fileExists,
+  readDir,
+  removeFile,
+  removeDir,
+  isDirEmpty,
+} from '../../platform/fs/file-system.js';
+import {
+  getPlatformConfigDir,
+  getPlatformSkillsDir,
+  getPlatformSkillsDirs,
+  type Platform,
+} from '../../platform/install/platforms.js';
+import type { InstallScope } from '../../platform/install/types.js';
+import {
+  readManifest,
+  getManagedSkillPaths,
+  getManagedSkillPathsForSelection,
+  computeRuleDestPath,
+  removeManagedHooksFromJsonFile,
+  getCentralSkillsDir,
+  removeRetiredOwnerOwnedSkillPaths,
+  RETIRED_OWNER_OWNED_SKILL_PATHS,
+} from './platform-install.js';
+import type { OwnerWorkflow, InitWorkflowSelection } from '../owner-entry/types.js';
+import { removeOwnerProjectInstructions } from './project-instructions.js';
+import { readJsonObjectFile } from './json-object.js';
+import { SKILLS_AGENT_MAP } from '../integrations/superpowers.js';
+
+interface RemovalResult {
+  removed: number;
+  failed: number;
+  preserved?: string[];
+  reason?: string;
+}
+
+const LEGACY_RULE_PATHS = [
+  'owner/rules/owner-phase-guard.md',
+  'owner-native/rules/owner-native-phase-guard.md',
+] as const;
+const LEGACY_HOOK_SCRIPT_PATHS = [
+  'owner/scripts/owner-hook-guard.mjs',
+  'owner-native/scripts/owner-native-hook-guard.mjs',
+] as const;
+
+type ManagedWorkingTree = {
+  readonly [entry: string]: 'file' | ManagedWorkingTree;
+};
+
+function managedWorkingTreeEntry(
+  tree: ManagedWorkingTree,
+  entry: string,
+): 'file' | ManagedWorkingTree | undefined {
+  return Object.prototype.hasOwnProperty.call(tree, entry) ? tree[entry] : undefined;
+}
+
+function setManagedWorkingTreeEntry(
+  tree: ManagedWorkingTree,
+  entry: string,
+  value: 'file' | ManagedWorkingTree,
+): void {
+  Object.defineProperty(tree, entry, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
+const EMPTY_MANAGED_WORKING_TREE: ManagedWorkingTree = {};
+const OPENSPEC_WORKING_TREE: ManagedWorkingTree = {
+  changes: {
+    archive: EMPTY_MANAGED_WORKING_TREE,
+  },
+  specs: EMPTY_MANAGED_WORKING_TREE,
+};
+const SUPERPOWERS_WORKING_TREE: ManagedWorkingTree = {
+  specs: EMPTY_MANAGED_WORKING_TREE,
+  plans: EMPTY_MANAGED_WORKING_TREE,
+  reports: EMPTY_MANAGED_WORKING_TREE,
+};
+const OWNER_WORKING_TREE: ManagedWorkingTree = {
+  'config.yaml': 'file',
+};
+const NATIVE_WORKING_TREE: ManagedWorkingTree = {
+  specs: EMPTY_MANAGED_WORKING_TREE,
+  changes: EMPTY_MANAGED_WORKING_TREE,
+  archive: EMPTY_MANAGED_WORKING_TREE,
+  runtime: {
+    locks: EMPTY_MANAGED_WORKING_TREE,
+    transactions: EMPTY_MANAGED_WORKING_TREE,
+  },
+};
+
+interface WorkingObjectIdentity {
+  kind: 'file' | 'directory';
+  fileObject: FileObjectIdentity;
+  size: bigint;
+}
+
+interface InspectedWorkingNode {
+  identity: WorkingObjectIdentity;
+  children: Map<string, InspectedWorkingNode> | null;
+}
+
+interface ManagedWorkingTreePlan {
+  directory: string;
+  managedTree: ManagedWorkingTree;
+  root: InspectedWorkingNode;
+  ancestorIdentities: Map<string, WorkingObjectIdentity>;
+  countRemoval: boolean;
+}
+
+interface QuarantinedWorkingTree {
+  plan: ManagedWorkingTreePlan;
+  quarantine: string;
+}
+
+interface RemoveWorkingDirsOptions {
+  workflows?: readonly OwnerWorkflow[];
+  testHooks?: {
+    afterPlanInspection?: () => void | Promise<void>;
+  };
+}
+
+function birthtimeOf(stat: BigIntStats): bigint {
+  return stat.birthtimeNs;
+}
+
+function workingIdentity(stat: BigIntStats): WorkingObjectIdentity {
+  return {
+    kind: stat.isFile() ? 'file' : 'directory',
+    fileObject: { dev: stat.dev, ino: stat.ino, birthtime: birthtimeOf(stat) },
+    size: stat.size,
+  };
+}
+
+function sameWorkingIdentity(
+  expected: WorkingObjectIdentity,
+  actual: WorkingObjectIdentity,
+): boolean {
+  if (expected.kind !== actual.kind) return false;
+  if (
+    hasComparableFileObject(expected.fileObject, actual.fileObject) &&
+    !sameFileObject(expected.fileObject, actual.fileObject)
+  ) {
+    return false;
+  }
+  if (
+    !hasComparableFileObject(expected.fileObject, actual.fileObject) &&
+    !sameFileObject(expected.fileObject, actual.fileObject)
+  ) {
+    return false;
+  }
+  return expected.kind === 'directory' || expected.size === actual.size;
+}
+
+function isInsideDirectory(parent: string, target: string): boolean {
+  const relative = path.relative(parent, target);
+  return (
+    relative === '' ||
+    (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+  );
+}
+
+async function readWorkingObjectIdentity(
+  target: string,
+  expected: 'file' | 'directory',
+): Promise<WorkingObjectIdentity> {
+  const stat = await lstat(target, { bigint: true });
+  if (stat.isSymbolicLink() || (expected === 'file' ? !stat.isFile() : !stat.isDirectory())) {
+    throw new Error(`Refusing to remove non-${expected} working object: ${target}`);
+  }
+  return workingIdentity(stat);
+}
+
+async function captureAncestorIdentities(
+  projectRoot: string,
+  directory: string,
+): Promise<Map<string, WorkingObjectIdentity>> {
+  if (!isInsideDirectory(projectRoot, directory)) {
+    throw new Error(`Working directory is outside the project root: ${directory}`);
+  }
+  const identities = new Map<string, WorkingObjectIdentity>();
+  let cursor = projectRoot;
+  identities.set(path.resolve(cursor), await readWorkingObjectIdentity(cursor, 'directory'));
+  const relative = path.relative(projectRoot, directory);
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    identities.set(path.resolve(cursor), await readWorkingObjectIdentity(cursor, 'directory'));
+  }
+  return identities;
+}
+
+async function assertIdentityChain(
+  projectRoot: string,
+  target: string,
+  identities: ReadonlyMap<string, WorkingObjectIdentity>,
+): Promise<void> {
+  if (!isInsideDirectory(projectRoot, target)) {
+    throw new Error(`Working directory is outside the project root: ${target}`);
+  }
+  let cursor = projectRoot;
+  const paths = [cursor];
+  const relative = path.relative(projectRoot, target);
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    cursor = path.join(cursor, segment);
+    paths.push(cursor);
+  }
+  for (const current of paths) {
+    const expected = identities.get(path.resolve(current));
+    if (!expected) {
+      throw new Error(`Working-directory identity is not bound: ${current}`);
+    }
+    const actual = await readWorkingObjectIdentity(current, expected.kind);
+    if (!sameWorkingIdentity(expected, actual)) {
+      throw new Error(`Working-directory object changed after inspection: ${current}`);
+    }
+  }
+}
+
+async function inspectManagedNode(
+  projectRoot: string,
+  directory: string,
+  managedTree: ManagedWorkingTree,
+  identities: Map<string, WorkingObjectIdentity>,
+): Promise<InspectedWorkingNode> {
+  const identity = identities.get(path.resolve(directory));
+  if (!identity) throw new Error(`Working-directory identity is not bound: ${directory}`);
+  const entries = (await readDir(directory)).sort();
+  await assertIdentityChain(projectRoot, directory, identities);
+  const children = new Map<string, InspectedWorkingNode>();
+
+  for (const entry of entries) {
+    if (!Object.prototype.hasOwnProperty.call(managedTree, entry)) {
+      throw new Error(
+        `Refusing to remove unknown working-directory content: ${path.join(directory, entry)}`,
+      );
+    }
+    const expected = managedTree[entry];
+    const entryPath = path.join(directory, entry);
+    if (expected === 'file') {
+      const childIdentity = await readWorkingObjectIdentity(entryPath, 'file');
+      identities.set(path.resolve(entryPath), childIdentity);
+      children.set(entry, { identity: childIdentity, children: null });
+      continue;
+    }
+    const childIdentity = await readWorkingObjectIdentity(entryPath, 'directory');
+    identities.set(path.resolve(entryPath), childIdentity);
+    children.set(entry, await inspectManagedNode(projectRoot, entryPath, expected, identities));
+  }
+
+  const entriesAfter = (await readDir(directory)).sort();
+  await assertIdentityChain(projectRoot, directory, identities);
+  if (JSON.stringify(entriesAfter) !== JSON.stringify(entries)) {
+    throw new Error(`Working directory changed during inspection: ${directory}`);
+  }
+  return { identity, children };
+}
+
+async function inspectManagedWorkingTree(
+  projectRoot: string,
+  directory: string,
+  managedTree: ManagedWorkingTree,
+  countRemoval = false,
+): Promise<ManagedWorkingTreePlan | null> {
+  try {
+    const ancestorIdentities = await captureAncestorIdentities(projectRoot, directory);
+    return {
+      directory,
+      managedTree,
+      root: await inspectManagedNode(projectRoot, directory, managedTree, ancestorIdentities),
+      ancestorIdentities,
+      countRemoval,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function validateManagedNode(
+  projectRoot: string,
+  directory: string,
+  node: InspectedWorkingNode,
+  identities: ReadonlyMap<string, WorkingObjectIdentity>,
+): Promise<void> {
+  await assertIdentityChain(projectRoot, directory, identities);
+  const actualIdentity = await readWorkingObjectIdentity(directory, node.identity.kind);
+  if (!sameWorkingIdentity(node.identity, actualIdentity)) {
+    throw new Error(`Working-directory object changed after inspection: ${directory}`);
+  }
+  if (!node.children) return;
+
+  const entries = (await readDir(directory)).sort();
+  await assertIdentityChain(projectRoot, directory, identities);
+  const expectedEntries = [...node.children.keys()].sort();
+  if (JSON.stringify(entries) !== JSON.stringify(expectedEntries)) {
+    throw new Error(`Working directory changed after inspection: ${directory}`);
+  }
+  for (const entry of expectedEntries) {
+    await validateManagedNode(
+      projectRoot,
+      path.join(directory, entry),
+      node.children.get(entry)!,
+      identities,
+    );
+  }
+  const entriesAfter = (await readDir(directory)).sort();
+  await assertIdentityChain(projectRoot, directory, identities);
+  if (JSON.stringify(entriesAfter) !== JSON.stringify(expectedEntries)) {
+    throw new Error(`Working directory changed after inspection: ${directory}`);
+  }
+}
+
+async function validateManagedWorkingTree(
+  projectRoot: string,
+  plan: ManagedWorkingTreePlan,
+): Promise<void> {
+  await validateManagedNode(projectRoot, plan.directory, plan.root, plan.ancestorIdentities);
+}
+
+function mergeManagedWorkingTree(
+  target: ManagedWorkingTree,
+  segments: readonly string[],
+  managedTree: ManagedWorkingTree,
+): void {
+  if (segments.length === 0) {
+    for (const [entry, expected] of Object.entries(managedTree)) {
+      const current = managedWorkingTreeEntry(target, entry);
+      if (current === 'file' || expected === 'file') {
+        if (current !== undefined && current !== expected) {
+          throw new Error(`Conflicting managed working-tree entry: ${entry}`);
+        }
+        setManagedWorkingTreeEntry(target, entry, expected);
+      } else if (current === undefined) {
+        setManagedWorkingTreeEntry(target, entry, expected);
+      } else {
+        mergeManagedWorkingTree(current, [], expected);
+      }
+    }
+    return;
+  }
+  const [head, ...tail] = segments;
+  const current = managedWorkingTreeEntry(target, head);
+  if (current === 'file') throw new Error(`Conflicting managed working-tree entry: ${head}`);
+  const child = current ?? Object.create(null);
+  setManagedWorkingTreeEntry(target, head, child);
+  mergeManagedWorkingTree(child, tail, managedTree);
+}
+
+function cloneManagedWorkingTree(managedTree: ManagedWorkingTree): ManagedWorkingTree {
+  return Object.fromEntries(
+    Object.entries(managedTree).map(([entry, expected]) => [
+      entry,
+      expected === 'file' ? expected : cloneManagedWorkingTree(expected),
+    ]),
+  );
+}
+
+async function assertWorkingTreeAbsentOrRealDirectory(
+  projectRoot: string,
+  directory: string,
+): Promise<boolean> {
+  try {
+    await captureAncestorIdentities(projectRoot, directory);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function realWorkingFileExists(file: string): Promise<boolean> {
+  try {
+    await readWorkingObjectIdentity(file, 'file');
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function validateQuarantinedNode(
+  directory: string,
+  node: InspectedWorkingNode,
+  ancestors: readonly { path: string; identity: WorkingObjectIdentity }[],
+): Promise<void> {
+  await assertQuarantineAncestorIdentities(ancestors);
+  const actual = await readWorkingObjectIdentity(directory, node.identity.kind);
+  if (!sameWorkingIdentity(node.identity, actual)) {
+    throw new Error(`Quarantined working object changed: ${directory}`);
+  }
+  if (!node.children) return;
+  const entries = (await readDir(directory)).sort();
+  await assertQuarantineAncestorIdentities(ancestors);
+  const expectedEntries = [...node.children.keys()].sort();
+  const after = await readWorkingObjectIdentity(directory, 'directory');
+  if (
+    !sameWorkingIdentity(node.identity, after) ||
+    JSON.stringify(entries) !== JSON.stringify(expectedEntries)
+  ) {
+    throw new Error(`Quarantined working directory changed: ${directory}`);
+  }
+  for (const entry of expectedEntries) {
+    await validateQuarantinedNode(path.join(directory, entry), node.children.get(entry)!, [
+      ...ancestors,
+      { path: directory, identity: node.identity },
+    ]);
+  }
+  const entriesAfter = (await readDir(directory)).sort();
+  await assertQuarantineAncestorIdentities(ancestors);
+  const finalIdentity = await readWorkingObjectIdentity(directory, 'directory');
+  if (
+    !sameWorkingIdentity(node.identity, finalIdentity) ||
+    JSON.stringify(entriesAfter) !== JSON.stringify(expectedEntries)
+  ) {
+    throw new Error(`Quarantined working directory changed: ${directory}`);
+  }
+}
+
+async function assertQuarantineAncestorIdentities(
+  ancestors: readonly { path: string; identity: WorkingObjectIdentity }[],
+): Promise<void> {
+  for (const ancestor of ancestors) {
+    const actual = await readWorkingObjectIdentity(ancestor.path, 'directory');
+    if (!sameWorkingIdentity(ancestor.identity, actual)) {
+      throw new Error(`Quarantine ancestor changed: ${ancestor.path}`);
+    }
+  }
+}
+
+async function removeQuarantinedNode(
+  directory: string,
+  node: InspectedWorkingNode,
+  ancestors: readonly { path: string; identity: WorkingObjectIdentity }[],
+): Promise<void> {
+  await assertQuarantineAncestorIdentities(ancestors);
+  const actual = await readWorkingObjectIdentity(directory, node.identity.kind);
+  if (!sameWorkingIdentity(node.identity, actual)) {
+    throw new Error(`Quarantined working object changed: ${directory}`);
+  }
+  if (!node.children) {
+    await unlink(directory);
+    return;
+  }
+
+  for (const [entry, child] of node.children) {
+    await removeQuarantinedNode(path.join(directory, entry), child, [
+      ...ancestors,
+      { path: directory, identity: node.identity },
+    ]);
+  }
+  const entries = await readDir(directory);
+  await assertQuarantineAncestorIdentities(ancestors);
+  const after = await readWorkingObjectIdentity(directory, 'directory');
+  if (!sameWorkingIdentity(node.identity, after) || entries.length !== 0) {
+    throw new Error(`Quarantined working directory changed before removal: ${directory}`);
+  }
+  await assertQuarantineAncestorIdentities(ancestors);
+  const beforeRemove = await readWorkingObjectIdentity(directory, 'directory');
+  if (!sameWorkingIdentity(node.identity, beforeRemove)) {
+    throw new Error(`Quarantined working directory changed before removal: ${directory}`);
+  }
+  await rmdir(directory);
+}
+
+function quarantineAncestorChain(
+  plan: ManagedWorkingTreePlan,
+): Array<{ path: string; identity: WorkingObjectIdentity }> {
+  const parent = path.dirname(plan.directory);
+  return [...plan.ancestorIdentities.entries()]
+    .filter(([candidate]) => candidate !== path.resolve(plan.directory))
+    .filter(([candidate]) => isInsideDirectory(candidate, parent))
+    .sort(([left], [right]) => left.split(path.sep).length - right.split(path.sep).length)
+    .map(([ancestorPath, identity]) => ({ path: ancestorPath, identity }));
+}
+
+async function rollbackQuarantinedTrees(
+  quarantined: readonly QuarantinedWorkingTree[],
+): Promise<void> {
+  for (const item of [...quarantined].reverse()) {
+    try {
+      await rename(item.quarantine, item.plan.directory);
+    } catch {
+      // Preserve the original failure. A conflicting replacement remains
+      // visible for explicit repair instead of being overwritten.
+    }
+  }
+}
+
+async function removeManagedWorkingTree(
+  projectRoot: string,
+  plans: readonly ManagedWorkingTreePlan[],
+): Promise<RemovalResult> {
+  for (const plan of plans) {
+    await validateManagedWorkingTree(projectRoot, plan);
+  }
+
+  // Preserve the existing retry contract for a config directory whose final
+  // rmdir is denied, while ensuring this probe happens before any tree moves.
+  const configPlan = plans.find((plan) => plan.countRemoval);
+  if (configPlan?.root.children && configPlan.root.children.size > 0) {
+    try {
+      await rmdir(configPlan.directory);
+      throw new Error('Managed config directory changed after inspection');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
+    }
+  }
+
+  const quarantined: QuarantinedWorkingTree[] = [];
+  try {
+    for (const plan of plans) {
+      await validateManagedWorkingTree(projectRoot, plan);
+      const ancestors = quarantineAncestorChain(plan);
+      await assertQuarantineAncestorIdentities(ancestors);
+      const quarantine = path.join(
+        path.dirname(plan.directory),
+        `.${path.basename(plan.directory)}.owner-uninstall-${randomUUID()}`,
+      );
+      try {
+        await lstat(quarantine);
+        throw new Error(`Uninstall quarantine already exists: ${quarantine}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      await rename(plan.directory, quarantine);
+      const item = { plan, quarantine };
+      quarantined.push(item);
+      await assertQuarantineAncestorIdentities(ancestors);
+      await validateQuarantinedNode(quarantine, plan.root, ancestors);
+    }
+  } catch (error) {
+    await rollbackQuarantinedTrees(quarantined);
+    throw error;
+  }
+
+  let removed = 0;
+  try {
+    for (const item of quarantined) {
+      await removeQuarantinedNode(
+        item.quarantine,
+        item.plan.root,
+        quarantineAncestorChain(item.plan),
+      );
+      if (item.plan.countRemoval) removed++;
+    }
+  } catch {
+    const remaining: QuarantinedWorkingTree[] = [];
+    for (const item of quarantined) {
+      try {
+        await lstat(item.quarantine);
+        remaining.push(item);
+      } catch {
+        // A fully removed quarantine has nothing left to restore.
+      }
+    }
+    await rollbackQuarantinedTrees(remaining);
+    return { removed, failed: 1 };
+  }
+  return { removed, failed: 0 };
+}
+
+async function removeManagedProjectConfigAfterFailedCleanup(
+  projectRoot: string,
+  expectedIdentity: WorkflowProjectConfigIdentity,
+): Promise<RemovalResult> {
+  if (!expectedIdentity.exists) return { removed: 0, failed: 0 };
+  try {
+    const currentIdentity = await readWorkflowProjectConfigIdentity(projectRoot);
+    if (!workflowProjectConfigIdentityEquals(expectedIdentity, currentIdentity)) {
+      return { removed: 0, failed: 1 };
+    }
+
+    const configPath = path.join(projectRoot, '.owner', 'config.yaml');
+    if (!(await removeFile(configPath))) return { removed: 0, failed: 1 };
+
+    try {
+      await rmdir(path.dirname(configPath));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'EEXIST') throw error;
+    }
+    return { removed: 1, failed: 0 };
+  } catch (error) {
+    return {
+      removed: 0,
+      failed: 1,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function retainedWorkingDirectoryContent(error: unknown, ownerDir: string): string | null {
+  const prefix = 'Refusing to remove unknown working-directory content: ';
+  const message = (error as Error).message;
+  if (!message.startsWith(prefix)) return null;
+  const contentPath = message.slice(prefix.length);
+  return isInsideDirectory(ownerDir, contentPath) ? null : contentPath;
+}
+
+async function removeManagedSkillsFromDirs(
+  baseDir: string,
+  skillsDirs: string[],
+  managedSkills: string[],
+): Promise<RemovalResult> {
+  let removed = 0;
+  let failed = 0;
+  const parentDirs = new Set<string>();
+  for (const skillsDir of skillsDirs) {
+    const platformRoot = path.join(baseDir, skillsDir);
+    const skillsRoot = path.join(baseDir, skillsDir, 'skills');
+    let sharedBoundary = false;
+    for (const boundary of [platformRoot, skillsRoot]) {
+      try {
+        if ((await lstat(boundary)).isSymbolicLink()) {
+          failed++;
+          sharedBoundary = true;
+          break;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          failed++;
+          sharedBoundary = true;
+          break;
+        }
+      }
+    }
+    if (sharedBoundary) continue;
+
+    for (const skillRelPath of managedSkills) {
+      try {
+        const parts = skillRelPath.split('/');
+        let current = baseDir;
+        let linkedAncestor = false;
+        const ancestorParts = [
+          ...skillsDir.split(/[\\/]/u).filter(Boolean),
+          'skills',
+          ...parts.slice(0, -1),
+        ];
+        for (const part of ancestorParts) {
+          current = path.join(current, part);
+          if ((await lstat(current)).isSymbolicLink()) {
+            if (await removeFile(current)) removed++;
+            linkedAncestor = true;
+            break;
+          }
+        }
+        if (linkedAncestor) continue;
+
+        if (await removeFile(path.join(skillsRoot, ...parts))) removed++;
+        current = skillsRoot;
+        for (const part of parts.slice(0, -1)) {
+          current = path.join(current, part);
+          parentDirs.add(current);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') failed++;
+      }
+    }
+  }
+
+  for (const dir of [...parentDirs].sort(
+    (left, right) => right.split(path.sep).length - left.split(path.sep).length,
+  )) {
+    try {
+      if (await isDirEmpty(dir)) await removeDir(dir);
+    } catch {
+      failed++;
+    }
+  }
+  return { removed, failed };
+}
+
+export async function removeLegacyOwnerSkillsForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  const canonicalDir = getPlatformSkillsDir(platform, scope);
+  const legacyDirs = getPlatformSkillsDirs(platform, scope).filter((dir) => dir !== canonicalDir);
+  if (legacyDirs.length === 0) return { removed: 0, failed: 0 };
+
+  const managedSkills = getManagedSkillPaths(await readManifest());
+  return removeManagedSkillsFromDirs(baseDir, legacyDirs, managedSkills);
+}
+
+async function removeOwnerSkillsForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+  workflowsToRemove: readonly OwnerWorkflow[] = ['native', 'classic'],
+  workflowsToKeep: readonly OwnerWorkflow[] = [],
+): Promise<RemovalResult> {
+  const manifest = await readManifest();
+  const selectionFor = (workflows: readonly OwnerWorkflow[]): InitWorkflowSelection =>
+    workflows.length === 2 ? 'both' : workflows[0]!;
+  const removablePaths = new Set(
+    getManagedSkillPathsForSelection(manifest, selectionFor(workflowsToRemove)),
+  );
+  for (const retainedPath of getManagedSkillPathsForSelection(
+    manifest,
+    workflowsToKeep.length === 0 ? 'both' : selectionFor(workflowsToKeep),
+  )) {
+    if (workflowsToKeep.length > 0) removablePaths.delete(retainedPath);
+  }
+  const removeRetiredNativePaths =
+    workflowsToRemove.includes('native') && !workflowsToKeep.includes('native');
+  if (removeRetiredNativePaths) {
+    for (const retiredPath of RETIRED_OWNER_OWNED_SKILL_PATHS) {
+      removablePaths.add(retiredPath);
+    }
+  }
+  const managedSkills = [...removablePaths];
+  const uniqueSkillsDirs = [...new Set(getPlatformSkillsDirs(platform, scope))];
+  const skillsRemoval = await removeManagedSkillsFromDirs(baseDir, uniqueSkillsDirs, managedSkills);
+  let removed = skillsRemoval.removed;
+  let failed = skillsRemoval.failed;
+  if (removeRetiredNativePaths) {
+    const centralCleanup = await removeRetiredOwnerOwnedSkillPaths([
+      path.join(getCentralSkillsDir(baseDir, scope), 'skills'),
+    ]);
+    removed += centralCleanup.removed;
+    failed += centralCleanup.failed;
+  }
+
+  return { removed, failed };
+}
+
+async function removeOwnerRulesForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  if (!platform.rulesDir || !platform.rulesFormat) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const manifest = await readManifest();
+  const rulePaths = [
+    ...(manifest.rules ?? []),
+    ...(manifest.nativeRules ?? []),
+    ...LEGACY_RULE_PATHS,
+  ];
+  if (!rulePaths || rulePaths.length === 0) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const skillsDir = getPlatformSkillsDir(platform, scope);
+  const rulesBase =
+    platform.rulesBaseDir !== undefined
+      ? platform.rulesBaseDir === ''
+        ? baseDir
+        : path.join(baseDir, platform.rulesBaseDir)
+      : path.join(baseDir, skillsDir);
+
+  let removed = 0;
+  let failed = 0;
+
+  for (const ruleRelPath of rulePaths) {
+    const ruleFileName = path.basename(ruleRelPath);
+    const rulesDestDir = path.join(rulesBase, platform.rulesDir);
+    const dest = computeRuleDestPath(rulesDestDir, ruleFileName, platform.rulesFormat);
+
+    try {
+      const result = await removeFile(dest);
+      if (result) {
+        removed++;
+      }
+    } catch {
+      failed++;
+    }
+  }
+
+  const rulesDestDir = path.join(rulesBase, platform.rulesDir);
+  try {
+    if (await isDirEmpty(rulesDestDir)) {
+      await removeDir(rulesDestDir);
+    }
+  } catch {
+    failed++;
+  }
+
+  return { removed, failed };
+}
+
+async function removeOpenSpecSkillsForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  let removed = 0;
+  let failed = 0;
+  for (const skillsDir of getPlatformSkillsDirs(platform, scope)) {
+    const skillsRoot = path.join(baseDir, skillsDir, 'skills');
+    try {
+      for (const entry of await readDir(skillsRoot)) {
+        if (!/^openspec-[a-z0-9-]+$/iu.test(entry)) continue;
+        if (await removeDir(path.join(skillsRoot, entry))) removed++;
+      }
+    } catch {
+      failed++;
+    }
+    const commandsRoot = path.join(baseDir, skillsDir, 'commands');
+    try {
+      for (const entry of await readDir(commandsRoot)) {
+        if (!/^(?:opsx|openspec)-[a-z0-9-]+\.[a-z0-9.]+$/iu.test(entry)) continue;
+        if (await removeFile(path.join(commandsRoot, entry))) removed++;
+      }
+    } catch {
+      failed++;
+    }
+  }
+  return { removed, failed };
+}
+
+async function readLockedSuperpowersSkillNames(projectPath: string): Promise<string[]> {
+  const lock = await readJsonObjectFile(path.join(projectPath, 'skills-lock.json'));
+  if (lock.status !== 'present') return [];
+  const skills = lock.value.skills;
+  if (!skills || typeof skills !== 'object' || Array.isArray(skills)) return [];
+  return Object.entries(skills).flatMap(([name, entry]) =>
+    entry &&
+    typeof entry === 'object' &&
+    !Array.isArray(entry) &&
+    (entry as Record<string, unknown>).source === 'obra/superpowers'
+      ? [name]
+      : [],
+  );
+}
+
+async function removeSuperpowersSkillDirs(
+  baseDir: string,
+  platforms: readonly Platform[],
+  scope: InstallScope,
+  names: readonly string[],
+): Promise<RemovalResult> {
+  let removed = 0;
+  let failed = 0;
+  const skillsDirs = [
+    ...new Set(platforms.flatMap((platform) => getPlatformSkillsDirs(platform, scope))),
+  ];
+  for (const skillsDir of skillsDirs) {
+    const platformRoot = path.join(baseDir, skillsDir);
+    const skillsRoot = path.join(platformRoot, 'skills');
+    try {
+      if (
+        (await lstat(platformRoot)).isSymbolicLink() ||
+        (await lstat(skillsRoot)).isSymbolicLink()
+      ) {
+        failed++;
+        continue;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') failed++;
+      continue;
+    }
+    for (const name of names) {
+      try {
+        if (await removeDir(path.join(skillsRoot, name))) removed++;
+      } catch {
+        failed++;
+      }
+    }
+  }
+  return { removed, failed };
+}
+
+async function removeSuperpowersSkillsForPlatforms(
+  projectPath: string,
+  platforms: readonly Platform[],
+  scope: InstallScope = 'project',
+  options: { removeSharedStorage?: boolean } = {},
+): Promise<RemovalResult> {
+  const agents = [
+    ...new Set(
+      platforms
+        .map((platform) => SKILLS_AGENT_MAP[platform.id])
+        .filter((agent): agent is string => Boolean(agent)),
+    ),
+  ];
+  if (agents.length === 0) return { removed: 0, failed: 0 };
+  const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const scopeArgs = scope === 'global' ? ['--global'] : [];
+  try {
+    const output = execFileSync(command, ['skills', 'list', '--json', ...scopeArgs], {
+      cwd: projectPath,
+      encoding: 'utf8',
+      timeout: 30_000,
+      shell: process.platform === 'win32',
+    });
+    const listed = JSON.parse(output) as Array<{
+      name?: unknown;
+      source?: unknown;
+    }>;
+    const names = new Set([
+      ...listed.flatMap((skill) =>
+        skill.source === 'obra/superpowers' && typeof skill.name === 'string' ? [skill.name] : [],
+      ),
+      ...(await readLockedSuperpowersSkillNames(projectPath)),
+    ]);
+    let failed = 0;
+    for (const name of names) {
+      try {
+        execFileSync(
+          command,
+          ['skills', 'remove', name, '--agent', ...agents, '--yes', ...scopeArgs],
+          {
+            cwd: projectPath,
+            stdio: 'ignore',
+            timeout: 60_000,
+            shell: process.platform === 'win32',
+          },
+        );
+      } catch {
+        failed++;
+      }
+    }
+    const baseDir = scope === 'global' ? homedir() : projectPath;
+    if (options.removeSharedStorage) {
+      const fallbackResult = await removeSuperpowersSkillDirs(baseDir, platforms, scope, [
+        ...names,
+      ]);
+      failed += fallbackResult.failed;
+    }
+
+    const remaining = (
+      await Promise.all(
+        [...names].map(async (name) => {
+          for (const platform of platforms) {
+            for (const skillsDir of getPlatformSkillsDirs(platform, scope)) {
+              if (await fileExists(path.join(baseDir, skillsDir, 'skills', name))) return true;
+            }
+          }
+          return false;
+        }),
+      )
+    ).filter(Boolean).length;
+    if (remaining > 0) failed++;
+    return { removed: names.size - remaining, failed };
+  } catch {
+    return { removed: 0, failed: 1 };
+  }
+}
+
+async function removeOwnerHooksForPlatform(
+  baseDir: string,
+  platform: Platform,
+  scope: InstallScope = 'project',
+): Promise<RemovalResult> {
+  if (!platform.supportsHooks || !platform.hookFormat) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const manifest = await readManifest();
+  const hooksConfig = { ...(manifest.hooks ?? {}), ...(manifest.nativeHooks ?? {}) };
+  if (!hooksConfig || Object.keys(hooksConfig).length === 0) {
+    return { removed: 0, failed: 0 };
+  }
+
+  const platformBase = path.join(baseDir, getPlatformConfigDir(platform, scope));
+  const scriptRelPaths = [...new Set([...Object.keys(hooksConfig), ...LEGACY_HOOK_SCRIPT_PATHS])];
+
+  try {
+    const canonicalFile = platform.hookConfigFile ?? 'settings.local.json';
+    const files = [canonicalFile, ...(platform.legacyHookConfigFiles ?? [])];
+    let removed = 0;
+    let failed = 0;
+    for (const file of new Set(files)) {
+      let result: RemovalResult;
+      try {
+        result = await removeManagedHooksFromJsonFile(
+          path.join(platformBase, file),
+          scriptRelPaths,
+        );
+      } catch {
+        failed++;
+        continue;
+      }
+      removed += result.removed;
+      failed += result.failed;
+    }
+    return { removed, failed };
+  } catch {
+    return { removed: 0, failed: 1 };
+  }
+}
+
+async function removeWorkingDirs(
+  projectPath: string,
+  options: RemoveWorkingDirsOptions = {},
+): Promise<RemovalResult> {
+  let projectRoot: string;
+  try {
+    projectRoot = await realpath(projectPath);
+    const rootStat = await lstat(projectRoot, { bigint: true });
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      return { removed: 0, failed: 1 };
+    }
+  } catch {
+    return { removed: 0, failed: 1 };
+  }
+  const ownerDir = path.join(projectRoot, '.owner');
+  const docsDir = path.join(projectRoot, 'docs');
+  const legacyOpenSpecRoot = path.join(projectRoot, 'openspec');
+  const docsOpenSpecRoot = path.join(docsDir, 'openspec');
+
+  let plans: ManagedWorkingTreePlan[];
+  let configIdentity: WorkflowProjectConfigIdentity | undefined;
+  let removeProjectConfigOnFailure = false;
+  try {
+    const snapshot = await readWorkflowProjectConfigSnapshot(projectRoot, {
+      allowPartialProject: true,
+    });
+    const document = snapshot.document;
+    configIdentity = snapshot.identity;
+    const configuredWorkflows = document?.config
+      ? (document.config.workflows ?? [document.config.default_workflow])
+      : [];
+    const workflowsToRemove = options.workflows;
+    const classicEnabled =
+      (workflowsToRemove === undefined || workflowsToRemove.includes('classic')) &&
+      (configuredWorkflows.includes('classic') || document?.classic !== undefined);
+    const nativeEnabled =
+      (workflowsToRemove === undefined || workflowsToRemove.includes('native')) &&
+      (configuredWorkflows.includes('native') || document?.native !== undefined);
+    const selectiveWorkflowRemoval =
+      workflowsToRemove !== undefined && workflowsToRemove.length < configuredWorkflows.length;
+    const fullWorkflowRemoval =
+      workflowsToRemove === undefined ||
+      (configuredWorkflows.length > 0 && workflowsToRemove.length === configuredWorkflows.length);
+    removeProjectConfigOnFailure = fullWorkflowRemoval;
+    const classicOnlyRemoval =
+      workflowsToRemove?.includes('classic') === true && !workflowsToRemove.includes('native');
+    const removingClassicWorkingDirs = classicEnabled || fullWorkflowRemoval;
+    const artifactLayout = classicEnabled ? (document?.classic?.artifact_layout ?? 'legacy') : null;
+    const layout = artifactLayout ? classicLayoutPaths(projectRoot, artifactLayout) : null;
+    const preserveOpenSpecRoot =
+      layout !== null &&
+      (await realWorkingFileExists(path.join(layout.openSpecRoot, 'config.yaml')));
+    const splitDocsWorkingTrees =
+      artifactLayout === 'docs' && (preserveOpenSpecRoot || classicOnlyRemoval);
+
+    if (artifactLayout) {
+      const legacyRootExists = await assertWorkingTreeAbsentOrRealDirectory(
+        projectRoot,
+        legacyOpenSpecRoot,
+      );
+      const docsRootExists = await assertWorkingTreeAbsentOrRealDirectory(
+        projectRoot,
+        docsOpenSpecRoot,
+      );
+      if (legacyRootExists && docsRootExists) {
+        throw new Error('Refusing to remove conflicting legacy and docs OpenSpec roots');
+      }
+      const alternateRootExists = artifactLayout === 'legacy' ? docsRootExists : legacyRootExists;
+      if (alternateRootExists) {
+        throw new Error('Refusing to remove an OpenSpec root that does not match project config');
+      }
+    }
+
+    const ownerTree = cloneManagedWorkingTree(
+      workflowsToRemove === undefined || workflowsToRemove.length === configuredWorkflows.length
+        ? OWNER_WORKING_TREE
+        : EMPTY_MANAGED_WORKING_TREE,
+    );
+    const docsTree: ManagedWorkingTree = removingClassicWorkingDirs
+      ? { superpowers: cloneManagedWorkingTree(SUPERPOWERS_WORKING_TREE) }
+      : {};
+    const legacyTree = removingClassicWorkingDirs
+      ? cloneManagedWorkingTree(OPENSPEC_WORKING_TREE)
+      : {};
+    if (artifactLayout === 'docs' && !preserveOpenSpecRoot) {
+      mergeManagedWorkingTree(docsTree, ['openspec'], OPENSPEC_WORKING_TREE);
+    }
+
+    let separateNativeRoot: string | null = null;
+    if (nativeEnabled) {
+      if (!document?.native) throw new Error('Native project config is incomplete');
+      const nativePaths = await nativeProjectPaths(projectRoot, document.native.artifact_root);
+      if (isInsideDirectory(docsDir, nativePaths.nativeRoot)) {
+        if (splitDocsWorkingTrees || selectiveWorkflowRemoval) {
+          separateNativeRoot = nativePaths.nativeRoot;
+        } else {
+          mergeManagedWorkingTree(
+            docsTree,
+            path.relative(docsDir, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
+            NATIVE_WORKING_TREE,
+          );
+        }
+      } else if (isInsideDirectory(ownerDir, nativePaths.nativeRoot)) {
+        if (selectiveWorkflowRemoval) {
+          separateNativeRoot = nativePaths.nativeRoot;
+        } else {
+          mergeManagedWorkingTree(
+            ownerTree,
+            path.relative(ownerDir, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
+            NATIVE_WORKING_TREE,
+          );
+        }
+      } else if (
+        artifactLayout === 'legacy' &&
+        isInsideDirectory(legacyOpenSpecRoot, nativePaths.nativeRoot)
+      ) {
+        mergeManagedWorkingTree(
+          legacyTree,
+          path.relative(legacyOpenSpecRoot, nativePaths.nativeRoot).split(path.sep).filter(Boolean),
+          NATIVE_WORKING_TREE,
+        );
+      } else {
+        separateNativeRoot = nativePaths.nativeRoot;
+      }
+    }
+
+    const candidates: Array<
+      readonly [directory: string, tree: ManagedWorkingTree, countRemoval: boolean]
+    > = [];
+    if (splitDocsWorkingTrees) {
+      candidates.push([path.join(docsDir, 'superpowers'), SUPERPOWERS_WORKING_TREE, false]);
+      if (artifactLayout === 'docs' && !preserveOpenSpecRoot) {
+        candidates.push([layout!.openSpecRoot, OPENSPEC_WORKING_TREE, false]);
+      }
+    } else if (Object.keys(docsTree).length > 0) {
+      candidates.push([docsDir, docsTree, false]);
+    }
+    if (artifactLayout === 'legacy' && !preserveOpenSpecRoot) {
+      candidates.push([layout!.openSpecRoot, legacyTree, false]);
+    }
+    if (separateNativeRoot) {
+      candidates.push([separateNativeRoot, NATIVE_WORKING_TREE, false]);
+    }
+    if (Object.keys(ownerTree).length > 0) candidates.push([ownerDir, ownerTree, true]);
+
+    plans = [];
+    for (const [directory, managedTree, countRemoval] of candidates) {
+      const inspected = await inspectManagedWorkingTree(
+        projectRoot,
+        directory,
+        managedTree,
+        countRemoval,
+      );
+      if (inspected) plans.push(inspected);
+    }
+    await options.testHooks?.afterPlanInspection?.();
+    if (
+      !workflowProjectConfigIdentityEquals(
+        configIdentity,
+        await readWorkflowProjectConfigIdentity(projectRoot),
+      )
+    ) {
+      throw new Error('Project config changed during uninstall planning');
+    }
+    for (const plan of plans) {
+      await validateManagedWorkingTree(projectRoot, plan);
+    }
+  } catch (error) {
+    const preservedContent = retainedWorkingDirectoryContent(error, ownerDir);
+    const configResult =
+      removeProjectConfigOnFailure && configIdentity && preservedContent
+        ? await removeManagedProjectConfigAfterFailedCleanup(projectRoot, configIdentity)
+        : { removed: 0, failed: 0 };
+    if (preservedContent) {
+      return {
+        removed: configResult.removed,
+        failed: configResult.failed,
+        preserved: [preservedContent],
+      };
+    }
+    return {
+      removed: configResult.removed,
+      failed: 1 + configResult.failed,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    return await removeManagedWorkingTree(projectRoot, plans);
+  } catch (error) {
+    return {
+      removed: 0,
+      failed: 1,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export {
+  removeOwnerSkillsForPlatform,
+  removeOwnerRulesForPlatform,
+  removeOwnerHooksForPlatform,
+  removeOpenSpecSkillsForPlatform,
+  removeSuperpowersSkillsForPlatforms,
+  removeWorkingDirs,
+  removeOwnerProjectInstructions,
+};

@@ -1,0 +1,98 @@
+name: 🐛 Bug Report
+description: Report a reproducible problem with Owner.
+title: 'fix: '
+labels: ['bug']
+body:
+  - type: checkboxes
+    attributes:
+      label: 🔎 Existing issue check
+      description: Please search existing issues before opening a new one.
+      options:
+        - label: I have searched the existing issues.
+          required: true
+
+  - type: dropdown
+    attributes:
+      label: 🎯 Affected area
+      description: Which part of Owner is affected?
+      options:
+        - CLI command / user interaction (`app/`)
+        - Classic workflow runtime (`domains/owner-classic`, `assets/skills/owner/scripts/`)
+        - Engine (`domains/engine`)
+        - Native workflow runtime (`domains/owner-native`)
+        - Integrations (`domains/integrations`)
+        - Skill domain (`domains/skill`)
+        - Workflow contract (`domains/workflow-contract`)
+        - Platform adapter / installer (`platform/*`)
+        - Bundled skills or assets (`assets/skills/`, `assets/skills-zh/`)
+        - Repository automation (`scripts/*`)
+        - Documentation
+        - CI / release / architecture checks
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: 📦 Owner version
+      description: Run `owner --version` or check the installed package version.
+      placeholder: '0.2.8'
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 💥 Current behavior
+      description: What happened?
+      placeholder: 'Describe the error, unexpected output, or broken workflow.'
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: ✅ Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 🔁 Steps to reproduce
+      description: Include the exact command, project state, affected layer/path if known, and options used.
+      placeholder: |
+        1. In a project with ...
+        2. Run `owner init --scope project --json`
+        3. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 🖥️ Environment
+      description: Please include versions and platform details that may affect reproduction.
+      value: |
+        - OS:
+        - Shell:
+        - Node:
+        - Package manager:
+        - Install scope: project / global
+        - Skill language: en / zh
+        - Target AI platform(s):
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 📋 Logs or output
+      description: Paste terminal output, stack traces, or JSON output. Remove secrets before posting.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🧩 Additional context
+      description: Links, screenshots, related specs, suspected files, or anything else that helps explain the issue.
+    validations:
+      required: false

@@ -1,0 +1,137 @@
+{
+  "assetsRoot": "assets",
+  "manifestPath": "assets/manifest.json",
+  "skillsRoots": {
+    "en": "assets/skills",
+    "zh": "assets/skills-zh"
+  },
+  "classicRuntime": {
+    "entries": {
+      "runtime": "domains/owner-classic/classic-cli.ts",
+      "state": "domains/owner-classic/classic-state-entry.ts",
+      "validate": "domains/owner-classic/classic-validate-entry.ts",
+      "guard": "domains/owner-classic/classic-guard-entry.ts",
+      "handoff": "domains/owner-classic/classic-handoff-entry.ts",
+      "archive": "domains/owner-classic/classic-archive-entry.ts",
+      "hookGuard": "domains/owner-classic/classic-hook-guard-entry.ts",
+      "intent": "domains/owner-classic/classic-intent-entry.ts",
+      "resume-probe": "domains/owner-classic/classic-resume-probe-entry.ts"
+    },
+    "outputs": {
+      "runtime": "assets/skills/owner/scripts/owner-runtime.mjs",
+      "state": "assets/skills/owner/scripts/owner-state.mjs",
+      "validate": "assets/skills/owner/scripts/owner-yaml-validate.mjs",
+      "guard": "assets/skills/owner/scripts/owner-guard.mjs",
+      "handoff": "assets/skills/owner/scripts/owner-handoff.mjs",
+      "archive": "assets/skills/owner/scripts/owner-archive.mjs",
+      "hookGuard": "assets/skills/owner/scripts/owner-hook-guard.mjs",
+      "intent": "assets/skills/owner/scripts/owner-intent.mjs",
+      "resume-probe": "assets/skills/owner/scripts/owner-resume-probe.mjs"
+    }
+  },
+  "nativeRuntime": {
+    "entries": {
+      "runtime": "domains/owner-native/native-cli-entry.ts",
+      "hookGuard": "domains/owner-native/native-hook-guard-entry.ts",
+      "init": "domains/owner-native/native-init-entry.ts",
+      "root": "domains/owner-native/native-root-entry.ts",
+      "new": "domains/owner-native/native-new-entry.ts",
+      "spec": "domains/owner-native/native-spec-entry.ts",
+      "show": "domains/owner-native/native-show-entry.ts",
+      "status": "domains/owner-native/native-status-entry.ts",
+      "select": "domains/owner-native/native-select-entry.ts",
+      "next": "domains/owner-native/native-next-entry.ts",
+      "archive": "domains/owner-native/native-archive-entry.ts",
+      "doctor": "domains/owner-native/native-doctor-entry.ts"
+    },
+    "outputs": {
+      "runtime": "assets/skills/owner-native/scripts/owner-native-runtime.mjs",
+      "hookGuard": "assets/skills/owner-native/scripts/owner-native-hook-guard.mjs",
+      "init": "assets/skills/owner-native/scripts/owner-native-init.mjs",
+      "root": "assets/skills/owner-native/scripts/owner-native-root.mjs",
+      "new": "assets/skills/owner-native/scripts/owner-native-new.mjs",
+      "spec": "assets/skills/owner-native/scripts/owner-native-spec.mjs",
+      "show": "assets/skills/owner-native/scripts/owner-native-show.mjs",
+      "status": "assets/skills/owner-native/scripts/owner-native-status.mjs",
+      "select": "assets/skills/owner-native/scripts/owner-native-select.mjs",
+      "next": "assets/skills/owner-native/scripts/owner-native-next.mjs",
+      "archive": "assets/skills/owner-native/scripts/owner-native-archive.mjs",
+      "doctor": "assets/skills/owner-native/scripts/owner-native-doctor.mjs"
+    }
+  },
+  "entryRuntime": {
+    "entries": {
+      "runtime": "domains/owner-entry/entry-runtime-entry.ts",
+      "hookRouter": "domains/owner-entry/hook-router-entry.ts"
+    },
+    "outputs": {
+      "runtime": "assets/skills/owner/scripts/owner-entry-runtime.mjs",
+      "hookRouter": "assets/skills/owner/scripts/owner-hook-router.mjs"
+    }
+  },
+  "allowedTopLevelEntries": [
+    ".agents",
+    ".claude",
+    ".codex",
+    ".owner",
+    ".git",
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    ".gitmodules",
+    ".husky",
+    ".idea",
+    ".npmignore",
+    ".prettierignore",
+    ".prettierrc",
+    ".superpowers",
+    ".tmp",
+    "AGENTS.md",
+    "app",
+    "assets",
+    "bin",
+    "build.js",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "codecov.yml",
+    "config",
+    "CONTRIBUTING-zh.md",
+    "CONTRIBUTING.md",
+    "coverage",
+    "dist",
+    "docs",
+    "domains",
+    "eslint.config.js",
+    "LICENSE",
+    "NOTICE",
+    "node_modules",
+    "nul",
+    "package-lock.json",
+    "package.json",
+    "platform",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "README-zh.md",
+    "README.md",
+    "scripts",
+    "skills-lock.json",
+    "test",
+    "tsconfig.json",
+    "vitest.config.ts"
+  ],
+  "sourceRoots": ["app", "domains", "platform"],
+  "appModules": ["cli", "commands"],
+  "domainModules": [
+    "engine",
+    "integrations",
+    "owner-classic",
+    "owner-entry",
+    "owner-native",
+    "skill",
+    "workflow-contract"
+  ],
+  "platformModules": ["fs", "install", "paths", "process", "version"],
+  "scriptModules": ["build", "install", "lib", "lint", "release"],
+  "allowedCodeFiles": ["bin/fast-runtime-router.js"],
+  "testRoots": ["test"]
+}

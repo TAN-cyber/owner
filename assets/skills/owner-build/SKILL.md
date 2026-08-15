@@ -1,0 +1,292 @@
+---
+name: owner-build
+description: "Phase 3 of Owner Classic — recover or create the implementation plan and execute its tasks."
+---
+
+# Owner Phase 3: Plan and Build (Build)
+
+Before starting or recovering, read and follow `owner-classic/reference/classic-layout.md`. Every OpenSpec CLI call in this file must use the adapter, and every file path must use the `<classic-*>` logical roots bound by that protocol.
+
+## Prerequisites
+
+- Design Doc has been created (Phase 2 complete)
+- Active change exists
+
+## Steps
+
+### 0. Entry State Verification (Entry Check)
+
+Use the stable `owner` CLI described in `owner-classic/reference/scripts.md`, then run entry verification. When resuming from any entry point, first run the recovery check in `owner-classic/reference/context-recovery.md`:
+
+```bash
+owner state select <change-name>
+owner state check <name> build
+```
+
+Proceed to Step 1 after verification passes. The script outputs specific failure reasons when verification fails.
+
+If the `select` / `check` output is `BLOCKED` because `bound_branch` does not match the current branch, immediately pause under `owner-classic/reference/decision-point.md` and let the user choose one option: switch back to the bound branch and rerun entry verification, or run `owner state rebind <change-name>` after the user explicitly confirms the current branch should take over this change, then rerun entry verification. Do not switch branches or rebind on your own.
+
+**Idempotency**: All build phase operations can be safely re-executed. Read `.owner.yaml` `phase` to confirm build, read the plan header `base-ref`, then parse tasks.md checkboxes in document order and resume from the first unchecked task. Already-committed tasks must not be re-committed.
+
+### 1. Create Plan (Subagent Offload)
+
+Create the implementation plan through a subagent, avoiding planning skill occupying main session context. Plan files and execution feedback must use the configured Owner artifact language from `owner state get <name> language`.
+
+**Subagent instructions**:
+
+You are an implementation planning expert. Create an implementation plan based on the following inputs:
+
+1. **Immediately execute:** Use the Skill tool to load the Superpowers `writing-plans` skill. Skipping this step is prohibited. After the skill loads, ARGUMENTS must include: `Language: Use the configured Owner artifact language from owner state get <name> language`
+2. Read the Design Doc (technical design document under `docs/superpowers/specs/`)
+3. Read `<classic-change-dir>/tasks.md` (task boundaries)
+4. Follow the skill's guidance to create the plan
+
+Plan requirements:
+- Save to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`
+- Reference design document, break down into executable tasks
+- **Plan file header must contain associated metadata**:
+
+```yaml
+---
+change: <openspec-change-name>
+design-doc: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
+base-ref: <git rev-parse HEAD before implementation>
+---
+```
+
+`base-ref` is used during verification to measure committed changes across the full implementation range. Record the current commit when creating the plan:
+
+```bash
+git rev-parse HEAD
+```
+
+Write the plan to file, then return the file path.
+
+**Execute subagent**: Dispatch the above task to a subagent.
+
+After the subagent completes:
+- If a valid file path is returned and the file exists, record it as the plan
+- If the subagent fails or returns an invalid path, fall back to loading the Superpowers `writing-plans` skill inline in the main session (degraded fallback)
+
+### 2. Update Plan Status and Jointly Confirm Workflow Configuration
+
+Record plan path:
+
+```bash
+owner state set <name> plan docs/superpowers/plans/YYYY-MM-DD-feature.md
+```
+
+No manual phase update needed — guard auto-transitions when exit conditions are met.
+
+When presenting the joint decision, provide only the execution method, TDD mode, and code-review mode supported by this workflow. The workspace was prepared and bound during Open; if the change has no valid isolation, return to `/owner-open` instead of creating or switching a workspace in Build.
+
+After recording the plan, provide exactly **one joint decision point** that collects whether to continue now, execution method, TDD mode, and code review mode. Do not ask continue/pause first and then create another configuration blocker.
+
+| Option | Behavior | Description |
+|--------|----------|-------------|
+| A | Continue with configuration | Provide all Step 3 execution, TDD, and review choices in the same response |
+| B | Pause to switch model | Record `build_pause: plan-ready`, stop this `/owner-build` invocation, and allow the user to resume later from `/owner-classic` or `/owner-build` |
+
+This is a user decision point. **Follow `owner-classic/reference/decision-point.md` once and show the plan summary, pause option, and every executable Step 3 setting together**. Do not auto-select or write the pause into `build_mode`.
+
+When the user chooses to continue and supplies complete configuration:
+
+```bash
+owner state set <name> build_pause null
+```
+
+When the user chooses to pause:
+
+```bash
+owner state set <name> build_pause plan-ready
+```
+
+After setting `build_pause: plan-ready`, stop the current invocation. Do not choose `isolation` or `build_mode`, and do not load an execution skill.
+
+### 3. Apply the Confirmed Workflow Configuration
+
+If resuming with `build_pause: plan-ready` and the `plan` file exists, do not rerun `writing-plans`. Reissue the same joint Step 2 decision and clear the pause only after the user supplies complete configuration:
+
+```bash
+owner state set <name> build_pause null
+```
+
+Then apply the execution method, TDD mode, and code review mode below.
+
+The plan is in the workspace prepared during Open. First verify the existing binding:
+
+```bash
+owner state get <name> isolation
+```
+
+If the result is empty, stop Build and return to `/owner-open` for workspace resolve/prepare; do not make the first current/branch/worktree choice or create a workspace here.
+
+**Execution Method**:
+
+| Option | Skill | Applicable Scenario |
+|------|------|-------------------|
+| A | Superpowers `subagent-driven-development` | Independent tasks, high complexity; each task runs in an isolated implementer subagent with review driven by `review_mode` |
+| B | Superpowers `executing-plans` | The main session executes the plan sequentially; suitable for fewer or tightly coupled tasks |
+
+**Execution method recommendation rules**:
+- Task count ≥ 3 → Recommend A
+- Task count ≤ 2 and no cross-module dependencies → Recommend B
+- From hotfix path → Recommend B
+
+The execution, TDD, and review tables are part of the Step 2 joint decision and do not create another pause. Recommendations never replace user confirmation.
+
+After user selection, update only the execution method, TDD mode, and code-review mode fields; preserve the `isolation` and `bound_branch` established during Open.
+
+- If the user chooses `executing-plans`: run `owner state set <name> subagent_dispatch null`, then run `owner state set <name> build_mode executing-plans`
+- If the user chooses `subagent-driven-development`: run `owner state set <name> subagent_dispatch confirmed` to record the selected subagent execution, then run `owner state set <name> build_mode subagent-driven-development`
+
+**TDD Mode**:
+
+| Option | Meaning | Applicable Scenario |
+|--------|---------|---------------------|
+| `tdd` | Write a failing test first for each task, then implement | Recommended. Changes involving business logic, new features, APIs |
+| `direct` | Implementation-first, no per-task Red-Green-Refactor requirement | Still requires relevant tests and bug-regression evidence; hotfix/tweak presets default to `direct` |
+
+Run `owner state set <name> tdd_mode <tdd|direct>`
+
+**Code Review Mode**:
+
+| Option | Meaning | Applicable Scenario |
+|--------|---------|---------------------|
+| `off` | No automatic code review dispatch | Documentation, configuration, copywriting, small low-risk tasks |
+| `standard` | No per-task reviewer by default; dispatch a per-task reviewer only when a task hits a risk signal, plus one final lightweight code review | Default recommended, suits most ordinary changes |
+| `thorough` | Dispatch a per-task reviewer (spec + quality) on every task, plus one final complete review | High-risk, multi-module, architecture or security-related changes |
+
+Run `owner state set <name> review_mode <off|standard|thorough>`
+
+`isolation` is a script-enforced hard constraint. Full workflow must write `current`, `branch`, or `worktree` during Open and complete the corresponding workspace preparation and `bound_branch` binding before entering Build; if it is missing, Build may only stop and return to Open for repair.
+
+`subagent_dispatch` is a script-enforced hard constraint that records the user's selected subagent execution. `build_mode: subagent-driven-development` requires `subagent_dispatch: confirmed` before leaving the build phase, otherwise both `owner guard build --apply` and `owner state transition build-complete` will fail; it is not a capability check.
+
+`tdd_mode` is a script-enforced hard constraint. Full workflow must have `tdd_mode` selected as `tdd` or `direct` before leaving the build phase, otherwise both `owner guard build --apply` and `owner state transition build-complete` will fail.
+
+`review_mode` is a script-enforced hard constraint. Full workflow must have `review_mode` selected as `off`, `standard`, or `thorough` before leaving the build phase, otherwise both `owner guard build --apply` and `owner state transition build-complete` will fail. Legacy state files without this field follow a compat path, but should be backfilled on recovery.
+
+`build_mode` defaults to `direct` only for hotfix/tweak presets. Full workflow must not default to `direct`. Use it only when the user explicitly asks to bypass the plan execution skills and you record an explicit override:
+
+```bash
+owner state set <name> direct_override true
+owner state set <name> build_mode direct
+```
+
+Without `direct_override: true`, `build_mode=direct` in full workflow is blocked by both guard and state transition.
+
+**Execution location**:
+
+Open has already prepared the current directory, branch, or Worktree according to `isolation` and returned the actual `projectRoot`. On resume, run `owner classic workspace resolve <name> --json`, enter the returned directory, then run `owner state select <change-name>`; do not create a Worktree, switch branches, commit a plan to transfer it across Worktrees, or rebind isolation in Build.
+
+**Execute plan**: Must handle execution according to the actual runtime of `build_mode`.
+
+- `build_mode: executing-plans`: **Immediately execute:** Use the Skill tool to load the Superpowers `executing-plans` skill. Skipping this step is prohibited. If loading fails, stop and report the error; do not substitute with normal conversation. After the skill loads, ARGUMENTS must include the same Language constraint as Step 1: `Language: Use the configured Owner artifact language from owner state get <name> language`. Execute according to plan.
+- `build_mode: subagent-driven-development`: The main session only coordinates and must not write implementation code directly. **Immediately execute:** Use the Skill tool to load the Superpowers `subagent-driven-development` skill. After the skill loads, read `owner-classic/reference/subagent-dispatch.md` for Owner-specific extensions (subagent dispatch, task isolation, checkoff verification, TDD constraints, continuous execution, context recovery) and apply them alongside the skill's workflow. If they conflict, the more specific Owner extensions take precedence.
+- If subagent dispatch fails, follow `owner-classic/reference/subagent-dispatch.md` to record the current task as `BLOCKED` with the failure reason; the main session must not take over implementation.
+
+**TDD Mode Execution Constraints**:
+
+If `tdd_mode: tdd`:
+- `build_mode: executing-plans`: After loading the execution skill and before executing the first task, **Immediately execute:** Use the Skill tool to load the Superpowers `test-driven-development` skill once. Skipping this step is prohibited. After the skill loads, start from the first unchecked task and follow the loaded TDD Red-Green-Refactor cycle for each task. Must not skip the failing test verification phase. Do not reload this skill for subsequent tasks; follow the already-loaded flow. If resuming after context compaction, re-run this step to load the TDD skill once, then continue from the first unchecked task.
+- `build_mode: subagent-driven-development`: The main session does not load the TDD skill. TDD constraints and evidence thresholds are defined in `owner-classic/reference/subagent-dispatch.md`; every background implementer and fix agent must use the Skill tool to load the Superpowers `test-driven-development` skill and follow the Owner-injected TDD hard constraint.
+
+If `tdd_mode: direct`: Follow normal flow, no enforced TDD.
+
+**`executing-plans` review gate**:
+
+Under `executing-plans`, the main session executes tasks directly (no isolated implementer subagent), so there is no per-task reviewer as in `subagent-driven-development`. Code review is done against completed diffs and scales with `review_mode`:
+
+- **`review_mode: off`**: No automatic code review. Do not load `requesting-code-review`. Record the skip reason in the verification report draft or tasks.md.
+- **`review_mode: standard`**: After all planned tasks are complete and before the build → verify phase guard, use the Skill tool to load the Superpowers `requesting-code-review` skill once and request one lightweight code review (correctness, security, edge cases) scoped to the whole change.
+- **`review_mode: thorough`**: In addition to the single final review, request one segmented code review per task segment (every 3 tasks, scoped to that segment's diff). If total tasks ≤ 3, skip the mid-execution segments and only do the final review. Each segment review uses `requesting-code-review` against the segment's commit range. This is the closest equivalent to `subagent-driven-development`'s per-task review that `executing-plans` can offer, since it has no isolated implementer to review per task.
+
+Requirements (apply to `standard` and `thorough`):
+- the `requesting-code-review` skill must be loaded before `owner guard <change-name> build --apply`
+- if loading `requesting-code-review` fails under `standard` or `thorough`, stop and ask the user to resolve the error and retry, or explicitly switch to `review_mode: off` with a recorded reason; never skip the gate or continue guard before that explicit switch
+- CRITICAL review findings (security vulnerabilities, data loss risk, build/test failures) must be fixed first and must not be carried into verify
+- if non-CRITICAL review findings are accepted, record the acceptance reason and impact scope in tasks.md, the commit body, a verification report draft, or another durable artifact
+
+### 3b. In-Execution Debugging (Debug Gate)
+
+During task execution, whenever a crash, unexpected behavior, test failure, or build failure appears while running the program, tests, build, or manual verification, must use the Skill tool to load the Superpowers `systematic-debugging` skill. Before root-cause investigation is complete, must not propose or implement source-code fixes.
+
+For specific investigation, minimal failing test, fix verification, and keeping the current change verification loop, follow `owner-classic/reference/debug-gate.md`.
+
+### 4. Spec Incremental Updates
+
+When the initial spec is found incomplete during implementation, handle by scale:
+
+| Scale | Trigger Conditions | Approach |
+|------|-------------------|----------|
+| Small | Missing acceptance scenarios, edge cases | Directly edit delta spec + design.md, append tasks.md tasks |
+| Medium | Interface changes, new components, data flow changes | **Pause, present the choice, and wait for the user to explicitly confirm**, then must use Skill tool to load the Superpowers `brainstorming` skill to update Design Doc + delta spec |
+| Large | Brand-new capability requirements | **Pause, present the split choice, and wait for the user to explicitly confirm**; after user confirms, create independent change through `/owner-open` |
+
+**50% Threshold Determination**: Using initial task count in tasks.md as baseline, if new tasks exceed half of that total, it's considered outside original plan scope, **must follow the `owner-classic/reference/decision-point.md` protocol to pause and wait for the user to decide whether to split into a new change**.
+
+When creating an independent change, must invoke `/owner-open`, not `/opsx:new` directly. `/owner-open` creates both OpenSpec artifacts and `.owner.yaml`, preventing the new change from leaving the Owner state machine.
+
+**User choices must include**:
+- "Split into new change" — create independent change via `/owner-open`
+- "Continue in current change" — record scope-expansion decision, update tasks.md and delta spec, then continue
+
+**Principles**:
+- Delta spec is a living document, can be modified at any time during this phase
+- Each update should be committed with commit message explaining the change reason
+- Do not sync to main spec in advance, sync uniformly during archiving
+- For small-scale incremental direct delta spec edits, note in commit message to facilitate design doc drift assessment during archiving
+
+### 5. Context Management
+
+Build is the longest phase and may span many tasks. To support resume after context compaction:
+
+- **After each task**: complete acceptance per the current execution branch and `review_mode` before checking off and committing. `subagent-driven-development` dispatches no per-task reviewer under `off`; under `standard`, a per-task reviewer fires only when the task hits a risk signal; under `thorough`, every task gets a per-task reviewer. All modes must perform targeted verification by unique task text. Parse tasks.md checkboxes to count remaining work without rereading unrelated task bodies
+- **Context compression recovery**: Follow `owner-classic/reference/context-recovery.md` with phase set to `build`.
+- **User manual-change resume**: handle uncommitted changes through `owner-classic/reference/dirty-worktree.md`. That protocol defines checks, attribution, and prohibitions. Build-specific handling:
+  1. After attribution, if the diff implies plan or spec changes, handle it through Step 4 "Spec Incremental Updates"
+- **Long task split**: if a single task exceeds 200 lines of code changes, consider splitting it into multiple subtasks and commits
+
+## Exit Conditions
+
+- All tasks.md checked
+- Code committed
+- Project-specific build/tests explicitly run and pass; do not rely only on guard auto-detection
+- `isolation` has been written as `current`, `branch`, or `worktree`
+- `build_mode` has been written as `subagent-driven-development`, `executing-plans`, or `direct` with explicit override; if `subagent-driven-development`, `subagent_dispatch` must be `confirmed`
+- `tdd_mode` has been written as `tdd` or `direct`
+- `review_mode` has been written as `off`, `standard`, or `thorough`
+- Code review has been completed per the `executing-plans` review gate (Section "Execute plan") for the chosen `review_mode`: under `standard` or `thorough`, code review has been requested and CRITICAL review findings fixed or non-CRITICAL acceptance rationale recorded; under `review_mode: off`, the reason for skipping automatic code review has been recorded in a persistent artifact
+- **Phase guard**: Run `owner guard <change-name> build --apply`; after all PASS, state advances to `phase: verify`
+
+Guard runs the inferred project build check (`npm run build`, Maven, or Cargo when detected). When the inferred command fails, guard prints the command output as evidence for debugging.
+
+If the project has no automatically inferred build command, the user or Agent must run the real build command first, then record its evidence separately:
+
+```bash
+owner state record-check <change-name> build --command "<actual build command>" --exit-code 0
+```
+
+`--command` records command text only; Owner **never executes it**. Build and verify evidence are separate and cannot substitute for each other. `OWNER_SKIP_BUILD=1` is only a compatibility bypass for legacy workflows, not auditable build evidence.
+
+Before exit, run guard to auto-transition:
+
+```bash
+owner guard <change-name> build --apply
+```
+
+State file is automatically updated to `phase: verify`, `verify_result: pending`.
+
+## Automatic Handoff to Next Phase
+
+Follow `owner-classic/reference/auto-transition.md`. Key command:
+
+```bash
+owner state next <change-name>
+```
+
+- `NEXT: auto` → invoke the skill pointed to by `SKILL` to enter the next phase
+- `NEXT: manual` → do not invoke the next skill; return control with `HINT`, end the invocation, and do not create another confirmation point
+- `NEXT: done` → workflow is complete, no further action needed

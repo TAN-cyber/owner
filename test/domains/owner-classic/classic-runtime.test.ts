@@ -1,0 +1,780 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import { PassThrough } from 'stream';
+import { spawnSync } from 'child_process';
+import { readRunState } from '../../../domains/engine/state.js';
+import { ensureClassicRuntimeRun } from '../../../domains/owner-classic/classic-runtime-run.js';
+
+const scriptsDir = path.resolve('assets', 'skills', 'owner', 'scripts');
+const stateScript = path.join(scriptsDir, 'owner-state.mjs');
+const validateScript = path.join(scriptsDir, 'owner-yaml-validate.mjs');
+const guardScript = path.join(scriptsDir, 'owner-guard.mjs');
+const handoffScript = path.join(scriptsDir, 'owner-handoff.mjs');
+const resumeProbeScript = path.join(scriptsDir, 'owner-resume-probe.mjs');
+const buildScript = path.resolve('scripts', 'build', 'build-classic-runtime.mjs');
+const temporaryDirectories: string[] = [];
+
+async function seedClassicProject(
+  projectRoot: string,
+  artifactLayout: 'legacy' | 'docs' = 'legacy',
+): Promise<void> {
+  await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, '.owner', 'config.yaml'),
+    [
+      'schema: owner.project.v1',
+      'default_workflow: classic',
+      'workflows: [classic]',
+      'classic:',
+      `  artifact_layout: ${artifactLayout}`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await fs.mkdir(
+    artifactLayout === 'docs'
+      ? path.join(projectRoot, 'docs', 'openspec')
+      : path.join(projectRoot, 'openspec'),
+    { recursive: true },
+  );
+}
+
+async function snapshotChange(changeDir: string): Promise<{ files: string[]; yaml: Buffer }> {
+  const files: string[] = [];
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      files.push(path.relative(changeDir, absolute).replaceAll('\\', '/'));
+      if (entry.isDirectory()) await visit(absolute);
+    }
+  }
+  await visit(changeDir);
+  return { files: files.sort(), yaml: await fs.readFile(path.join(changeDir, '.owner.yaml')) };
+}
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) =>
+        fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }),
+      ),
+  );
+});
+
+describe('Classic runtime CLI adapter', () => {
+  it.each(['docs', 'legacy'] as const)(
+    'discovers the %s project from a nested cwd across all Classic launchers',
+    async (artifactLayout) => {
+      const directory = await fs.mkdtemp(
+        path.join(os.tmpdir(), `owner-classic-nested-${artifactLayout}-`),
+      );
+      temporaryDirectories.push(directory);
+      await seedClassicProject(directory, artifactLayout);
+      const nested = path.join(directory, 'packages', 'app');
+      await fs.mkdir(nested, { recursive: true });
+      const changesRoot =
+        artifactLayout === 'docs'
+          ? path.join(directory, 'docs', 'openspec', 'changes')
+          : path.join(directory, 'openspec', 'changes');
+      const run = (script: string, args: string[]) =>
+        spawnSync(process.execPath, [script, ...args], {
+          cwd: nested,
+          encoding: 'utf8',
+        });
+
+      const initialized = run(stateScript, ['init', 'nested-layout', 'full']);
+      expect(initialized.status, initialized.stderr).toBe(0);
+      const changeDir = path.join(changesRoot, 'nested-layout');
+      await fs.writeFile(
+        path.join(changeDir, 'proposal.md'),
+        '# Proposal\nAdd nested project discovery for Classic commands.\n',
+      );
+      await fs.writeFile(
+        path.join(changeDir, 'design.md'),
+        '# Design\nResolve repository artifacts from the configured project root.\n',
+      );
+      await fs.writeFile(
+        path.join(changeDir, 'tasks.md'),
+        '- [x] Exercise every Classic launcher from a nested cwd\n',
+      );
+
+      const state = run(stateScript, ['get', 'nested-layout', 'phase']);
+      expect(state.status, state.stderr).toBe(0);
+      expect(state.stdout).toBe('open\n');
+
+      await ensureClassicRuntimeRun(changeDir);
+      const recorded = run(stateScript, [
+        'record-check',
+        'nested-layout',
+        'build',
+        '--command',
+        'pnpm build',
+        '--exit-code',
+        '0',
+      ]);
+      expect(recorded.status, recorded.stderr).toBe(0);
+      expect(recorded.stderr).toContain(
+        '[RECORDED] build exit=0 cwd=packages/app command=pnpm build',
+      );
+
+      const validated = run(validateScript, ['nested-layout']);
+      expect(validated.status, validated.stderr).toBe(0);
+      expect(validated.stderr).toContain('validation PASSED');
+
+      const guarded = run(guardScript, ['nested-layout', 'open']);
+      expect(guarded.status, guarded.stderr).toBe(0);
+      expect(guarded.stderr).toContain('ALL CHECKS PASSED');
+
+      const handoff = run(handoffScript, ['nested-layout', '--hash-only']);
+      expect(handoff.status, handoff.stderr).toBe(0);
+      expect(handoff.stdout.trim()).toMatch(/^[a-f0-9]{64}$/u);
+
+      const probeInput = JSON.stringify({
+        schema_version: 'owner.resume_probe.v1',
+        utterance: 'continue nested-layout',
+        locale: 'en',
+        agent_context: { non_trivial_work: true, already_in_owner_flow: false },
+      });
+      const probe = run(resumeProbeScript, ['probe', probeInput]);
+      expect(probe.status, probe.stderr).toBe(0);
+      expect(JSON.parse(probe.stdout)).toMatchObject({
+        action: 'auto_resume',
+        changeName: 'nested-layout',
+        phase: 'open',
+      });
+
+      const alternateRoot =
+        artifactLayout === 'docs'
+          ? path.join(directory, 'openspec')
+          : path.join(directory, 'docs', 'openspec');
+      await expect(fs.access(alternateRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it('rejects state initialization when project config is missing', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-no-config-state-'));
+    temporaryDirectories.push(directory);
+    await fs.mkdir(path.join(directory, '.git'));
+
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      const result = await runClassicCli(['state', 'init', 'demo', 'full']);
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('Classic artifact layout is unavailable');
+      await expect(fs.access(path.join(directory, 'openspec'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('initializes state in the configured root while preserving a standalone OpenSpec root', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-dual-root-state-'));
+    temporaryDirectories.push(directory);
+    await fs.mkdir(path.join(directory, '.git'));
+    await fs.mkdir(path.join(directory, '.owner'));
+    await fs.writeFile(
+      path.join(directory, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: classic',
+        'workflows: [classic]',
+        'classic:',
+        '  artifact_layout: legacy',
+        '',
+      ].join('\n'),
+    );
+    await fs.mkdir(path.join(directory, 'openspec', 'changes'), { recursive: true });
+    await fs.mkdir(path.join(directory, 'docs', 'openspec', 'changes'), { recursive: true });
+
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      const result = await runClassicCli(['state', 'init', 'demo', 'full']);
+
+      expect(result.exitCode).toBe(0);
+      await expect(
+        fs.stat(path.join(directory, 'openspec', 'changes', 'demo', '.owner.yaml')),
+      ).resolves.toBeDefined();
+      await expect(
+        fs.readdir(path.join(directory, 'docs', 'openspec', 'changes')),
+      ).resolves.toEqual([]);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('allows Hook Guard writes for the configured root when a standalone root exists', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-dual-root-hook-'));
+    temporaryDirectories.push(directory);
+    await fs.mkdir(path.join(directory, '.git'));
+    await fs.mkdir(path.join(directory, '.owner'));
+    await fs.writeFile(
+      path.join(directory, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: classic',
+        'workflows: [classic]',
+        'classic:',
+        '  artifact_layout: legacy',
+        '',
+      ].join('\n'),
+    );
+    const legacyChange = path.join(directory, 'openspec', 'changes', 'demo');
+    await fs.mkdir(legacyChange, { recursive: true });
+    await fs.writeFile(
+      path.join(legacyChange, '.owner.yaml'),
+      ['workflow: hotfix', 'phase: build', 'design_doc: null', 'archived: false', ''].join('\n'),
+    );
+    await fs.mkdir(path.join(directory, 'docs', 'openspec', 'changes'), { recursive: true });
+
+    const { inspectClassicHookGuard } =
+      await import('../../../domains/owner-classic/classic-hook-guard.js');
+    const result = await inspectClassicHookGuard(directory, 'demo', {
+      intent: 'write',
+      targets: [path.join(directory, 'src', 'feature.ts')],
+      toolName: 'Write',
+    });
+
+    expect(result).toMatchObject({ allowed: true, workflow: 'classic', change: 'demo' });
+  });
+
+  it('creates and reads Classic state from a configured docs layout', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-docs-runtime-'));
+    temporaryDirectories.push(directory);
+    await fs.mkdir(path.join(directory, '.git'));
+    await fs.mkdir(path.join(directory, '.owner'));
+    await fs.writeFile(
+      path.join(directory, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: classic',
+        'workflows: [classic]',
+        'native:',
+        '  artifact_root: docs',
+        'classic:',
+        '  artifact_layout: docs',
+        '  language: zh-CN',
+        '',
+      ].join('\n'),
+    );
+    await fs.mkdir(path.join(directory, 'docs', 'openspec'), { recursive: true });
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      expect((await runClassicCli(['state', 'get', 'demo', 'phase'])).stdout).toBe('open\n');
+      await expect(
+        fs.stat(path.join(directory, 'docs', 'openspec', 'changes', 'demo', '.owner.yaml')),
+      ).resolves.toBeDefined();
+      await expect(fs.stat(path.join(directory, 'openspec'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('ignores a user-facing owner-classic wrapper when discovering the internal runtime package', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-classic-wrapper-'));
+    temporaryDirectories.push(directory);
+    const wrapper = path.join(directory, 'owner-classic');
+    await fs.mkdir(wrapper, { recursive: true });
+    await fs.writeFile(
+      path.join(wrapper, 'SKILL.md'),
+      '---\nname: owner-classic\n---\n\n# User-facing wrapper\n',
+      'utf8',
+    );
+    await seedClassicProject(directory);
+    const previousRoot = process.env.OWNER_RUNTIME_CLASSIC_ROOT;
+    const previous = process.cwd();
+    process.env.OWNER_RUNTIME_CLASSIC_ROOT = wrapper;
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      const changeDir = path.join(directory, 'openspec', 'changes', 'demo');
+
+      await expect(ensureClassicRuntimeRun(changeDir)).resolves.toBeDefined();
+      await expect(readRunState(changeDir)).resolves.toMatchObject({ skill: 'owner-classic' });
+    } finally {
+      process.chdir(previous);
+      if (previousRoot === undefined) delete process.env.OWNER_RUNTIME_CLASSIC_ROOT;
+      else process.env.OWNER_RUNTIME_CLASSIC_ROOT = previousRoot;
+    }
+  });
+
+  it('records current-Run command checks through the state dispatcher', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-record-check-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      await ensureClassicRuntimeRun(path.join(directory, 'openspec', 'changes', 'demo'));
+      const result = await runClassicCli([
+        'state',
+        'record-check',
+        'demo',
+        'build',
+        '--command',
+        'npx tsc --noEmit',
+        '--exit-code',
+        '0',
+        '--cwd',
+        '.',
+      ]);
+
+      expect(result).toMatchObject({ exitCode: 0 });
+      expect(result.stderr).toContain('[RECORDED] build exit=0 cwd=. command=npx tsc --noEmit');
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('rejects record-check without a current Run without changing any files', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-record-check-legacy-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      const changeDir = path.join(directory, 'openspec', 'changes', 'demo');
+      const yamlPath = path.join(changeDir, '.owner.yaml');
+      const yaml = (await fs.readFile(yamlPath, 'utf8')).replace(/^run_id:.*\r?\n/mu, '');
+      await fs.writeFile(yamlPath, yaml);
+      await fs.rm(path.join(changeDir, '.owner'), { recursive: true, force: true });
+      const before = await snapshotChange(changeDir);
+
+      const result = await runClassicCli([
+        'state',
+        'record-check',
+        'demo',
+        'build',
+        '--command',
+        'pnpm build',
+        '--exit-code',
+        '0',
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('existing synchronized Classic Run');
+      expect(await snapshotChange(changeDir)).toEqual(before);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it.each([
+    ['an invalid migration marker', 'marker', 'classic_migration must be 1'],
+    ['a mismatched Run skill identity', 'skill', 'Classic Run skill mismatch'],
+  ])('rejects record-check with %s without changing any files', async (_label, fault, error) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), `owner-record-check-${fault}-`));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      const changeDir = path.join(directory, 'openspec', 'changes', 'demo');
+      await ensureClassicRuntimeRun(changeDir);
+      if (fault === 'marker') {
+        const yamlPath = path.join(changeDir, '.owner.yaml');
+        const yaml = (await fs.readFile(yamlPath, 'utf8')).replace(
+          /^classic_migration:.*$/mu,
+          'classic_migration: 999',
+        );
+        await fs.writeFile(yamlPath, yaml);
+      } else {
+        const runPath = path.join(changeDir, '.owner', 'run-state.json');
+        const run = JSON.parse(await fs.readFile(runPath, 'utf8'));
+        run.skill = 'not-owner-classic';
+        await fs.writeFile(runPath, `${JSON.stringify(run, null, 2)}\n`);
+      }
+      const before = await snapshotChange(changeDir);
+
+      const result = await runClassicCli([
+        'state',
+        'record-check',
+        'demo',
+        'build',
+        '--command',
+        'pnpm build',
+        '--exit-code',
+        '0',
+      ]);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(error);
+      expect(await snapshotChange(changeDir)).toEqual(before);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it.each([
+    [['deploy', '--command', 'npm test', '--exit-code', '0'], 'Invalid command check scope'],
+    [['build', '--exit-code', '0'], 'Missing option: --command'],
+    [['build', '--command', 'npm test', '--exit-code', '1.5'], 'integer'],
+    [['build', '--command', 'npm test', '--exit-code', '0', '--wat'], 'Unknown option'],
+  ])('rejects invalid record-check arguments %#', async (tail, message) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-record-check-invalid-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    const previous = process.cwd();
+    process.chdir(directory);
+    try {
+      const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+      expect((await runClassicCli(['state', 'init', 'demo', 'full'])).exitCode).toBe(0);
+      const result = await runClassicCli(['state', 'record-check', 'demo', ...tail]);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(message);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('routes a command and preserves stdout, stderr, and exit code', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+    const result = await runClassicCli(['state', 'get', 'phase'], {
+      state: async (args) => ({
+        exitCode: 3,
+        stdout: args.join('|'),
+        stderr: 'diagnostic',
+      }),
+    });
+
+    expect(result).toEqual({
+      exitCode: 3,
+      stdout: 'get|phase',
+      stderr: 'diagnostic',
+    });
+  });
+
+  it('serializes the complete command result for internal --json callers', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+    const result = await runClassicCli(['validate', '--json', 'change-dir'], {
+      validate: async (_args, options) => ({
+        exitCode: 2,
+        stdout: options.json ? 'structured' : 'plain',
+        stderr: 'invalid state',
+      }),
+    });
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toBeUndefined();
+    expect(JSON.parse(result.stdout ?? '')).toEqual({
+      command: 'validate',
+      exitCode: 2,
+      stdout: 'structured',
+      stderr: 'invalid state',
+    });
+  });
+
+  it('rejects unknown commands after all recognized handlers are registered', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+
+    await expect(runClassicCli(['unknown'])).resolves.toMatchObject({
+      exitCode: 64,
+      stderr: expect.stringContaining('Unknown Classic command'),
+    });
+  });
+
+  it('routes intent frames through the Classic CLI', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+    const frame = {
+      schema_version: 'owner.intent.v1',
+      utterance: 'fix the broken guard',
+      locale: 'en',
+      intent: { name: 'fix_bug', confidence: 0.92 },
+      entities: [{ type: 'bug_signal', value: 'broken', text: 'broken' }],
+      slots: {
+        requested_action: 'fix',
+        workflow_candidate: 'hotfix',
+        user_explicit_workflow: null,
+        change_id: null,
+        target_area: 'guard',
+        scope: 'small',
+        existing_behavior: true,
+        new_capability: false,
+        public_api_change: false,
+        schema_change: false,
+        cross_module_change: false,
+      },
+      context: { active_changes_count: 0, active_change_names: [], dirty_worktree: false },
+      evidence: [
+        { field: 'intent.name', quote: 'fix', source: 'user' },
+        { field: 'slots.workflow_candidate', quote: 'broken', source: 'user' },
+      ],
+      proposed_route: {
+        name: 'hotfix',
+        next_skill: 'owner-hotfix',
+        confidence: 0.9,
+        requires_confirmation: false,
+        fallback_reason: null,
+      },
+    };
+
+    const result = await runClassicCli(['intent', 'route', JSON.stringify(frame)]);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout ?? '')).toMatchObject({
+      route: { name: 'hotfix', next_skill: 'owner-hotfix' },
+    });
+  });
+
+  it('returns readable intent validation errors', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+
+    const result = await runClassicCli(['intent', 'route', '{"schema_version":"wrong"}']);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('Invalid OwnerIntentFrame');
+  });
+  it('routes intent frames from --stdin', async () => {
+    const { runClassicCli } = await import('../../../domains/owner-classic/classic-cli.js');
+    const frame = {
+      schema_version: 'owner.intent.v1',
+      utterance: 'fix the broken guard',
+      locale: 'en',
+      intent: { name: 'fix_bug', confidence: 0.92 },
+      entities: [{ type: 'bug_signal', value: 'broken', text: 'broken' }],
+      slots: {
+        requested_action: 'fix',
+        workflow_candidate: 'hotfix',
+        user_explicit_workflow: null,
+        change_id: null,
+        target_area: 'guard',
+        scope: 'small',
+        existing_behavior: true,
+        new_capability: false,
+        public_api_change: false,
+        schema_change: false,
+        cross_module_change: false,
+      },
+      context: { active_changes_count: 0, active_change_names: [], dirty_worktree: false },
+      evidence: [
+        { field: 'intent.name', quote: 'fix', source: 'user' },
+        { field: 'slots.workflow_candidate', quote: 'broken', source: 'user' },
+      ],
+      proposed_route: {
+        name: 'hotfix',
+        next_skill: 'owner-hotfix',
+        confidence: 0.9,
+        requires_confirmation: false,
+        fallback_reason: null,
+      },
+    };
+
+    const originalStdin = process.stdin;
+    const input = new PassThrough();
+    input.end(JSON.stringify(frame));
+    Object.defineProperty(process, 'stdin', { value: input, configurable: true });
+
+    const result = await runClassicCli(['intent', 'route', '--stdin']);
+
+    Object.defineProperty(process, 'stdin', { value: originalStdin, configurable: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout ?? '')).toMatchObject({
+      route: { name: 'hotfix', next_skill: 'owner-hotfix' },
+    });
+  });
+});
+describe('Classic script bundles', () => {
+  it('runs without dist or node_modules and exposes JSON diagnostics', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-script-'));
+    temporaryDirectories.push(directory);
+    const isolatedStateScript = path.join(directory, 'owner-state.mjs');
+    await fs.copyFile(
+      path.join(scriptsDir, 'owner-runtime.mjs'),
+      path.join(directory, 'owner-runtime.mjs'),
+    );
+    await fs.copyFile(stateScript, isolatedStateScript);
+
+    const result = spawnSync(
+      process.execPath,
+      [isolatedStateScript, 'get', 'missing', 'phase', '--json'],
+      {
+        cwd: directory,
+        encoding: 'utf8',
+      },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      exitCode: result.status,
+    });
+  });
+
+  it('is fresh and lists the shared runtime plus launchers in the shipped manifest', async () => {
+    const check = spawnSync(process.execPath, [buildScript, '--check'], {
+      cwd: path.resolve('.'),
+      encoding: 'utf8',
+    });
+    const manifest = JSON.parse(
+      await fs.readFile(path.resolve('assets', 'manifest.json'), 'utf8'),
+    ) as {
+      skills: string[];
+    };
+
+    expect(check.status, check.stderr || check.stdout).toBe(0);
+    expect(manifest.skills).toContain('owner/scripts/owner-runtime.mjs');
+    expect(manifest.skills).toContain('owner/scripts/owner-state.mjs');
+    expect(manifest.skills).toContain('owner/scripts/owner-guard.mjs');
+    expect(manifest.skills).toContain('owner/scripts/owner-intent.mjs');
+  });
+
+  it('executes state and validation commands from a standalone project', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-script-state-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+
+    const init = spawnSync(process.execPath, [stateScript, 'init', 'demo', 'full'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    const demoDir = path.join(directory, 'openspec', 'changes', 'demo');
+    await fs.writeFile(path.join(demoDir, 'proposal.md'), 'proposal\n');
+    await fs.writeFile(path.join(demoDir, 'design.md'), 'design\n');
+    await fs.writeFile(path.join(demoDir, 'tasks.md'), '- [x] seed\n');
+    const get = spawnSync(process.execPath, [stateScript, 'get', 'demo', 'phase'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    const set = spawnSync(
+      process.execPath,
+      [stateScript, 'set', 'demo', 'build_mode', 'executing-plans'],
+      { cwd: directory, encoding: 'utf8' },
+    );
+    const transition = spawnSync(
+      process.execPath,
+      [stateScript, 'transition', 'demo', 'open-complete'],
+      { cwd: directory, encoding: 'utf8' },
+    );
+    const next = spawnSync(process.execPath, [stateScript, 'next', 'demo'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    const validate = spawnSync(process.execPath, [validateScript, 'demo'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+
+    expect(init.status).toBe(0);
+    expect(get).toMatchObject({ status: 0, stdout: 'open\n' });
+    expect(set.status).toBe(0);
+    expect(transition.status).toBe(0);
+    const eventLog = await fs.readFile(path.join(demoDir, '.owner', 'state-events.jsonl'), 'utf8');
+    expect(JSON.parse(eventLog.trim())).toMatchObject({
+      schemaVersion: 1,
+      change: 'demo',
+      event: 'open-complete',
+      source: 'owner-state',
+      from: { phase: 'open' },
+      to: { phase: 'design' },
+      effects: [{ field: 'phase', from: 'open', to: 'design' }],
+    });
+    expect(next.stdout).toContain('SKILL: owner-design');
+    expect(validate.status).toBe(0);
+    expect(validate.stderr).toContain('validation PASSED');
+  });
+
+  it('keeps task-checkoff validation in the TypeScript state command', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-script-task-'));
+    temporaryDirectories.push(directory);
+    await fs.mkdir(path.join(directory, 'docs'), { recursive: true });
+    await fs.writeFile(
+      path.join(directory, 'docs', 'plan.md'),
+      '- [x] Implement runtime facade\n- [ ] Continue migration\n',
+    );
+
+    const pass = spawnSync(
+      process.execPath,
+      [stateScript, 'task-checkoff', 'docs/plan.md', 'Implement runtime facade'],
+      { cwd: directory, encoding: 'utf8' },
+    );
+    const fail = spawnSync(
+      process.execPath,
+      [stateScript, 'task-checkoff', 'docs/plan.md', 'Continue migration'],
+      { cwd: directory, encoding: 'utf8' },
+    );
+
+    expect(pass.status).toBe(0);
+    expect(pass.stdout).toContain('TASK_CHECKOFF: PASS');
+    expect(fail.status).toBe(1);
+    expect(fail.stderr).toContain('task is not checked');
+  });
+
+  it('rejects direct writes to machine-owned Run fields', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-script-owned-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    spawnSync(process.execPath, [stateScript, 'init', 'demo', 'full'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+
+    const result = spawnSync(
+      process.execPath,
+      [stateScript, 'set', 'demo', 'current_step', 'completed'],
+      { cwd: directory, encoding: 'utf8' },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Unknown field');
+  });
+
+  it('re-resolves the Run step when migrated Classic configuration changes', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-script-sync-'));
+    temporaryDirectories.push(directory);
+    await seedClassicProject(directory);
+    spawnSync(process.execPath, [stateScript, 'init', 'demo', 'full'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    const changeDir = path.join(directory, 'openspec', 'changes', 'demo');
+    await ensureClassicRuntimeRun(changeDir);
+    spawnSync(process.execPath, [stateScript, 'set', 'demo', 'phase', 'build'], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, OWNER_FORCE_PHASE: '1' },
+    });
+    // Full-workflow build source writes require a recorded design_doc, otherwise
+    // the hook guard treats it as an illegal phase jump.
+    await fs.mkdir(path.join(directory, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(directory, 'docs', 'design.md'), 'design\n');
+    spawnSync(process.execPath, [stateScript, 'set', 'demo', 'design_doc', 'docs/design.md'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    await fs.mkdir(path.join(directory, 'docs'), { recursive: true });
+    await fs.writeFile(path.join(directory, 'docs', 'plan.md'), '- [ ] implement\n');
+
+    const set = spawnSync(process.execPath, [stateScript, 'set', 'demo', 'plan', 'docs/plan.md'], {
+      cwd: directory,
+      encoding: 'utf8',
+    });
+    const runState = await readRunState(changeDir);
+
+    expect(set.status).toBe(0);
+    expect(runState).not.toBeNull();
+    expect(runState!.currentStep).toBe('full.build.configure');
+  });
+});

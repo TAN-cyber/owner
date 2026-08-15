@@ -1,0 +1,49 @@
+# Source code (only dist/ gets published)
+src/
+build.js
+tsconfig.json
+
+# Secrets / env
+.env
+.env.*
+.env*
+**/.env*
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Git
+.git/
+.gitignore
+
+# Test / coverage
+coverage/
+*.test.ts
+*.spec.ts
+__tests__/
+
+# Lock files
+pnpm-lock.yaml
+skills-lock.json
+
+# Logs
+*.log
+npm-debug.log*
+
+.agents/

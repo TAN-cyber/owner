@@ -1,0 +1,40 @@
+name: Greetings
+
+on:
+  # Run the base branch workflow so forked PRs can receive the first-interaction comment.
+  # This workflow must never check out or execute pull request code.
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  greeting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@1c4688942c71f71d4f5502a26ea67c331730fa4d # v3.1.0
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |-
+            👋 Thanks for opening your first issue in Owner, @${{ github.actor }}.
+
+            Please make sure the issue includes the expected behavior, actual behavior, and enough context to reproduce or evaluate the request.
+          pr_message: |-
+            👋 Thanks for opening your first PR to Owner, @${{ github.actor }}.
+
+            Before review, please make sure the PR title follows Conventional Commits, for example `fix: handle project-scope init`, and that the checklist in the PR template is up to date.
+
+            🧪 The most useful local checks are:
+
+            ```bash
+            pnpm build
+            pnpm lint
+            pnpm format:check
+            pnpm test
+            ```
+
+            🧰 If your change touches `assets/skills/owner/scripts/`, please also check script portability across macOS, Linux, and Windows Git Bash. Avoid `sed -i`, support both `sha256sum` and `shasum -a 256`, and guard optional `grep` pipelines with `|| true`.
+
+            ✨ We appreciate the contribution and will take a look as soon as we can.

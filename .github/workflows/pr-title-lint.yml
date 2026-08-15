@@ -1,0 +1,46 @@
+name: PR Title Lint
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint-pr-title:
+    name: Lint PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          scopes: |
+            cli
+            commands
+            core
+            skills
+            assets
+            scripts
+            docs
+            ci
+            deps
+            release
+          requireScope: false
+          subjectPattern: ^.{1,72}$
+          subjectPatternError: |
+            PR title subject must be 72 characters or fewer.
+            Found: "{subject}" ({length} characters)

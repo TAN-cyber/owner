@@ -1,0 +1,66 @@
+name: 💬 Question
+description: Ask about installing, configuring, or using Owner.
+title: 'Question: '
+labels: ['question']
+body:
+  - type: textarea
+    attributes:
+      label: ❓ Question
+      description: What are you trying to understand or accomplish?
+      placeholder: 'I am trying to use Owner to ...'
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 🎯 Topic
+      description: Which part of Owner is your question about?
+      options:
+        - CLI command / user interaction (`app/`)
+        - Classic workflow runtime (`domains/owner-classic`, `assets/skills/owner/scripts/`)
+        - Engine (`domains/engine`)
+        - Native workflow runtime (`domains/owner-native`)
+        - Integrations (`domains/integrations`)
+        - Skill domain (`domains/skill`)
+        - Workflow contract (`domains/workflow-contract`)
+        - Platform adapter / installer (`platform/*`)
+        - Bundled skills or assets (`assets/skills/`, `assets/skills-zh/`)
+        - Repository automation (`scripts/*`)
+        - Documentation
+        - CI / release / architecture checks
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🔍 What you tried
+      description: Include commands, configuration, docs you read, or workflow steps you followed.
+      placeholder: |
+        - Ran `owner init ...`
+        - Ran `owner doctor ...`
+        - Read `README.md` section ...
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🖥️ Environment
+      description: Add details if the question depends on your setup.
+      value: |
+        - OS:
+        - Shell:
+        - Node:
+        - Install scope: project / global
+        - Skill language: en / zh
+        - Target AI platform(s):
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🧩 Additional context
+      description: Links, screenshots, logs, or related issues.
+    validations:
+      required: false

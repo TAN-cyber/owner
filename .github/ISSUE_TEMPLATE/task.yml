@@ -1,0 +1,64 @@
+name: 🛠️ Maintenance Task
+description: Track project maintenance, refactoring, docs, or release work.
+title: 'chore: '
+labels: ['task']
+body:
+  - type: textarea
+    attributes:
+      label: 🎯 Goal
+      description: What needs to be done, and why?
+      placeholder: 'Update ... so that ...'
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 🧱 Task type
+      options:
+        - Refactor
+        - Documentation
+        - Tests
+        - CI
+        - Release
+        - Dependencies
+        - Repository maintenance
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 📌 Scope
+      description: List the files, commands, platforms, or workflows that are expected to change.
+      placeholder: |
+        - `app/...`
+        - `domains/<domain>/...`
+        - `platform/...`
+        - `scripts/...`
+        - `assets/skills/...`
+        - `test/domains/<domain>/...`
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: ✅ Acceptance criteria
+      description: What must be true when this task is complete?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 🧪 Suggested verification
+      description: Commands or manual checks that should pass.
+      placeholder: |
+        - `pnpm build`
+        - `pnpm lint`
+        - `pnpm run lint:architecture`
+        - `pnpm test`
+        - `npx vitest run test/domains/owner-classic/owner-scripts.test.ts`
+    validations:
+      required: false

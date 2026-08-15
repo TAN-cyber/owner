@@ -1,0 +1,86 @@
+name: 🚀 Feature Request
+description: Suggest an improvement to Owner.
+title: 'feat: '
+labels: ['enhancement', 'needs-triage']
+body:
+  - type: checkboxes
+    attributes:
+      label: 🔎 Existing issue check
+      description: Please search existing issues before opening a new one.
+      options:
+        - label: I have searched the existing issues.
+          required: true
+
+  - type: textarea
+    attributes:
+      label: 🧭 Problem
+      description: What workflow problem should this solve?
+      placeholder: 'When using Owner to ..., I need ...'
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: ✨ Proposed solution
+      description: Describe the behavior you want Owner to provide.
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 🎯 Primary area
+      description: Where would this feature live?
+      options:
+        - CLI command / user interaction (`app/`)
+        - Classic workflow runtime (`domains/owner-classic`, `assets/skills/owner/scripts/`)
+        - Engine (`domains/engine`)
+        - Native workflow runtime (`domains/owner-native`)
+        - Integrations (`domains/integrations`)
+        - Skill domain (`domains/skill`)
+        - Workflow contract (`domains/workflow-contract`)
+        - Platform adapter / installer (`platform/*`)
+        - Bundled skills or assets (`assets/skills/`, `assets/skills-zh/`)
+        - Repository automation (`scripts/*`)
+        - Tests / repository architecture
+        - Documentation
+        - CI / release
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 🪐 Workflow phase
+      description: If this affects a Owner phase, choose the closest one.
+      options:
+        - Not phase-specific
+        - Open
+        - Design
+        - Build
+        - Verify
+        - Archive
+        - Hotfix
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🔀 Alternatives considered
+      description: What workarounds or alternate designs have you considered?
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🧰 Compatibility notes
+      description: Mention affected platforms, install scopes, languages, test ownership, or runtime/generated assets if relevant.
+      placeholder: 'For example: project/global scope, English/Chinese skills, macOS/Linux/Windows, `test/domains/<domain>/`, or regenerated Classic runtime assets.'
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 🧩 Additional context
+      description: Links, examples, screenshots, or related projects.
+    validations:
+      required: false

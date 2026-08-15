@@ -1,0 +1,1236 @@
+import path from 'path';
+import os from 'os';
+import { checkbox, select } from '@inquirer/prompts';
+import { platformSelectPrompt } from './platform-select-prompt.js';
+import {
+  SUPPORTED_PLATFORMS,
+  getPlatformSkillsDir,
+  type Platform,
+} from '../../platform/install/platforms.js';
+import {
+  resolvePlatformTarget,
+  type PlatformTargetResolution,
+} from '../../platform/install/platform-targets.js';
+import {
+  detectPlatforms,
+  hasSkills,
+  getBaseDir,
+  type InstallScope,
+} from '../../platform/install/detect.js';
+import {
+  readProjectRegistry,
+  upsertProjectInstallation,
+} from '../../platform/install/project-registry.js';
+import type { InstallMode } from '../../platform/install/types.js';
+import {
+  copyOwnerSkillsForPlatform,
+  copyOwnerRulesForPlatform,
+  createWorkingDirs,
+  prepareNativeSkillInstallTarget,
+} from '../../domains/skill/platform-install.js';
+import {
+  reconcileOwnerHooksForPlatform,
+  reconcileProjectOwnerHooksForPlatform,
+} from '../../domains/skill/hook-lifecycle.js';
+import { syncOwnerProjectInstructions } from '../../domains/skill/project-instructions.js';
+import { LANGUAGES, type LanguageConfig } from '../../domains/skill/languages.js';
+import { resolveInitWorkflow } from '../../domains/owner-entry/init-workflow.js';
+import type { OwnerWorkflow, InitWorkflowSelection } from '../../domains/owner-entry/types.js';
+import { migrateLegacyClassicSelection } from '../../domains/owner-entry/current-selection.js';
+import { defaultProjectConfig } from '../../domains/owner-native/native-config.js';
+import {
+  ensureNativeDirectories,
+  nativeProjectPaths,
+} from '../../domains/owner-native/native-paths.js';
+import {
+  installOpenSpec,
+  isCommandAvailable,
+  isOpenSpecCliCompatible,
+} from '../../domains/integrations/openspec.js';
+import {
+  assertClassicLayoutInitializationSafe,
+  beginClassicLayoutInitialization,
+  checkpointClassicLayoutInitialization,
+  completeClassicLayoutInitialization,
+  type ClassicLayoutInitializationPermit,
+} from '../../domains/owner-classic/classic-layout-initialization.js';
+import { classicLayoutPaths } from '../../domains/owner-classic/classic-layout.js';
+import { assertClassicOpenSpecRootHealthy } from '../../domains/owner-classic/classic-openspec-root.js';
+import {
+  readWorkflowProjectConfigDocument,
+  readWorkflowProjectConfigSnapshot,
+} from '../../domains/workflow-contract/project-config-reader.js';
+import { writeWorkflowProjectConfig } from '../../domains/workflow-contract/project-config-writer.js';
+import { ensureOwnerProjectGitignore } from '../../domains/workflow-contract/project-gitignore.js';
+import {
+  readWorkflowGlobalConfig,
+  writeWorkflowGlobalConfig,
+} from '../../domains/workflow-contract/global-config.js';
+import type {
+  WorkflowGlobalConfig,
+  WorkflowProjectConfig,
+} from '../../domains/workflow-contract/types.js';
+import { installSuperpowersForPlatforms } from '../../domains/integrations/superpowers.js';
+import { printVersionInfo } from '../../platform/version/version.js';
+import { printOwnerBanner } from '../cli/owner-banner.js';
+import { t, type TranslationKey } from './i18n.js';
+import { detectInstalledOwnerTargets } from './update.js';
+import type { CommandExecutionResult } from './command-result.js';
+
+type InitOptions = {
+  yes?: boolean;
+  skipExisting?: boolean;
+  overwrite?: boolean;
+  json?: boolean;
+  scope?: InstallScope;
+  language?: string;
+  installMode?: InstallMode;
+  workflow?: InitWorkflowSelection;
+  artifactRoot?: string;
+  platform?: string;
+};
+
+function workflowChoiceNames(lang: string): Array<{
+  name: string;
+  value: InitWorkflowSelection;
+}> {
+  if (lang === 'zh') {
+    return [
+      {
+        name: 'Native — 面向强模型的轻量自主流程，自带澄清、状态、检查与自动推进，不依赖外部 Skill',
+        value: 'native',
+      },
+      {
+        name: 'Classic — 面向高约束或较弱模型的完整 Spec/TDD 阶段流程，使用 OpenSpec 与 Superpowers',
+        value: 'classic',
+      },
+      {
+        name: '两者 — 同时安装两套独立入口；/owner 默认使用 Native，也可显式进入 Classic',
+        value: 'both',
+      },
+    ];
+  }
+  return [
+    {
+      name: 'Native — lightweight autonomy for strong models, with clarification, state, checks, and auto-progression; no external skills',
+      value: 'native',
+    },
+    {
+      name: 'Classic — full Spec/TDD phases for high-control work or weaker models, using OpenSpec and Superpowers',
+      value: 'classic',
+    },
+    {
+      name: 'Both — install two independent entries; /owner defaults to Native and Classic remains explicit',
+      value: 'both',
+    },
+  ];
+}
+
+async function selectWorkflow(
+  options: InitOptions,
+  lang: string,
+  suggested: InitWorkflowSelection,
+): Promise<InitWorkflowSelection> {
+  if (options.workflow) return options.workflow;
+  if (options.yes || options.json) return suggested;
+  return select({
+    message: lang === 'zh' ? '选择要初始化的 Owner 模式：' : 'Select Owner workflow(s):',
+    choices: workflowChoiceNames(lang),
+    default: suggested,
+  });
+}
+
+function includesWorkflow(selection: InitWorkflowSelection, workflow: OwnerWorkflow): boolean {
+  return selection === 'both' || selection === workflow;
+}
+
+type InstallStatus = 'installed' | 'skipped' | 'failed';
+type ComponentAction = 'overwrite' | 'skip' | 'install' | 'reuse';
+type BulkOverwriteChoice = 'overwrite-all' | 'skip-all' | 'choose';
+
+interface PlatformResult {
+  platform: Platform;
+  openspec: InstallStatus;
+  superpowers: InstallStatus;
+  owner: InstallStatus;
+  failures: InitFailureDetail[];
+}
+
+interface InitFailureDetail {
+  platform: string;
+  platformName: string;
+  component: 'OpenSpec' | 'Superpowers' | 'Owner' | 'Rule' | 'Hook' | 'Finalization';
+  reason: string;
+}
+
+type ComponentPlan = {
+  osAction: ComponentAction;
+  spAction: ComponentAction;
+  cmAction: ComponentAction;
+};
+
+async function selectScope(options: InitOptions, lang: string): Promise<InstallScope> {
+  if (options.scope) return options.scope;
+  if (options.yes || options.json) return 'project';
+
+  return select({
+    message: t(lang, 'installScope'),
+    choices: [
+      { name: t(lang, 'scopeProject'), value: 'project' as const },
+      { name: t(lang, 'scopeGlobal'), value: 'global' as const },
+    ],
+  });
+}
+
+async function selectLanguage(options: InitOptions): Promise<LanguageConfig> {
+  if (options.language) {
+    return LANGUAGES.find((l) => l.id === options.language) ?? LANGUAGES[0];
+  }
+  if (options.yes || options.json) return LANGUAGES[0];
+
+  const langId = await select({
+    message: t('en', 'languagePrompt'),
+    choices: LANGUAGES.map((lang) => ({ name: lang.name, value: lang.id })),
+  });
+
+  return LANGUAGES.find((l) => l.id === langId) ?? LANGUAGES[0];
+}
+
+async function selectInstallMode(options: InitOptions, lang: string): Promise<InstallMode> {
+  if (options.installMode) return options.installMode;
+  if (options.yes || options.json) return 'copy';
+
+  return select({
+    message: t(lang, 'installMode'),
+    choices: [
+      { name: t(lang, 'installModeCopy'), value: 'copy' as const },
+      { name: t(lang, 'installModeSymlink'), value: 'symlink' as const },
+    ],
+  });
+}
+
+async function selectPlatforms(
+  detected: Set<string>,
+  options: InitOptions,
+  lang: string,
+): Promise<string[]> {
+  const choices = SUPPORTED_PLATFORMS.map((p) => ({
+    name: `${p.name}${detected.has(p.id) ? ` (${t(lang, 'detected')})` : ''}`,
+    summaryName: p.name,
+    value: p.id,
+    checked: detected.has(p.id),
+  }));
+
+  if (options.yes || options.json) {
+    const selected = [...detected];
+    return selected.length > 0 ? selected : SUPPORTED_PLATFORMS.map((p) => p.id);
+  }
+
+  return platformSelectPrompt({
+    message: t(lang, 'selectPlatforms'),
+    choices,
+    selectedLabel: t(lang, 'selectedPlatforms'),
+    emptyLabel: t(lang, 'noneSelected'),
+    requiredErrorLabel: t(lang, 'selectPlatformsRequired'),
+    required: true,
+  });
+}
+
+async function promptOverwriteChoice(
+  componentName: string,
+  platformName: string,
+  lang: string,
+): Promise<'overwrite' | 'skip'> {
+  return select({
+    message: `${componentName} ${t(lang, 'alreadyExists')} ${platformName}. ${t(lang, 'overwriteChoice')}`,
+    choices: [
+      { name: t(lang, 'overwrite'), value: 'overwrite' as const },
+      { name: t(lang, 'skip'), value: 'skip' as const },
+    ],
+  });
+}
+
+async function promptBulkOverwriteChoice(
+  platformName: string,
+  components: string[],
+  lang: string,
+): Promise<BulkOverwriteChoice> {
+  return select({
+    message: `${platformName} ${t(lang, 'bulkOverwrite')} ${components.join(', ')}. ${t(lang, 'overwriteChoice')}`,
+    choices: [
+      { name: t(lang, 'overwriteAll'), value: 'overwrite-all' as const },
+      { name: t(lang, 'skipAll'), value: 'skip-all' as const },
+      { name: t(lang, 'choosePer'), value: 'choose' as const },
+    ],
+  });
+}
+
+function applyBulkOverwriteChoice<T extends ComponentPlan>(
+  plan: T,
+  choice: Exclude<BulkOverwriteChoice, 'choose'>,
+  hasExisting?: { os?: boolean; sp?: boolean; cm?: boolean },
+): T {
+  const action = choice === 'overwrite-all' ? 'overwrite' : 'skip';
+  const shouldApply = (actionState: ComponentAction, exists?: boolean) =>
+    actionState === 'install' && (hasExisting === undefined || exists === true);
+  return {
+    ...plan,
+    osAction: shouldApply(plan.osAction, hasExisting?.os) ? action : plan.osAction,
+    spAction: shouldApply(plan.spAction, hasExisting?.sp) ? action : plan.spAction,
+    cmAction: shouldApply(plan.cmAction, hasExisting?.cm) ? action : plan.cmAction,
+  };
+}
+
+function resolveAction(
+  hasExisting: boolean,
+  options: InitOptions,
+): 'overwrite' | 'skip' | 'install' {
+  if (!hasExisting) return 'install';
+  if (options.overwrite) return 'overwrite';
+  if (options.skipExisting) return 'skip';
+  if (options.yes || options.json) return 'skip';
+  return 'install';
+}
+
+function resolveOwnerAction(hasExisting: boolean, options: InitOptions): ComponentAction {
+  if (hasExisting && (options.yes || options.json) && !options.overwrite && !options.skipExisting)
+    return 'reuse';
+  return resolveAction(hasExisting, options);
+}
+
+type NpmDepId = 'openspec' | 'superpowers';
+
+interface NpmDepState {
+  id: NpmDepId;
+  installed: boolean;
+  required?: boolean;
+}
+
+async function selectNpmDeps(
+  spPlatformIds: string[],
+  options: InitOptions,
+  lang: string,
+  workflow: OwnerWorkflow,
+): Promise<Set<NpmDepId>> {
+  if (workflow === 'native') return new Set();
+
+  const openSpecInstalled = isCommandAvailable('openspec');
+  const openSpecRequired = workflow === 'classic' && !isOpenSpecCliCompatible();
+  const superpowersInstalled = spPlatformIds.length === 0 ? true : undefined;
+
+  const states: NpmDepState[] = [
+    { id: 'openspec', installed: openSpecInstalled, required: openSpecRequired },
+    { id: 'superpowers', installed: Boolean(superpowersInstalled) },
+  ];
+
+  const depLabel: Record<NpmDepId, (installed: boolean) => string> = {
+    openspec: (installed) =>
+      installed ? t(lang, 'npmDepOpenSpecInstalled') : t(lang, 'npmDepOpenSpec'),
+    superpowers: (installed) =>
+      installed ? t(lang, 'npmDepSuperpowersInstalled') : t(lang, 'npmDepSuperpowers'),
+  };
+
+  const depHint: Partial<Record<NpmDepId, string>> = {
+    superpowers: t(lang, 'npmDepSuperpowersHint'),
+  };
+
+  const choices = states.map(({ id, installed, required }) => {
+    const choice: {
+      name: string;
+      value: NpmDepId;
+      checked: boolean;
+      description?: string;
+    } = {
+      name: depLabel[id](installed),
+      value: id,
+      checked: id === 'openspec' ? Boolean(required) : !installed,
+    };
+    if (depHint[id]) {
+      choice.description = depHint[id];
+    }
+    return choice;
+  });
+
+  if (options.yes || options.json) {
+    return new Set(
+      states.filter((state) => !state.installed || state.required).map((state) => state.id),
+    );
+  }
+
+  const selected = await checkbox({
+    message: t(lang, 'selectNpmDeps'),
+    choices,
+    validate: (values) =>
+      openSpecRequired && !values.some((value) => value.value === 'openspec')
+        ? t(lang, 'npmDepOpenSpecRequired')
+        : true,
+  });
+  return new Set(selected as NpmDepId[]);
+}
+
+function hasFailure(r: PlatformResult): boolean {
+  return r.openspec === 'failed' || r.superpowers === 'failed' || r.owner === 'failed';
+}
+
+function hasInstall(r: PlatformResult): boolean {
+  return r.openspec === 'installed' || r.superpowers === 'installed' || r.owner === 'installed';
+}
+
+function isAllSkipped(r: PlatformResult): boolean {
+  return r.openspec === 'skipped' && r.superpowers === 'skipped' && r.owner === 'skipped';
+}
+
+function displaySummary(
+  results: PlatformResult[],
+  scope: InstallScope,
+  lang: string,
+  workflowSelection: InitWorkflowSelection,
+  nativeArtifactRoot: string | null,
+  classicArtifactLayout: 'legacy' | 'docs' | null,
+): void {
+  const scopeLabel = scope === 'global' ? os.homedir() : 'project';
+  const componentStatuses: Array<[keyof Omit<PlatformResult, 'platform'>, string]> = [
+    ['openspec', 'OpenSpec'],
+    ['superpowers', 'Superpowers'],
+    ['owner', 'Owner'],
+  ];
+  const failedDetails = (result: PlatformResult) =>
+    componentStatuses
+      .filter(([key]) => result[key] === 'failed')
+      .map(([, label]) => `${label} ${t(lang, 'failedStatus')}`)
+      .join(', ');
+
+  // A platform with both installed and failed components is shown as failed,
+  // not both. Use priority: failed > installed > skipped.
+  const failed = results.filter(hasFailure);
+  const installed = results.filter((r) => !hasFailure(r) && hasInstall(r));
+  const skipped = results.filter(isAllSkipped);
+  const failures = results.flatMap((result) => result.failures);
+
+  console.log(
+    `\n  ${failures.length > 0 ? (lang === 'zh' ? 'Owner 设置未完成。' : 'Owner setup incomplete.') : t(lang, 'setupComplete')} (scope: ${scopeLabel})\n`,
+  );
+
+  if (installed.length > 0) {
+    console.log(`  ${t(lang, 'installed')}`);
+    for (const r of installed) {
+      console.log(`    ${r.platform.name} -> ${getPlatformSkillsDir(r.platform, scope)}/skills/`);
+    }
+  }
+  if (skipped.length > 0) {
+    console.log(`  ${t(lang, 'skippedLabel')} ${skipped.map((r) => r.platform.name).join(', ')}`);
+  }
+  if (failed.length > 0) {
+    console.log(`  ${t(lang, 'failedLabel')}`);
+    for (const r of failed) {
+      console.log(`    ${r.platform.name} (${failedDetails(r)})`);
+      for (const failure of r.failures) {
+        console.log(`      ${failure.component}: ${failure.reason}`);
+      }
+    }
+  }
+
+  const showNativeWorkspace =
+    scope === 'project' &&
+    includesWorkflow(workflowSelection, 'native') &&
+    nativeArtifactRoot !== null;
+  const showClassicWorkspace =
+    scope === 'project' && includesWorkflow(workflowSelection, 'classic');
+  if (showNativeWorkspace || showClassicWorkspace) {
+    console.log(`\n  ${t(lang, 'workingDirs')}`);
+    if (showNativeWorkspace) {
+      const root = nativeArtifactRoot === '.' ? '' : `${nativeArtifactRoot}/`;
+      console.log(`    ${t(lang, 'nativeWorkingDir')} ${root}owner/`);
+    }
+    if (showClassicWorkspace) {
+      const openSpecRoot = classicArtifactLayout === 'docs' ? 'docs/openspec/' : 'openspec/';
+      console.log(`    ${lang === 'zh' ? 'Classic：' : 'Classic: '}${openSpecRoot}`);
+      console.log(
+        '    Superpowers: docs/superpowers/specs/, docs/superpowers/plans/, docs/superpowers/reports/',
+      );
+    }
+  }
+
+  if (failures.length === 0) {
+    console.log(`\n  ${t(lang, 'getStarted')}`);
+    console.log(`    ${t(lang, 'getStartedOwner')}`);
+    if (includesWorkflow(workflowSelection, 'classic')) {
+      console.log(`    ${t(lang, 'getStartedHotfix')}`);
+      console.log(`    ${t(lang, 'getStartedTweak')}`);
+    }
+  }
+  console.log();
+}
+
+export async function initCommand(
+  targetPath: string,
+  options: InitOptions = {},
+): Promise<CommandExecutionResult> {
+  const projectPath = path.resolve(targetPath);
+  const log = options.json ? () => undefined : console.log;
+
+  await printOwnerBanner({ enabled: !options.json });
+  if (!options.json) {
+    await printVersionInfo(log);
+  }
+
+  const language = await selectLanguage(options);
+  const lang = language.id;
+
+  log(`  ${t(lang, 'settingUp')} ${projectPath}\n`);
+
+  const detected = await detectPlatforms(projectPath);
+  const scope = await selectScope(options, lang);
+  if (scope === 'project') {
+    await readProjectRegistry({ strict: true });
+  }
+  const initialProjectConfigSnapshot =
+    scope === 'project'
+      ? await readWorkflowProjectConfigSnapshot(projectPath, {
+          allowPartialProject: true,
+          allowMissingNativeFields: true,
+        })
+      : null;
+  const suggestedWorkflowDecision =
+    scope === 'project'
+      ? await resolveInitWorkflow(
+          projectPath,
+          {
+            workflow: options.workflow === 'both' ? 'native' : options.workflow,
+            artifactRoot: options.artifactRoot,
+          },
+          initialProjectConfigSnapshot!,
+        )
+      : null;
+  const configuredWorkflows = initialProjectConfigSnapshot?.document?.config?.workflows ?? [];
+  const suggestedWorkflowSelection: InitWorkflowSelection =
+    options.workflow === undefined &&
+    configuredWorkflows.includes('native') &&
+    configuredWorkflows.includes('classic')
+      ? 'both'
+      : (suggestedWorkflowDecision?.workflow ?? 'native');
+  const workflowSelection = await selectWorkflow(options, lang, suggestedWorkflowSelection);
+  if (
+    scope === 'global' &&
+    options.artifactRoot !== undefined &&
+    !includesWorkflow(workflowSelection, 'native')
+  ) {
+    throw new Error('--root is only valid when the Native workflow is enabled');
+  }
+  const workflow: OwnerWorkflow = workflowSelection === 'both' ? 'native' : workflowSelection;
+  const workflowDecision =
+    scope === 'project'
+      ? options.workflow === undefined && (options.yes || options.json)
+        ? suggestedWorkflowDecision
+        : await resolveInitWorkflow(
+            projectPath,
+            {
+              workflow,
+              artifactRoot: options.artifactRoot,
+            },
+            initialProjectConfigSnapshot!,
+          )
+      : null;
+  const initialProjectConfigDocument = initialProjectConfigSnapshot?.document ?? null;
+  const workflowSource = workflowDecision?.source ?? 'global-install';
+  const installMode =
+    workflowSelection === 'native' ? 'copy' : await selectInstallMode(options, lang);
+
+  const selectedPlatformTargets: PlatformTargetResolution[] = options.platform
+    ? [resolvePlatformTarget(options.platform, scope)]
+    : (await selectPlatforms(detected, options, lang)).map((platformId) => ({
+        platform: SUPPORTED_PLATFORMS.find((platform) => platform.id === platformId)!,
+        native: true,
+      }));
+  const selectedPlatformIds = selectedPlatformTargets.map((target) => target.platform.id);
+  if (selectedPlatformTargets.length === 0) {
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          {
+            projectPath,
+            scope,
+            language: language.id,
+            workflow,
+            initializedWorkflows:
+              workflowSelection === 'both' ? ['native', 'classic'] : [workflowSelection],
+            workflowSource,
+            projectConfigCreated: false,
+            projectConfigUpdated: false,
+            nativeArtifactRoot: null,
+            selectedPlatforms: [],
+            status: 'incomplete',
+            failures: [{ component: 'Owner', reason: 'no platforms selected' }],
+            results: [],
+            workingDirsCreated: false,
+          },
+          null,
+          2,
+        ),
+      );
+      return { status: 'incomplete' };
+    }
+    log(`\n  ${t(lang, 'noPlatforms')}\n`);
+    return { status: 'incomplete' };
+  }
+
+  const selectedPlatforms = selectedPlatformTargets.map((target) => target.platform);
+  const baseDir = getBaseDir(scope, projectPath);
+
+  type PlatformPlan = ComponentPlan & {
+    platform: Platform;
+    native: boolean;
+    hasOS: boolean;
+    hasSP: boolean;
+    hasCM: boolean;
+  };
+
+  const plans: PlatformPlan[] = [];
+
+  for (const target of selectedPlatformTargets) {
+    const { platform, native } = target;
+    const hasOS =
+      native && includesWorkflow(workflowSelection, 'classic')
+        ? await hasSkills(baseDir, platform, 'openspec', selectedPlatforms, scope)
+        : false;
+    const hasSP =
+      native && includesWorkflow(workflowSelection, 'classic')
+        ? await hasSkills(baseDir, platform, 'superpowers', selectedPlatforms, scope)
+        : false;
+    const hasCM = await hasSkills(baseDir, platform, 'owner', selectedPlatforms, scope, {
+      includeGlobalFallback: false,
+    });
+
+    let osAction =
+      native && includesWorkflow(workflowSelection, 'classic')
+        ? resolveAction(hasOS, options)
+        : 'skip';
+    let spAction =
+      native && includesWorkflow(workflowSelection, 'classic')
+        ? resolveAction(hasSP, options)
+        : 'skip';
+    let cmAction =
+      workflowSelection === 'classic'
+        ? resolveOwnerAction(hasCM, options)
+        : resolveAction(hasCM, options);
+    if (
+      includesWorkflow(workflowSelection, 'native') &&
+      hasCM &&
+      (options.yes || options.json) &&
+      !options.skipExisting &&
+      !options.overwrite
+    ) {
+      cmAction = 'install';
+    }
+
+    if (!options.yes && !options.json) {
+      const existingComponents = [
+        hasOS && osAction === 'install' ? 'OpenSpec' : null,
+        hasSP && spAction === 'install' ? 'Superpowers' : null,
+        hasCM && cmAction === 'install' ? 'Owner' : null,
+      ].filter((component): component is string => Boolean(component));
+
+      if (existingComponents.length > 1) {
+        const bulkChoice = await promptBulkOverwriteChoice(platform.name, existingComponents, lang);
+        if (bulkChoice !== 'choose') {
+          ({ osAction, spAction, cmAction } = applyBulkOverwriteChoice(
+            { osAction, spAction, cmAction },
+            bulkChoice,
+            { os: hasOS, sp: hasSP, cm: hasCM },
+          ));
+        }
+      }
+
+      if (osAction === 'install' && hasOS) {
+        osAction = await promptOverwriteChoice('OpenSpec', platform.name, lang);
+      }
+      if (spAction === 'install' && hasSP) {
+        spAction = await promptOverwriteChoice('Superpowers', platform.name, lang);
+      }
+      if (cmAction === 'install' && hasCM) {
+        cmAction = await promptOverwriteChoice('Owner', platform.name, lang);
+      }
+    }
+
+    plans.push({ platform, native, osAction, spAction, cmAction, hasOS, hasSP, hasCM });
+  }
+
+  if (includesWorkflow(workflowSelection, 'native') && scope === 'project') {
+    for (const plan of plans) {
+      const action =
+        plan.cmAction === 'overwrite' ? 'overwrite' : plan.cmAction === 'install' ? 'fill' : 'skip';
+      await prepareNativeSkillInstallTarget(
+        baseDir,
+        plan.platform,
+        scope,
+        language.skillsDir,
+        action,
+      );
+    }
+  }
+
+  const osToolIds = Array.from(
+    new Set(plans.filter((p) => p.osAction !== 'skip').map((p) => p.platform.openspecToolId)),
+  );
+
+  const spPlatformIds = plans.filter((p) => p.spAction !== 'skip').map((p) => p.platform.id);
+
+  const selectedNpmDeps = await selectNpmDeps(
+    spPlatformIds,
+    options,
+    lang,
+    includesWorkflow(workflowSelection, 'classic') ? 'classic' : 'native',
+  );
+  const shouldInstallOpenSpecCli = selectedNpmDeps.has('openspec');
+  const shouldInstallSuperpowers = selectedNpmDeps.has('superpowers');
+  const requiresClassicArtifactRoot =
+    scope === 'project' &&
+    workflowDecision !== null &&
+    includesWorkflow(workflowSelection, 'classic');
+
+  let osGlobalStatus: InstallStatus = 'skipped';
+  let osFailureReason: string | undefined;
+  let classicOpenSpecRootReady = !requiresClassicArtifactRoot;
+  let classicLayoutInitializationPermit: ClassicLayoutInitializationPermit | undefined;
+  if (requiresClassicArtifactRoot) {
+    try {
+      let initialization = await assertClassicLayoutInitializationSafe(
+        projectPath,
+        workflowDecision!.classicArtifactLayout,
+        undefined,
+        initialProjectConfigSnapshot?.identity,
+      );
+      initialization = await beginClassicLayoutInitialization(projectPath, initialization);
+      classicLayoutInitializationPermit = initialization.initializationPermit;
+    } catch (error) {
+      osGlobalStatus = 'failed';
+      osFailureReason = (error as Error).message;
+      log(`  Classic layout initialization: failed (${osFailureReason})`);
+    }
+  }
+  const assertClassicProjectMutationAllowed =
+    scope === 'project' &&
+    workflowDecision &&
+    classicLayoutInitializationPermit &&
+    includesWorkflow(workflowSelection, 'classic')
+      ? async () => {
+          await assertClassicLayoutInitializationSafe(
+            projectPath,
+            workflowDecision.classicArtifactLayout,
+            classicLayoutInitializationPermit,
+          );
+        }
+      : undefined;
+  if ((osToolIds.length > 0 || requiresClassicArtifactRoot) && !osFailureReason) {
+    log(
+      `\n  ${t(lang, 'installingOS')} ${
+        osToolIds.length > 0 ? osToolIds.join(', ') : 'artifact root'
+      }`,
+    );
+    try {
+      osGlobalStatus = await installOpenSpec(
+        projectPath,
+        osToolIds,
+        scope,
+        shouldInstallOpenSpecCli,
+        scope === 'project' ? workflowDecision?.classicArtifactLayout : 'legacy',
+        assertClassicProjectMutationAllowed,
+        (error) => {
+          osFailureReason = error.message;
+        },
+      );
+      if (osGlobalStatus === 'installed' && requiresClassicArtifactRoot) {
+        await assertClassicProjectMutationAllowed?.();
+        await assertClassicOpenSpecRootHealthy(
+          projectPath,
+          classicLayoutPaths(projectPath, workflowDecision!.classicArtifactLayout),
+        );
+        await assertClassicProjectMutationAllowed?.();
+        if (classicLayoutInitializationPermit) {
+          await checkpointClassicLayoutInitialization(
+            projectPath,
+            classicLayoutInitializationPermit,
+          );
+        }
+        classicOpenSpecRootReady = true;
+      } else if (requiresClassicArtifactRoot) {
+        osFailureReason ??=
+          osGlobalStatus === 'skipped'
+            ? 'Classic OpenSpec artifact root initialization skipped because a compatible OpenSpec CLI is unavailable'
+            : 'Classic OpenSpec artifact root initialization failed';
+        osGlobalStatus = 'failed';
+      }
+    } catch (error) {
+      osGlobalStatus = 'failed';
+      osFailureReason = (error as Error).message;
+      log(`  OpenSpec: failed (${osFailureReason})`);
+    }
+    if (osGlobalStatus === 'skipped' && !shouldInstallOpenSpecCli) {
+      log(`  OpenSpec: ${t(lang, 'osSkippedNoCli')}`);
+    } else {
+      log(`  OpenSpec: ${osGlobalStatus}`);
+    }
+  } else {
+    log(`\n  OpenSpec: ${t(lang, 'allSkipped')}`);
+  }
+
+  let spGlobalStatus: InstallStatus = 'skipped';
+
+  if (spPlatformIds.length > 0) {
+    if (!shouldInstallSuperpowers) {
+      log(`\n  Superpowers: ${t(lang, 'spSkippedByUser')}`);
+    } else {
+      log(`\n  ${t(lang, 'installingSP')} ${spPlatformIds.join(', ')}`);
+      spGlobalStatus = await installSuperpowersForPlatforms(
+        projectPath,
+        scope,
+        spPlatformIds,
+        true,
+      );
+      log(`  Superpowers: ${spGlobalStatus}`);
+    }
+  } else {
+    log(`\n  Superpowers: ${t(lang, 'allSkipped')}`);
+  }
+
+  const results: PlatformResult[] = [];
+  let projectRouterInstalled = false;
+
+  for (const plan of plans) {
+    const { platform, cmAction } = plan;
+    const platformSkillsDir = getPlatformSkillsDir(platform, scope);
+    const skillsPath =
+      installMode === 'symlink'
+        ? `via .owner/skills/ in ${platformSkillsDir}/skills/`
+        : `${scope === 'global' ? '~/' : ''}${platformSkillsDir}/skills/`;
+
+    let cmStatus: InstallStatus = 'skipped';
+    const platformFailures: InitFailureDetail[] = [];
+    let ownerComponentInstalled = false;
+    let skillFailed = false;
+    if (cmAction !== 'skip') {
+      const { copied, failed } = await copyOwnerSkillsForPlatform(
+        baseDir,
+        platform,
+        cmAction === 'overwrite',
+        language.skillsDir,
+        scope,
+        installMode,
+        workflowSelection,
+      );
+      skillFailed = failed > 0;
+      cmStatus = failed > 0 ? 'failed' : copied > 0 ? 'installed' : 'skipped';
+      ownerComponentInstalled = copied > 0;
+      if (failed > 0) {
+        platformFailures.push({
+          platform: platform.id,
+          platformName: platform.name,
+          component: 'Owner',
+          reason: `${failed} Skill file(s) failed to install`,
+        });
+      }
+      if (cmAction === 'reuse' && copied === 0 && failed === 0) {
+        log(`  Owner -> ${platform.name}: reused (${t(lang, 'alreadyExists')})`);
+      } else {
+        log(
+          `  Owner -> ${platform.name}: ${cmStatus} (${copied} files${
+            failed > 0 ? `, ${failed} failed` : ''
+          }) -> ${skillsPath}`,
+        );
+      }
+    } else {
+      log(`  Owner -> ${platform.name}: skipped (${t(lang, 'alreadyExists')})`);
+    }
+
+    if (cmAction !== 'skip' && !skillFailed) {
+      try {
+        const { copied: ruleCopied, failed: ruleFailed } = await copyOwnerRulesForPlatform(
+          baseDir,
+          platform,
+          cmAction === 'overwrite',
+          language.id,
+          scope,
+          workflowSelection,
+        );
+        ownerComponentInstalled ||= ruleCopied > 0;
+        if (ruleCopied > 0) {
+          log(`  Owner rules -> ${platform.name}: ${ruleCopied} ${t(lang, 'rulesInstalled')}`);
+        }
+        if (ruleFailed > 0) {
+          cmStatus = 'failed';
+          platformFailures.push({
+            platform: platform.id,
+            platformName: platform.name,
+            component: 'Rule',
+            reason: `${ruleFailed} Rule file(s) failed to install`,
+          });
+          log(`  Owner rules -> ${platform.name}: ${t(lang, 'rulesFailed')} (${ruleFailed})`);
+        }
+      } catch (err) {
+        cmStatus = 'failed';
+        platformFailures.push({
+          platform: platform.id,
+          platformName: platform.name,
+          component: 'Rule',
+          reason: (err as Error).message,
+        });
+        log(
+          `  Owner rules -> ${platform.name}: ${t(lang, 'rulesFailed')} (${(err as Error).message})`,
+        );
+      }
+    }
+
+    if (cmAction !== 'skip' && !skillFailed) {
+      try {
+        const {
+          status,
+          reason,
+          cleanupFailed = 0,
+        } = scope === 'project'
+          ? await reconcileProjectOwnerHooksForPlatform(baseDir, platform, workflowSelection, {
+              globalBaseDir: os.homedir(),
+            })
+          : await reconcileOwnerHooksForPlatform(baseDir, platform, scope, workflowSelection);
+        ownerComponentInstalled ||= status === 'installed';
+        if (status === 'installed') {
+          if (scope === 'project') projectRouterInstalled = true;
+          log(`  Owner hooks -> ${platform.name}: ${t(lang, 'hooksInstalled')}`);
+          if (cleanupFailed > 0) {
+            cmStatus = 'failed';
+            platformFailures.push({
+              platform: platform.id,
+              platformName: platform.name,
+              component: 'Hook',
+              reason: reason ?? `legacy Hook cleanup failed (${cleanupFailed})`,
+            });
+            log(`  Owner hooks -> ${platform.name}: ${reason}`);
+          }
+        } else if (status === 'failed') {
+          cmStatus = 'failed';
+          platformFailures.push({
+            platform: platform.id,
+            platformName: platform.name,
+            component: 'Hook',
+            reason: reason ?? 'Hook installation failed',
+          });
+          log(`  Owner hooks -> ${platform.name}: ${t(lang, 'hooksFailed')} (${reason})`);
+        } else if (reason && platform.supportsHooks) {
+          log(`  Owner hooks -> ${platform.name}: ${t(lang, 'hooksSkipped')} (${reason})`);
+        }
+      } catch (err) {
+        cmStatus = 'failed';
+        platformFailures.push({
+          platform: platform.id,
+          platformName: platform.name,
+          component: 'Hook',
+          reason: (err as Error).message,
+        });
+        log(
+          `  Owner hooks -> ${platform.name}: ${t(lang, 'hooksFailed')} (${(err as Error).message})`,
+        );
+      }
+    }
+
+    if (cmAction !== 'skip' && cmStatus !== 'failed') {
+      cmStatus = ownerComponentInstalled ? 'installed' : 'skipped';
+    }
+
+    results.push({
+      platform,
+      openspec:
+        osToolIds.includes(platform.openspecToolId) || requiresClassicArtifactRoot
+          ? osGlobalStatus
+          : 'skipped',
+      superpowers: plan.spAction !== 'skip' ? spGlobalStatus : 'skipped',
+      owner: cmStatus,
+      failures: [
+        ...((osToolIds.includes(platform.openspecToolId) || requiresClassicArtifactRoot) &&
+        osGlobalStatus === 'failed'
+          ? [
+              {
+                platform: platform.id,
+                platformName: platform.name,
+                component: 'OpenSpec' as const,
+                reason:
+                  osFailureReason ??
+                  'OpenSpec installation failed; see the preceding diagnostic for details',
+              },
+            ]
+          : []),
+        ...(plan.spAction !== 'skip' && spGlobalStatus === 'failed'
+          ? [
+              {
+                platform: platform.id,
+                platformName: platform.name,
+                component: 'Superpowers' as const,
+                reason: 'Superpowers installation failed; see the preceding diagnostic for details',
+              },
+            ]
+          : []),
+        ...platformFailures,
+      ],
+    });
+  }
+
+  let projectConfigCreated = false;
+  let projectConfigUpdated = false;
+  let nativeArtifactRoot: string | null = null;
+  let workingDirsCreated = false;
+  let finalizationFailure: string | undefined;
+  const ownerInstallComplete =
+    results.length > 0 && results.every((result) => result.owner !== 'failed');
+  const projectInitializationComplete = ownerInstallComplete && classicOpenSpecRootReady;
+  const globalWorkflowConfigReady =
+    scope !== 'global' ||
+    !includesWorkflow(workflowSelection, 'classic') ||
+    osGlobalStatus === 'installed';
+
+  if (
+    scope === 'project' &&
+    projectRouterInstalled &&
+    projectInitializationComplete &&
+    includesWorkflow(workflowSelection, 'classic')
+  ) {
+    if (await migrateLegacyClassicSelection(projectPath)) {
+      log('  Owner current selection -> migrated Classic v1 to shared v2');
+    }
+  }
+
+  try {
+    if (scope === 'project' && workflowDecision && projectInitializationComplete) {
+      if (includesWorkflow(workflowSelection, 'native')) {
+        const paths = await nativeProjectPaths(projectPath, workflowDecision.artifactRoot);
+        await ensureNativeDirectories(paths);
+        nativeArtifactRoot = workflowDecision.artifactRoot;
+      }
+      if (includesWorkflow(workflowSelection, 'classic')) {
+        await createWorkingDirs(
+          projectPath,
+          language.artifactLanguage,
+          workflowDecision.classicArtifactLayout,
+          classicLayoutInitializationPermit,
+        );
+      }
+      workingDirsCreated = true;
+
+      await syncOwnerProjectInstructions(
+        projectPath,
+        language.id,
+        includesWorkflow(workflowSelection, 'native') &&
+          (initialProjectConfigDocument?.ambient_resume ?? true),
+      );
+
+      const successfulOwnerPlatforms = new Set(
+        results
+          .filter(
+            (result) =>
+              result.owner !== 'failed' &&
+              plans.some(
+                (plan) => plan.platform.id === result.platform.id && plan.cmAction !== 'skip',
+              ),
+          )
+          .map((result) => result.platform.id),
+      );
+      const completeProjectTargets = options.platform
+        ? (
+            await Promise.all(
+              plans
+                .filter(
+                  (plan) =>
+                    plan.cmAction !== 'skip' && successfulOwnerPlatforms.has(plan.platform.id),
+                )
+                .map(async (plan) => {
+                  if (plan.cmAction !== 'reuse') {
+                    return {
+                      platform: plan.platform,
+                      language: language.id,
+                    };
+                  }
+                  const existing = (
+                    await detectInstalledOwnerTargets(projectPath, {
+                      scopes: ['project'],
+                    })
+                  ).find((target) => target.platform.id === plan.platform.id);
+                  return existing
+                    ? {
+                        platform: plan.platform,
+                        language: existing.language,
+                      }
+                    : null;
+                }),
+            )
+          ).filter((target): target is { platform: Platform; language: 'en' | 'zh' } =>
+            Boolean(target),
+          )
+        : (
+            await detectInstalledOwnerTargets(projectPath, {
+              scopes: ['project'],
+            })
+          ).filter((target) => successfulOwnerPlatforms.has(target.platform.id));
+      if (completeProjectTargets.length > 0) {
+        await upsertProjectInstallation(
+          projectPath,
+          completeProjectTargets.map((target) => ({
+            platform: target.platform.id,
+            language: target.language,
+          })),
+          'init',
+        );
+      }
+
+      // The project config activates the selected workflow. Commit it only after
+      // every required project artifact has been written successfully so a
+      // partial initialization cannot route later commands into Native.
+      const existingDocument = await readWorkflowProjectConfigDocument(projectPath, {
+        allowPartialProject: true,
+        allowMissingNativeFields: true,
+      });
+      const existing = existingDocument?.config ?? null;
+      const selectedWorkflows =
+        workflowSelection === 'both' ? (['native', 'classic'] as const) : [workflowSelection];
+      {
+        const defaults = defaultProjectConfig(
+          workflowDecision.artifactRoot,
+          language.artifactLanguage,
+        );
+        const config: WorkflowProjectConfig = existing
+          ? {
+              ...existing,
+              ...(existing.native ? { native: { ...existing.native } } : {}),
+              ...(existing.classic ? { classic: { ...existing.classic } } : {}),
+            }
+          : {
+              schema: 'owner.project.v1',
+              default_workflow: workflowDecision.workflow,
+              ambient_resume: existingDocument?.ambient_resume ?? true,
+              ...(existingDocument?.classic ? { classic: { ...existingDocument.classic } } : {}),
+            };
+        if (includesWorkflow(workflowSelection, 'native') && !config.native) {
+          config.native = defaults.native;
+        }
+        config.default_workflow = workflowDecision.workflow;
+        config.workflows = [...selectedWorkflows];
+        if (includesWorkflow(workflowSelection, 'classic')) {
+          config.classic = {
+            ...config.classic,
+            artifact_layout: workflowDecision.classicArtifactLayout,
+            language: language.artifactLanguage,
+            context_compression: config.classic?.context_compression ?? 'off',
+            review_mode: config.classic?.review_mode ?? 'standard',
+            auto_transition: config.classic?.auto_transition ?? true,
+          };
+          await assertClassicLayoutInitializationSafe(
+            projectPath,
+            workflowDecision.classicArtifactLayout,
+            classicLayoutInitializationPermit,
+          );
+        }
+        await ensureOwnerProjectGitignore(projectPath);
+        await writeWorkflowProjectConfig(projectPath, config, {
+          expectedIdentity: initialProjectConfigSnapshot?.identity,
+        });
+        if (classicLayoutInitializationPermit) {
+          await completeClassicLayoutInitialization(projectPath, classicLayoutInitializationPermit);
+        }
+        projectConfigCreated = initialProjectConfigDocument === null;
+        projectConfigUpdated = initialProjectConfigDocument !== null;
+      }
+    } else if (scope === 'global' && globalWorkflowConfigReady) {
+      const defaults = defaultProjectConfig(
+        options.artifactRoot ?? 'docs',
+        language.artifactLanguage,
+      );
+      const existingGlobalConfig = await readWorkflowGlobalConfig(baseDir);
+      const selectedWorkflows =
+        workflowSelection === 'both' ? (['native', 'classic'] as const) : [workflowSelection];
+      const config: WorkflowGlobalConfig = {
+        schema: 'owner.global.v1',
+        default_workflow: workflow,
+        workflows: [...selectedWorkflows],
+        ambient_resume: existingGlobalConfig?.ambient_resume ?? true,
+        ...(includesWorkflow(workflowSelection, 'native')
+          ? {
+              native: existingGlobalConfig?.native
+                ? { ...existingGlobalConfig.native }
+                : defaults.native,
+            }
+          : {}),
+        ...(includesWorkflow(workflowSelection, 'classic')
+          ? {
+              classic: {
+                artifact_layout: 'docs',
+                language: language.artifactLanguage,
+                context_compression: 'off',
+                review_mode: 'standard',
+                auto_transition: true,
+              },
+            }
+          : {}),
+      };
+      await writeWorkflowGlobalConfig(baseDir, config);
+    }
+  } catch (error) {
+    finalizationFailure = (error as Error).message;
+    const target = results[0];
+    if (target) {
+      target.owner = 'failed';
+      target.failures.push({
+        platform: target.platform.id,
+        platformName: target.platform.name,
+        component: 'Finalization',
+        reason: finalizationFailure,
+      });
+    }
+    log(`  Owner finalization failed: ${finalizationFailure}`);
+  }
+
+  const failures = results.flatMap((result) => result.failures);
+  const completionStatus = failures.length > 0 || finalizationFailure ? 'incomplete' : 'complete';
+
+  if (options.json) {
+    console.log(
+      JSON.stringify(
+        {
+          status: completionStatus,
+          failures,
+          projectPath,
+          scope,
+          language: language.id,
+          workflow,
+          initializedWorkflows:
+            workflowSelection === 'both' ? ['native', 'classic'] : [workflowSelection],
+          workflowSource,
+          projectConfigCreated,
+          projectConfigUpdated,
+          nativeArtifactRoot,
+          classicArtifactLayout: workflowDecision?.classicArtifactLayout ?? null,
+          selectedPlatforms: selectedPlatformIds,
+          results: results.map((result) => ({
+            platform: result.platform.id,
+            platformName: result.platform.name,
+            openspec: result.openspec,
+            superpowers: result.superpowers,
+            owner: result.owner,
+          })),
+          workingDirsCreated,
+        },
+        null,
+        2,
+      ),
+    );
+    return { status: completionStatus };
+  }
+
+  displaySummary(
+    results,
+    scope,
+    lang,
+    workflowSelection,
+    nativeArtifactRoot,
+    workflowDecision?.classicArtifactLayout ?? null,
+  );
+  return { status: completionStatus };
+}
+
+export { applyBulkOverwriteChoice, workflowChoiceNames };
+export type { TranslationKey };

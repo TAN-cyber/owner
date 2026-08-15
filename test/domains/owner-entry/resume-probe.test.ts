@@ -1,0 +1,618 @@
+import { promises as fs } from 'fs';
+import { spawnSync } from 'child_process';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  OWNER_RESUME_PROBE_SCHEMA_VERSION,
+  resolveOwnerEntryResumeProbe,
+} from '../../../domains/owner-entry/resume-probe.js';
+import {
+  createNativeChange,
+  nativeChangeDir,
+} from '../../../domains/owner-native/native-change.js';
+import {
+  defaultProjectConfig,
+  writeProjectConfig,
+} from '../../../domains/owner-native/native-config.js';
+import { nativeProjectPaths } from '../../../domains/owner-native/native-paths.js';
+import {
+  nativeSelectionFile,
+  selectNativeChange,
+} from '../../../domains/owner-native/native-selection.js';
+import { advanceNativeChange } from '../../../domains/owner-native/native-transitions.js';
+import {
+  createNativePortableChange,
+  nativeLocalExecutionFile,
+} from '../../../domains/owner-native/native-portable-runtime.js';
+import { nativeVerificationFixtureReport } from '../../helpers/native-verification.js';
+
+const VALID_BRIEF = `# Outcome
+Ship cache controls.
+# Scope
+Cache expiration behavior.
+# Non-goals
+No storage migration.
+# Acceptance examples
+- Cache entries expire predictably.
+# Constraints and invariants
+Preserve existing APIs.
+# Decisions
+Use Native state.
+# Open questions
+None.
+# Verification expectations
+Run focused cache tests.
+`;
+
+const CLASSIC_BUILD_STATE = [
+  'workflow: full',
+  'phase: build',
+  'archived: false',
+  'build_pause: null',
+  'isolation: branch',
+  'build_mode: executing-plans',
+  'tdd_mode: direct',
+  'review_mode: standard',
+  'verify_mode: light',
+  'verified_at: null',
+  'verify_result: pending',
+  'auto_transition: true',
+  'design_doc: null',
+  'plan: null',
+  '',
+].join('\n');
+
+async function writeFile(file: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, content, 'utf8');
+}
+
+async function createNative(projectRoot: string, name: string, artifactRoot = '.'): Promise<void> {
+  const paths = await nativeProjectPaths(projectRoot, artifactRoot);
+  const state = await createNativeChange({ paths, name, language: 'en' });
+  await fs.writeFile(path.join(nativeChangeDir(paths, name), state.brief), VALID_BRIEF, 'utf8');
+}
+
+async function createClassic(projectRoot: string, name: string): Promise<void> {
+  const changeDir = path.join(projectRoot, 'openspec', 'changes', name);
+  await writeFile(path.join(changeDir, '.owner.yaml'), CLASSIC_BUILD_STATE);
+  await writeFile(path.join(changeDir, 'proposal.md'), `# ${name}\n`);
+  await writeFile(path.join(changeDir, 'design.md'), `# ${name} design\n`);
+  await writeFile(path.join(changeDir, 'tasks.md'), '- [ ] finish\n');
+}
+
+async function writeClassicProjectConfig(projectRoot: string): Promise<void> {
+  await writeFile(
+    path.join(projectRoot, '.owner', 'config.yaml'),
+    [
+      'schema: owner.project.v1',
+      'default_workflow: classic',
+      'workflows: [classic]',
+      'classic:',
+      '  artifact_layout: legacy',
+      '  language: zh-CN',
+      '',
+    ].join('\n'),
+  );
+}
+
+function input(utterance: string, nonTrivialWork = true) {
+  return {
+    schema_version: OWNER_RESUME_PROBE_SCHEMA_VERSION,
+    utterance,
+    locale: 'zh-CN',
+    agent_context: {
+      non_trivial_work: nonTrivialWork,
+      already_in_owner_flow: false,
+    },
+  } as const;
+}
+
+async function snapshot(root: string): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(root, absolute).replaceAll('\\', '/');
+      if (entry.isDirectory()) {
+        result[`${relative}/`] = 'directory';
+        await visit(absolute);
+      } else {
+        result[relative] = (await fs.readFile(absolute)).toString('base64');
+      }
+    }
+  }
+  await visit(root);
+  return result;
+}
+
+describe('Owner entry resume probe v2', () => {
+  let projectRoot: string;
+
+  beforeEach(async () => {
+    projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-entry-resume-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  });
+
+  it('routes a configured Native project only through the permanent Native entry', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'cache-controls');
+    await createClassic(projectRoot, 'cache-controls');
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 cache-controls')),
+    ).resolves.toMatchObject({
+      schema_version: 'owner.resume_probe.v2',
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource: 'project-config',
+      action: 'auto_resume',
+      changeName: 'cache-controls',
+      phase: 'shape',
+      nextCommand: '/owner-native',
+    });
+  });
+
+  it('auto-resumes a portable v4 change without a local execution overlay', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    await createNativePortableChange({ paths, name: 'portable-resume', language: 'en' });
+    await selectNativeChange(paths, 'portable-resume');
+    await fs.rm(nativeLocalExecutionFile(paths, 'portable-resume'), { force: true });
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 portable-resume')),
+    ).resolves.toMatchObject({
+      workflow: 'native',
+      skill: 'owner-native',
+      action: 'auto_resume',
+      changeName: 'portable-resume',
+      phase: 'shape',
+      reasonCode: 'native-change-named',
+    });
+  });
+
+  it('routes configured Classic through its permanent entry and rejects missing config', async () => {
+    await writeProjectConfig(projectRoot, {
+      ...defaultProjectConfig('.'),
+      default_workflow: 'classic',
+    });
+    await createClassic(projectRoot, 'classic-change');
+    await createNative(projectRoot, 'native-ignored');
+
+    const configured = await resolveOwnerEntryResumeProbe(
+      projectRoot,
+      input('继续 classic-change'),
+    );
+    expect(configured).toMatchObject({
+      workflow: 'classic',
+      skill: 'owner-classic',
+      entrySource: 'project-config',
+      action: 'auto_resume',
+      changeName: 'classic-change',
+      nextCommand: '/owner-classic',
+    });
+
+    await fs.rm(path.join(projectRoot, '.owner', 'config.yaml'));
+    const missingConfig = await resolveOwnerEntryResumeProbe(
+      projectRoot,
+      input('继续 classic-change'),
+    );
+    expect(missingConfig).toMatchObject({
+      workflow: null,
+      skill: null,
+      entrySource: null,
+      action: 'ask_user',
+      reasonCode: 'project-config-invalid',
+      nextCommand: null,
+    });
+  });
+
+  it.each(['native', 'classic'] as const)(
+    'stops before inspecting %s workflow state when Ambient Resume is disabled',
+    async (workflow) => {
+      const config = {
+        ...defaultProjectConfig('.'),
+        default_workflow: workflow,
+        ambient_resume: false,
+      };
+      await writeProjectConfig(projectRoot, config);
+      await createNative(projectRoot, 'native-disabled');
+      await createClassic(projectRoot, 'classic-disabled');
+
+      await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject(
+        {
+          workflow: null,
+          skill: null,
+          action: 'out_of_scope',
+          reasonCode: 'ambient-resume-disabled',
+          nextCommand: null,
+        },
+      );
+    },
+  );
+
+  it('preserves the Classic dirty-worktree confirmation rule behind the v2 facade', async () => {
+    await writeClassicProjectConfig(projectRoot);
+    await createClassic(projectRoot, 'classic-dirty');
+    const initialized = spawnSync('git', ['init'], { cwd: projectRoot, encoding: 'utf8' });
+    expect(initialized.status, initialized.stderr).toBe(0);
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 classic-dirty')),
+    ).resolves.toMatchObject({
+      workflow: 'classic',
+      entrySource: 'project-config',
+      action: 'ask_user',
+      reasonCode: 'classic-ask-user',
+      changeName: 'classic-dirty',
+      nextCommand: null,
+    });
+  });
+
+  it('fails closed with structured Classic output when legacy change state is malformed', async () => {
+    await writeClassicProjectConfig(projectRoot);
+    await writeFile(
+      path.join(projectRoot, 'openspec', 'changes', 'broken-classic', '.owner.yaml'),
+      'workflow: [broken\n',
+    );
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 broken-classic')),
+    ).resolves.toMatchObject({
+      schema_version: 'owner.resume_probe.v2',
+      workflow: 'classic',
+      skill: 'owner-classic',
+      entrySource: 'project-config',
+      action: 'ask_user',
+      confidence: 'low',
+      reasonCode: 'classic-state-invalid',
+      changeName: null,
+      phase: null,
+      nextCommand: null,
+      reason: expect.stringMatching(/invalid|parse|yaml/iu),
+    });
+  });
+
+  it('fails closed with a structured result when project config is malformed', async () => {
+    await createClassic(projectRoot, 'must-not-fallback');
+    await fs.mkdir(path.join(projectRoot, '.owner'), { recursive: true });
+    await writeFile(path.join(projectRoot, '.owner', 'config.yaml'), 'schema: [broken\n');
+
+    await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject({
+      schema_version: 'owner.resume_probe.v2',
+      workflow: null,
+      skill: null,
+      entrySource: null,
+      action: 'ask_user',
+      confidence: 'low',
+      reasonCode: 'project-config-invalid',
+      changeName: null,
+      nextCommand: null,
+    });
+  });
+
+  it('returns none when the configured Native workflow has no active changes', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+
+    await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject({
+      workflow: 'native',
+      skill: 'owner-native',
+      action: 'none',
+      reasonCode: 'no-active-native-changes',
+      changeName: null,
+      nextCommand: null,
+    });
+  });
+
+  it('returns none when a stale Native selection has no active replacement', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    await writeFile(
+      nativeSelectionFile(paths),
+      JSON.stringify({
+        schema: 'owner.selection.v2',
+        workflow: 'native',
+        change: 'missing-change',
+        branch: null,
+      }),
+    );
+
+    await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject({
+      workflow: 'native',
+      skill: 'owner-native',
+      action: 'none',
+      reasonCode: 'no-active-native-changes',
+      changeName: null,
+      nextCommand: null,
+    });
+  });
+
+  it('uses Native selection for multiple changes without guessing from content', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'cache-controls');
+    await createNative(projectRoot, 'login-flow');
+    const paths = await nativeProjectPaths(projectRoot, '.');
+
+    const ambiguous = await resolveOwnerEntryResumeProbe(projectRoot, input('继续'));
+    expect(ambiguous).toMatchObject({
+      action: 'ask_user',
+      reasonCode: 'multiple-native-changes',
+      changeName: null,
+      nextCommand: null,
+    });
+
+    await selectNativeChange(paths, 'login-flow');
+    const selected = await resolveOwnerEntryResumeProbe(projectRoot, input('继续'));
+    expect(selected).toMatchObject({
+      action: 'auto_resume',
+      changeName: 'login-flow',
+      nextCommand: '/owner-native',
+    });
+
+    const explicitlyNamed = await resolveOwnerEntryResumeProbe(
+      projectRoot,
+      input('继续 cache-controls'),
+    );
+    expect(explicitlyNamed).toMatchObject({
+      action: 'auto_resume',
+      changeName: 'cache-controls',
+      nextCommand: '/owner-native',
+    });
+  });
+
+  it('does not inspect Runtime artifacts for non-target Native changes', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'cache-controls');
+    await createNative(projectRoot, 'login-flow');
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    await selectNativeChange(paths, 'login-flow');
+    const nonTargetRuntime = path.join(nativeChangeDir(paths, 'cache-controls'), 'runtime');
+    const openedNonTargetRuntimePaths: string[] = [];
+    const originalOpen = fs.open.bind(fs);
+    const openSpy = vi.spyOn(fs, 'open').mockImplementation((...args) => {
+      const openedPath = String(args[0]);
+      if (
+        openedPath === nonTargetRuntime ||
+        openedPath.startsWith(`${nonTargetRuntime}${path.sep}`)
+      ) {
+        openedNonTargetRuntimePaths.push(openedPath);
+      }
+      return originalOpen(...args);
+    });
+
+    try {
+      await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject(
+        {
+          action: 'auto_resume',
+          changeName: 'login-flow',
+          nextCommand: '/owner-native',
+        },
+      );
+    } finally {
+      openSpy.mockRestore();
+    }
+
+    expect(openedNonTargetRuntimePaths).toEqual([]);
+  });
+
+  it('falls back from a stale selection only when one active Native change is unambiguous', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'only-active');
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    await writeFile(
+      nativeSelectionFile(paths),
+      JSON.stringify({
+        schema: 'owner.selection.v2',
+        workflow: 'native',
+        change: 'missing-change',
+        branch: null,
+      }),
+    );
+
+    const sole = await resolveOwnerEntryResumeProbe(projectRoot, input('继续'));
+    expect(sole).toMatchObject({
+      action: 'auto_resume',
+      changeName: 'only-active',
+      nextCommand: '/owner-native',
+    });
+    expect(sole.evidence).toContainEqual(
+      expect.objectContaining({ source: 'state', quote: expect.stringContaining('ENOENT') }),
+    );
+
+    await createNative(projectRoot, 'second-active');
+    await expect(resolveOwnerEntryResumeProbe(projectRoot, input('继续'))).resolves.toMatchObject({
+      action: 'ask_user',
+      reasonCode: 'multiple-native-changes',
+      changeName: null,
+      nextCommand: null,
+    });
+  });
+
+  it('always resumes every valid Native phase through the permanent Native entry', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'phase-routing');
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    const changeDir = nativeChangeDir(paths, 'phase-routing');
+    const phases = ['shape', 'build', 'verify', 'archive'] as const;
+
+    for (const phase of phases) {
+      const probe = await resolveOwnerEntryResumeProbe(projectRoot, input('继续 phase-routing'));
+      expect(probe).toMatchObject({
+        workflow: 'native',
+        action: 'auto_resume',
+        changeName: 'phase-routing',
+        phase,
+        nextCommand: '/owner-native',
+      });
+
+      if (phase === 'shape') {
+        const advanced = await advanceNativeChange({
+          paths,
+          name: 'phase-routing',
+          evidence: { summary: 'Shape is complete.', confirmed: true },
+        });
+        expect(advanced.findings).toEqual([]);
+      } else if (phase === 'build') {
+        const advanced = await advanceNativeChange({
+          paths,
+          name: 'phase-routing',
+          evidence: {
+            summary: 'No code is required for the phase routing fixture.',
+            noCodeReason: 'The fixture verifies workflow routing only.',
+          },
+        });
+        expect(advanced.findings).toEqual([]);
+      } else if (phase === 'verify') {
+        await fs.writeFile(
+          path.join(changeDir, 'verification.md'),
+          await nativeVerificationFixtureReport({ paths, name: 'phase-routing' }),
+          'utf8',
+        );
+        const advanced = await advanceNativeChange({
+          paths,
+          name: 'phase-routing',
+          evidence: {
+            summary: 'Verification passed.',
+            verificationResult: 'pass',
+            verificationReport: 'verification.md',
+          },
+        });
+        expect(advanced.findings).toEqual([]);
+      }
+    }
+  });
+
+  it('does not attach an unrelated request to the only Native change', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'cache-controls');
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('给 README 添加安装截图')),
+    ).resolves.toMatchObject({
+      workflow: 'native',
+      action: 'out_of_scope',
+      reasonCode: 'request-unrelated',
+      changeName: 'cache-controls',
+      nextCommand: null,
+    });
+  });
+
+  it('does not return a resume command for a corrupt Native target', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    const broken = path.join(paths.changesDir, 'broken-change');
+    await writeFile(path.join(broken, 'owner-state.yaml'), 'schema: [broken\n');
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 broken-change')),
+    ).resolves.toMatchObject({
+      workflow: 'native',
+      action: 'ask_user',
+      reasonCode: 'native-change-invalid',
+      changeName: 'broken-change',
+      phase: 'invalid',
+      nextCommand: null,
+    });
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('给 README 添加安装截图')),
+    ).resolves.toMatchObject({
+      action: 'out_of_scope',
+      reasonCode: 'request-unrelated',
+      nextCommand: null,
+    });
+  });
+
+  it('does not auto-resume a Native change whose artifacts fail validation', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'invalid-brief');
+    const paths = await nativeProjectPaths(projectRoot, '.');
+    await fs.writeFile(
+      path.join(nativeChangeDir(paths, 'invalid-brief'), 'brief.md'),
+      '# Scope\nOnly a scope remains.\n',
+      'utf8',
+    );
+
+    const probe = await resolveOwnerEntryResumeProbe(projectRoot, input('继续 invalid-brief'));
+
+    expect(probe).toMatchObject({
+      workflow: 'native',
+      action: 'ask_user',
+      reasonCode: 'native-change-invalid',
+      changeName: 'invalid-brief',
+      phase: 'shape',
+      nextCommand: null,
+    });
+    expect(probe.evidence).toContainEqual({
+      source: 'state',
+      quote: 'finding: brief-section-missing',
+    });
+  });
+
+  it('does not resume while a Native artifact-root move is incomplete', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'moving-change');
+    const config = defaultProjectConfig('.');
+    config.native.pending_root_move = {
+      id: 'deadbeef-0001',
+      fromArtifactRoot: '.',
+      toArtifactRoot: 'docs',
+      stage: 'copying',
+    };
+    await writeProjectConfig(projectRoot, config);
+
+    await expect(
+      resolveOwnerEntryResumeProbe(projectRoot, input('继续 moving-change')),
+    ).resolves.toMatchObject({
+      workflow: 'native',
+      skill: 'owner-native',
+      action: 'ask_user',
+      reasonCode: 'native-state-invalid',
+      changeName: null,
+      nextCommand: null,
+      reason: expect.stringContaining('owner native doctor --repair'),
+    });
+  });
+
+  it('does not make a dirty worktree a Native resume blocker', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('.'));
+    await createNative(projectRoot, 'cache-controls');
+    const initialized = spawnSync('git', ['init'], { cwd: projectRoot, encoding: 'utf8' });
+    expect(initialized.status, initialized.stderr).toBe(0);
+    await writeFile(path.join(projectRoot, 'notes.txt'), 'uncommitted user work\n');
+
+    const result = await resolveOwnerEntryResumeProbe(projectRoot, input('继续 cache-controls'));
+
+    expect(result).toMatchObject({
+      action: 'auto_resume',
+      changeName: 'cache-controls',
+      nextCommand: '/owner-native',
+    });
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({ source: 'repo', quote: expect.stringContaining('dirty file') }),
+    );
+  });
+
+  it('discovers a custom Native root from a nested path and remains read-only', async () => {
+    await writeProjectConfig(projectRoot, defaultProjectConfig('docs'));
+    await createNative(projectRoot, 'cache-controls', 'docs');
+    const nested = path.join(projectRoot, 'src', 'nested');
+    await fs.mkdir(nested, { recursive: true });
+    const before = await snapshot(projectRoot);
+
+    const result = await resolveOwnerEntryResumeProbe(nested, input('继续 cache-controls'));
+
+    expect(result).toMatchObject({
+      workflow: 'native',
+      action: 'auto_resume',
+      changeName: 'cache-controls',
+    });
+    expect(await snapshot(projectRoot)).toEqual(before);
+  });
+});

@@ -1,0 +1,3721 @@
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { promises as fs } from 'fs';
+import path from 'path';
+import os from 'os';
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
+import { spawnSync } from 'node:child_process';
+import { select } from '@inquirer/prompts';
+import { parse } from 'yaml';
+import { getLatestVersion } from '../../platform/version/version.js';
+import { PLATFORMS } from '../../platform/install/platforms.js';
+import { installOpenSpec } from '../../domains/integrations/openspec.js';
+import { installSuperpowersForPlatforms } from '../../domains/integrations/superpowers.js';
+import {
+  buildNpmUpdateArgs,
+  detectOwnerPackageScope,
+  detectInstalledOwnerLanguage,
+  detectInstalledOwnerTargets,
+  formatNpmUpdateCommand,
+  formatSkillUpdateCommand,
+  resolveNpmSelfUpdatePlan,
+  updateCommand,
+} from '../../app/commands/update.js';
+import {
+  getProjectRegistryPath,
+  upsertProjectInstallation,
+} from '../../platform/install/project-registry.js';
+import {
+  defaultProjectConfig,
+  writeProjectConfig,
+} from '../../domains/owner-native/native-config.js';
+import { assertClassicLayoutReadable } from '../../domains/owner-classic/classic-layout.js';
+
+// Mock the interactive select prompt so tests don't hang on CI (no TTY).
+vi.mock('@inquirer/prompts', () => ({
+  select: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    spawn: vi.fn(() => {
+      const child = new EventEmitter();
+      queueMicrotask(() => {
+        child.emit('exit', 0);
+        child.emit('close', 0);
+      });
+      return child;
+    }),
+  };
+});
+
+vi.mock('../../platform/version/version.js', () => ({
+  getCurrentVersion: vi.fn(() => '0.4.0-beta.7'),
+  getLatestVersion: vi.fn(async () => '0.4.0-beta.8'),
+  printVersionInfo: vi.fn(async () => ({
+    currentVersion: '0.4.0-beta.7',
+    latestVersion: '0.4.0-beta.8',
+    hasUpdate: true,
+    checked: true,
+  })),
+}));
+
+vi.mock('../../domains/integrations/openspec.js', () => ({
+  installOpenSpec: vi.fn(async () => 'installed'),
+  isProjectMutationGuardError: vi.fn(
+    (error: unknown) => (error as Error | undefined)?.name === 'ProjectMutationGuardError',
+  ),
+}));
+
+vi.mock('../../domains/integrations/superpowers.js', () => ({
+  installSuperpowersForPlatforms: vi.fn(async () => 'installed'),
+}));
+
+const mockedSelect = vi.mocked(select);
+const mockedSpawn = vi.mocked(spawn);
+const mockedGetLatestVersion = vi.mocked(getLatestVersion);
+const mockedInstallOpenSpec = vi.mocked(installOpenSpec);
+const mockedInstallSuperpowers = vi.mocked(installSuperpowersForPlatforms);
+
+const claudePlatform = PLATFORMS.find((platform) => platform.id === 'claude')!;
+
+const manifestPath = path.resolve('assets', 'manifest.json');
+
+const RETIRED_NATIVE_BUNDLES = [
+  'owner-native/scripts/owner-native-checkpoint.mjs',
+  'owner-native/scripts/owner-native-check.mjs',
+  'owner-native/scripts/owner-native-evidence.mjs',
+  'owner-native/scripts/owner-native-receipt.mjs',
+] as const;
+
+async function readManifest() {
+  return JSON.parse(await fs.readFile(manifestPath, 'utf-8')) as { skills: string[] };
+}
+
+type ComponentFailure = 'Skill' | 'Rule' | 'Hook';
+
+async function writeFakeOwnerPackage(packageRoot: string, version: string): Promise<void> {
+  await fs.mkdir(path.join(packageRoot, 'bin'), { recursive: true });
+  await fs.writeFile(
+    path.join(packageRoot, 'package.json'),
+    JSON.stringify({ name: 'owner', version, bin: { owner: 'bin/owner.js' } }),
+  );
+  await fs.writeFile(path.join(packageRoot, 'bin', 'owner.js'), '#!/usr/bin/env node\n');
+}
+
+async function arrangeClassicDocsOpenSpecUpdate(projectPath: string): Promise<void> {
+  await fs.mkdir(path.join(projectPath, '.owner'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectPath, '.owner', 'config.yaml'),
+    [
+      'schema: owner.project.v1',
+      'default_workflow: classic',
+      'workflows:',
+      '  - classic',
+      'ambient_resume: true',
+      'classic:',
+      '  artifact_layout: docs',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await fs.mkdir(path.join(projectPath, 'docs', 'openspec'), { recursive: true });
+  await fs.mkdir(path.join(projectPath, '.claude', 'skills', 'owner'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectPath, '.claude', 'skills', 'owner', 'SKILL.md'),
+    '# Owner\n',
+    'utf8',
+  );
+  await fs.mkdir(path.join(projectPath, '.claude', 'skills', 'openspec-propose'), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(projectPath, '.claude', 'skills', 'openspec-propose', 'SKILL.md'),
+    '# OpenSpec\n',
+    'utf8',
+  );
+}
+
+async function writeMockOpenSpecProject(
+  projectPath: string,
+  artifactLayout: 'legacy' | 'docs',
+  config: 'healthy' | 'missing' | 'corrupt' = 'healthy',
+): Promise<void> {
+  const openSpecRoot =
+    artifactLayout === 'docs'
+      ? path.join(projectPath, 'docs', 'openspec')
+      : path.join(projectPath, 'openspec');
+  await fs.mkdir(path.join(openSpecRoot, 'changes', 'archive'), { recursive: true });
+  if (config === 'healthy') {
+    await fs.writeFile(path.join(openSpecRoot, 'config.yaml'), 'schema: spec-driven\n', 'utf8');
+  } else if (config === 'corrupt') {
+    await fs.writeFile(path.join(openSpecRoot, 'config.yaml'), 'schema: [broken\n', 'utf8');
+  }
+}
+
+async function arrangeComponentFailure(
+  projectPath: string,
+  failure: ComponentFailure,
+): Promise<{ installMode: 'copy' | 'symlink' }> {
+  await fs.mkdir(path.join(projectPath, '.codex'), { recursive: true });
+
+  if (failure === 'Skill') {
+    await fs.mkdir(path.join(projectPath, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectPath, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Legacy Owner\n',
+    );
+    await fs.mkdir(path.join(projectPath, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectPath, '.agents', 'skills', 'owner', 'user-file.md'),
+      '# Keep\n',
+    );
+    return { installMode: 'symlink' };
+  }
+
+  await fs.mkdir(path.join(projectPath, '.agents', 'skills', 'owner'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectPath, '.agents', 'skills', 'owner', 'SKILL.md'),
+    '# Owner\n\nUse this skill.\n',
+  );
+
+  if (failure === 'Rule') {
+    await fs.writeFile(path.join(projectPath, '.codex', 'rules'), 'blocking file');
+  } else {
+    await fs.mkdir(path.join(projectPath, '.codex', 'hooks.json'), { recursive: true });
+  }
+
+  return { installMode: 'copy' };
+}
+
+describe('update command helpers', () => {
+  let tmpDir: string;
+  let fakeGlobalNpmRoot: string;
+  let candidateVersionOverride: string | null;
+  let candidateCommandFailure: string | null;
+  let candidateCommandHang: boolean;
+  let candidateCommandOutputBytes: number | null;
+  let candidateInstallHang: boolean;
+  let candidateBinEscapesPackage: boolean;
+  let targetInstallFailureVersion: string | null;
+  let mutateProjectMetadataOnFailure: boolean;
+  let delayGlobalRootClose: boolean;
+  let releaseGlobalRootClose: (() => void) | null;
+  let projectNpmRootOverride: string | null;
+  let projectNpmPrefixOverride: string | null;
+
+  beforeEach(async () => {
+    tmpDir = path.join(
+      os.tmpdir(),
+      `owner-update-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await fs.mkdir(tmpDir, { recursive: true });
+    fakeGlobalNpmRoot = path.join(tmpDir, 'global node_modules & safe');
+    await writeFakeOwnerPackage(path.join(fakeGlobalNpmRoot, 'owner'), '0.4.0-beta.7');
+    candidateVersionOverride = null;
+    candidateCommandFailure = null;
+    candidateCommandHang = false;
+    candidateCommandOutputBytes = null;
+    candidateInstallHang = false;
+    candidateBinEscapesPackage = false;
+    targetInstallFailureVersion = null;
+    mutateProjectMetadataOnFailure = false;
+    delayGlobalRootClose = false;
+    releaseGlobalRootClose = null;
+    projectNpmRootOverride = null;
+    projectNpmPrefixOverride = null;
+    mockedSelect.mockClear();
+    mockedSpawn.mockClear();
+    mockedGetLatestVersion.mockClear();
+    mockedInstallOpenSpec.mockReset();
+    mockedInstallOpenSpec.mockImplementation(
+      async (projectPath, _toolIds, scope, _shouldInstallCli, artifactLayout) => {
+        if (scope === 'project') {
+          await writeMockOpenSpecProject(projectPath, artifactLayout);
+        }
+        return 'installed';
+      },
+    );
+    mockedInstallSuperpowers.mockReset();
+    mockedInstallSuperpowers.mockResolvedValue('installed');
+    mockedSpawn.mockImplementation((_command, args, options) => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: ReturnType<typeof vi.fn>;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      let childClosed = false;
+      child.kill = vi.fn(() => {
+        queueMicrotask(() => {
+          if (childClosed) return;
+          childClosed = true;
+          child.emit('close', null);
+        });
+        return true;
+      });
+      queueMicrotask(async () => {
+        try {
+          const commandArgs = (args ?? []) as string[];
+          const firstArg = commandArgs[0] ?? '';
+          const npmInvocation = path.basename(firstArg).toLowerCase() === 'npm-cli.js';
+          const npmArgs = npmInvocation ? commandArgs.slice(1) : [];
+          const cwd = String((options as { cwd?: string } | undefined)?.cwd ?? tmpDir);
+
+          if (npmArgs[0] === 'root' && npmArgs[1] === '--global') {
+            child.stdout.emit('data', Buffer.from(`${fakeGlobalNpmRoot}\n`));
+            if (delayGlobalRootClose) {
+              child.emit('exit', 0);
+              await new Promise<void>((resolve) => {
+                releaseGlobalRootClose = resolve;
+              });
+              child.emit('close', 0);
+              return;
+            }
+          } else if (npmArgs[0] === 'root') {
+            child.stdout.emit(
+              'data',
+              Buffer.from(`${projectNpmRootOverride ?? path.join(cwd, 'node_modules')}\n`),
+            );
+          } else if (npmArgs[0] === 'prefix') {
+            child.stdout.emit('data', Buffer.from(`${projectNpmPrefixOverride ?? cwd}\n`));
+          } else if (npmArgs[0] === 'install' && npmArgs.includes('--prefix')) {
+            if (candidateInstallHang) return;
+            const prefix = npmArgs[npmArgs.indexOf('--prefix') + 1];
+            const packageSpec = npmArgs.find((arg) => arg.startsWith('owner@'))!;
+            const requestedVersion = packageSpec.slice('owner@'.length);
+            await writeFakeOwnerPackage(
+              path.join(prefix, 'node_modules', 'owner'),
+              candidateVersionOverride ?? requestedVersion,
+            );
+            if (candidateBinEscapesPackage) {
+              const packageRoot = path.join(prefix, 'node_modules', 'owner');
+              const outsideDir = path.join(tmpDir, 'candidate-bin-outside');
+              await fs.mkdir(outsideDir, { recursive: true });
+              await fs.writeFile(path.join(outsideDir, 'owner.js'), '#!/usr/bin/env node\n');
+              await fs.writeFile(
+                path.join(packageRoot, 'package.json'),
+                JSON.stringify({
+                  name: 'owner',
+                  version: candidateVersionOverride ?? requestedVersion,
+                  bin: { owner: 'linked/owner.js' },
+                }),
+              );
+              await fs.symlink(outsideDir, path.join(packageRoot, 'linked'), 'junction');
+            }
+          } else if (firstArg.endsWith(path.join('bin', 'owner.js'))) {
+            const packageRoot = path.resolve(path.dirname(firstArg), '..');
+            const pkg = JSON.parse(
+              await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+            ) as { version: string };
+            const cliArgs = commandArgs.slice(1);
+            const label =
+              cliArgs[0] === 'workflow'
+                ? 'workflow'
+                : cliArgs[0] === 'native'
+                  ? 'native'
+                  : 'version';
+            if (candidateCommandFailure === label) {
+              child.stderr.emit('data', Buffer.from(`candidate ${label} command failed\n`));
+              child.emit('exit', 1);
+              child.emit('close', 1);
+              return;
+            }
+            if (candidateCommandHang && label === 'version') return;
+            if (candidateCommandOutputBytes !== null && label === 'version') {
+              child.stdout.emit('data', Buffer.alloc(candidateCommandOutputBytes, 120));
+              return;
+            }
+            const output =
+              label === 'version'
+                ? `${pkg.version}\n`
+                : label === 'workflow'
+                  ? 'Usage: owner workflow resolve [options]\n'
+                  : 'Usage: owner native <command> [options]\n';
+            child.stdout.emit('data', Buffer.from(output));
+          } else if (npmArgs[0] === 'install') {
+            const packageSpec = npmArgs.find((arg) => arg.startsWith('owner@'))!;
+            const requestedVersion = packageSpec.slice('owner@'.length);
+            const packageRoot = npmArgs.includes('-g')
+              ? path.join(fakeGlobalNpmRoot, 'owner')
+              : path.join(projectNpmRootOverride ?? path.join(cwd, 'node_modules'), 'owner');
+            if (targetInstallFailureVersion === requestedVersion) {
+              if (mutateProjectMetadataOnFailure && !npmArgs.includes('-g')) {
+                await fs.writeFile(path.join(cwd, 'package.json'), '{"mutated":true}\n');
+                await fs.writeFile(
+                  path.join(projectNpmPrefixOverride ?? cwd, 'package-lock.json'),
+                  '{"mutated":true}\n',
+                );
+              }
+              child.stderr.emit('data', Buffer.from('npm ERR! EACCES permission denied\n'));
+              child.emit('exit', 1);
+              child.emit('close', 1);
+              return;
+            }
+            await writeFakeOwnerPackage(packageRoot, requestedVersion);
+          }
+
+          child.emit('exit', 0);
+          childClosed = true;
+          child.emit('close', 0);
+        } catch (error) {
+          child.emit('error', error);
+          child.emit('close', null);
+        }
+      });
+      return child as ReturnType<typeof spawn>;
+    });
+    mockedGetLatestVersion.mockResolvedValue('0.4.0-beta.8');
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('detects Chinese installed owner skills from existing skill content', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时，先澄清目标再执行。',
+      'utf-8',
+    );
+
+    await expect(detectInstalledOwnerLanguage(tmpDir, claudePlatform)).resolves.toBe('zh');
+  });
+
+  it('detects English installed owner skills from existing skill content', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill when starting a new change.',
+      'utf-8',
+    );
+
+    await expect(detectInstalledOwnerLanguage(tmpDir, claudePlatform)).resolves.toBe('en');
+  });
+
+  it('defaults installed owner language to English when the skills directory is missing', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude'), { recursive: true });
+
+    await expect(detectInstalledOwnerLanguage(tmpDir, claudePlatform)).resolves.toBe('en');
+  });
+
+  it('finds only scopes and platforms that already have owner skills installed', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    const globalDir = path.join(tmpDir, 'home');
+
+    await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+
+    await fs.mkdir(path.join(projectDir, '.cursor'), { recursive: true });
+
+    await fs.mkdir(path.join(globalDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.mkdir(path.join(globalDir, '.codex'), { recursive: true });
+    await fs.writeFile(
+      path.join(globalDir, '.agents', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时使用这个技能。',
+      'utf-8',
+    );
+
+    const targets = await detectInstalledOwnerTargets(projectDir, {
+      globalBaseDir: globalDir,
+    });
+
+    expect(targets.map((t) => `${t.scope}:${t.platform.id}:${t.language}`)).toEqual([
+      'project:claude:en',
+      'global:codex:zh',
+    ]);
+  });
+
+  it('ignores platform directories that do not contain a skills directory', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    await fs.mkdir(path.join(projectDir, '.claude'), { recursive: true });
+
+    await expect(detectInstalledOwnerTargets(projectDir, { scopes: ['project'] })).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('respects explicit scope filtering when detecting installed targets', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    const globalDir = path.join(tmpDir, 'home');
+
+    await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    await fs.mkdir(path.join(globalDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.mkdir(path.join(globalDir, '.codex'), { recursive: true });
+    await fs.writeFile(path.join(globalDir, '.agents', 'skills', 'owner', 'SKILL.md'), '# Owner');
+
+    const targets = await detectInstalledOwnerTargets(projectDir, {
+      globalBaseDir: globalDir,
+      scopes: ['global'],
+    });
+
+    expect(targets.map((t) => `${t.scope}:${t.platform.id}`)).toEqual(['global:codex']);
+  });
+
+  it('does not infer Codex from a shared canonical Skill directory without Codex detection paths', async () => {
+    const projectDir = path.join(tmpDir, 'shared-agents-only');
+    await fs.mkdir(path.join(projectDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, '.agents', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+    );
+
+    const targets = await detectInstalledOwnerTargets(projectDir, { scopes: ['project'] });
+
+    expect(targets).toEqual([]);
+  });
+
+  it('assigns a shared project .agents Skill root only to Codex when .codex evidence exists', async () => {
+    const projectDir = path.join(tmpDir, 'shared-agents-with-codex');
+    await fs.mkdir(path.join(projectDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, '.codex'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, '.agents', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+    );
+
+    const targets = await detectInstalledOwnerTargets(projectDir, { scopes: ['project'] });
+
+    expect(targets.map((target) => target.platform.id)).toEqual(['codex']);
+  });
+
+  it('updates an explicitly scoped canonical global Codex install without a detection path', async () => {
+    const projectDir = path.join(tmpDir, 'explicit-global-project');
+    const fakeHome = path.join(tmpDir, 'explicit-global-home');
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'), '# Owner\n');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(projectDir, { json: true, skipNpm: true, scope: 'global' });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json).skills.targets).toEqual([
+      expect.objectContaining({ scope: 'global', platform: 'codex' }),
+    ]);
+  });
+
+  it('migrates legacy Codex skills after canonical installation and preserves unrelated skills', async () => {
+    const fakeHome = path.join(tmpDir, 'home');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const legacyOwner = path.join(tmpDir, '.codex', 'skills', 'owner');
+    const legacyPersonal = path.join(tmpDir, '.codex', 'skills', 'personal');
+    await fs.mkdir(legacyOwner, { recursive: true });
+    await fs.mkdir(legacyPersonal, { recursive: true });
+    await fs.writeFile(path.join(legacyOwner, 'SKILL.md'), '# Owner\n\nUse this skill.');
+    await fs.writeFile(path.join(legacyPersonal, 'SKILL.md'), '# Personal\n');
+    const legacyHookPath = path.join(tmpDir, '.codex', 'settings.local.json');
+    await fs.mkdir(path.dirname(legacyHookPath), { recursive: true });
+    await fs.writeFile(
+      legacyHookPath,
+      JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: 'Write|Edit',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: 'node .codex/skills/owner/scripts/owner-hook-guard.mjs',
+                  },
+                  { type: 'command', command: 'node my-user-hook.mjs' },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { skipNpm: true, scope: 'project' });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(
+      fs.access(path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md')),
+    ).resolves.toBeUndefined();
+    await expect(fs.access(legacyOwner)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(path.join(legacyPersonal, 'SKILL.md'), 'utf8')).resolves.toBe(
+      '# Personal\n',
+    );
+    const hooks = JSON.parse(await fs.readFile(path.join(tmpDir, '.codex', 'hooks.json'), 'utf8'));
+    expect(hooks.hooks.PreToolUse[0].hooks[0].command.replaceAll('\\', '/')).toContain(
+      '/.agents/skills/owner/scripts/owner-hook-router.mjs',
+    );
+    const legacy = JSON.parse(
+      await fs.readFile(path.join(tmpDir, '.codex', 'settings.local.json'), 'utf8'),
+    );
+    expect(legacy.hooks.PreToolUse[0].hooks).toEqual([
+      { type: 'command', command: 'node my-user-hook.mjs' },
+    ]);
+    await expect(
+      fs.access(path.join(tmpDir, '.agents', 'settings.local.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('removes the historical global Router when project update installs the replacement', async () => {
+    const fakeHome = path.join(tmpDir, 'global-hook-migration-home');
+    const globalHooksPath = path.join(fakeHome, '.codex', 'hooks.json');
+    const userHook = { type: 'command', command: 'node user-hook.mjs' };
+    const globalRouter = {
+      type: 'command',
+      command: `node "${path.join(
+        fakeHome,
+        '.agents',
+        'skills',
+        'owner',
+        'scripts',
+        'owner-hook-router.mjs',
+      )}" --platform codex`,
+    };
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md'), '# Owner\n');
+    await fs.mkdir(path.dirname(globalHooksPath), { recursive: true });
+    await fs.writeFile(
+      globalHooksPath,
+      JSON.stringify({
+        hooks: { PreToolUse: [{ matcher: 'Write|Edit', hooks: [userHook, globalRouter] }] },
+      }),
+      'utf8',
+    );
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { skipNpm: true, scope: 'project', platform: 'codex' });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const globalHooks = JSON.parse(await fs.readFile(globalHooksPath, 'utf8'));
+    expect(globalHooks.hooks.PreToolUse[0].hooks).toEqual([userHook]);
+    await expect(fs.access(path.join(tmpDir, '.codex', 'hooks.json'))).resolves.toBeUndefined();
+  });
+
+  it('does not update Codex hooks when the managed Hook script cannot be copied', async () => {
+    const fakeHome = path.join(tmpDir, 'hook-copy-failure-home');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const skillDir = path.join(tmpDir, '.agents', 'skills', 'owner');
+    await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(path.join(skillDir, 'SKILL.md'), '# Owner\n\nUse this skill.');
+    await fs.writeFile(path.join(skillDir, 'scripts'), 'blocking file');
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { skipNpm: true, scope: 'project' });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.access(path.join(tmpDir, '.codex', 'hooks.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it.each<ComponentFailure>(['Skill', 'Rule', 'Hook'])(
+    '%s failure is reported as incomplete in JSON and does not refresh the registry',
+    async (failure) => {
+      const fakeHome = path.join(tmpDir, `component-failure-json-${failure}`);
+      const options = await arrangeComponentFailure(tmpDir, failure);
+      await upsertProjectInstallation(tmpDir, [{ platform: 'codex', language: 'en' }], 'init', {
+        homeDir: fakeHome,
+      });
+      const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await updateCommand(tmpDir, {
+          json: true,
+          skipNpm: true,
+          scope: 'project',
+          installMode: options.installMode,
+        });
+        const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+        expect(result.status).toBe('incomplete');
+        expect(result.skills.totalFailed > 0).toBe(failure === 'Skill');
+        expect(result.rules.totalFailed > 0).toBe(failure === 'Rule');
+        expect(result.hooks.totalFailed > 0).toBe(failure === 'Hook');
+
+        const component = `${failure.toLowerCase()}s` as 'skills' | 'rules' | 'hooks';
+        expect(result[component].targets[0].failed).toBeGreaterThan(0);
+        expect(result[component].targets[0].reason).toEqual(expect.any(String));
+      } finally {
+        log.mockRestore();
+        homedirSpy.mockRestore();
+      }
+
+      const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')) as {
+        projects: Array<{ lastSource: string }>;
+      };
+      expect(registry.projects[0].lastSource).toBe('init');
+
+      if (failure === 'Skill') {
+        await expect(
+          fs.access(path.join(tmpDir, '.codex', 'rules', 'owner-phase-guard.md')),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(fs.access(path.join(tmpDir, '.codex', 'hooks.json'))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      }
+    },
+  );
+
+  it.each<ComponentFailure>(['Skill', 'Rule', 'Hook'])(
+    '%s failure is reported as incomplete in text output',
+    async (failure) => {
+      const fakeHome = path.join(tmpDir, `component-failure-text-${failure}`);
+      const options = await arrangeComponentFailure(tmpDir, failure);
+      const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await updateCommand(tmpDir, {
+          skipNpm: true,
+          scope: 'project',
+          installMode: options.installMode,
+        });
+        const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+        expect(output).toMatch(/incomplete/iu);
+        if (failure === 'Skill') {
+          expect(output).toContain(
+            'Codex (project) Skill: failed (1) - 1 Skill file(s) failed to install',
+          );
+          expect(output).not.toMatch(/Antigravity.*Skill: failed/u);
+        } else if (failure === 'Rule') {
+          expect(output).toContain(
+            'Codex (project) Rule: failed (1) - 1 Rule file(s) failed to install',
+          );
+        } else {
+          expect(output).toMatch(
+            /Codex \(project\) Hook: failed \(1\) - Invalid Codex settings at .*hooks\.json: EISDIR/iu,
+          );
+        }
+      } finally {
+        log.mockRestore();
+        homedirSpy.mockRestore();
+      }
+    },
+  );
+
+  it.each<ComponentFailure>(['Skill', 'Rule', 'Hook'])(
+    '%s failure marks all-projects status failed',
+    async (failure) => {
+      const fakeHome = path.join(tmpDir, `component-failure-all-projects-${failure}`);
+      const project = path.join(tmpDir, `component-failure-project-${failure}`);
+      const options = await arrangeComponentFailure(project, failure);
+      await upsertProjectInstallation(project, [{ platform: 'codex', language: 'en' }], 'init', {
+        homeDir: fakeHome,
+      });
+      const registryBefore = await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8');
+      const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await updateCommand(project, {
+          allProjects: true,
+          json: true,
+          skipNpm: true,
+          installMode: options.installMode,
+        });
+        const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+        expect(result.projects[0].status).toBe('failed');
+        expect(result.projects[0].reason).toMatch(new RegExp(failure, 'iu'));
+        const failures = result.projects[0].failures as Array<Record<string, unknown>>;
+        if (failure === 'Skill') {
+          expect(failures).toEqual([
+            expect.objectContaining({
+              platformName: 'Codex',
+              scope: 'project',
+              component: 'Skill',
+              status: 'failed',
+              failed: 1,
+              reason: '1 Skill file(s) failed to install',
+            }),
+          ]);
+        } else if (failure === 'Rule') {
+          expect(failures).toContainEqual(
+            expect.objectContaining({
+              platform: 'codex',
+              platformName: 'Codex',
+              scope: 'project',
+              component: 'Rule',
+              status: 'failed',
+              failed: 1,
+              reason: '1 Rule file(s) failed to install',
+            }),
+          );
+        } else {
+          expect(failures).toContainEqual(
+            expect.objectContaining({
+              platform: 'codex',
+              platformName: 'Codex',
+              scope: 'project',
+              component: 'Hook',
+              status: 'failed',
+              failed: 1,
+              reason: expect.stringMatching(/Invalid Codex settings at .*hooks\.json: EISDIR/iu),
+            }),
+          );
+        }
+      } finally {
+        log.mockRestore();
+        homedirSpy.mockRestore();
+      }
+
+      await expect(fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')).resolves.toBe(
+        registryBefore,
+      );
+    },
+  );
+
+  it.each([true, false])(
+    'reports legacy Codex cleanup refusal as incomplete in %s output',
+    async (json) => {
+      const fakeHome = path.join(tmpDir, `cleanup-failure-home-${json}`);
+      const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const legacyTarget = path.join(tmpDir, 'legacy-shared-skills');
+      const legacySkills = path.join(tmpDir, '.codex', 'skills');
+      await fs.mkdir(path.join(legacyTarget, 'owner'), { recursive: true });
+      await fs.writeFile(path.join(legacyTarget, 'owner', 'SKILL.md'), '# Legacy Owner\n');
+      await fs.mkdir(path.dirname(legacySkills), { recursive: true });
+      await fs.symlink(
+        legacyTarget,
+        legacySkills,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      try {
+        await updateCommand(tmpDir, { skipNpm: true, scope: 'project', json });
+        const output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+        if (json) {
+          const result = JSON.parse(output);
+          expect(result.skills.cleanupFailed).toBeGreaterThan(0);
+          expect(result.skills.targets[0].cleanupFailed).toBeGreaterThan(0);
+          expect(result.skills.targets[0].reason).toMatch(/cleanup/iu);
+        } else {
+          expect(output).toMatch(/incomplete|failed/iu);
+        }
+      } finally {
+        log.mockRestore();
+        homedirSpy.mockRestore();
+      }
+
+      await expect(
+        fs.access(path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md')),
+      ).resolves.toBeUndefined();
+      await expect(fs.lstat(legacySkills)).resolves.toMatchObject({});
+    },
+  );
+
+  it('marks all-projects update failed when legacy Codex cleanup is refused', async () => {
+    const fakeHome = path.join(tmpDir, 'all-projects-home-cleanup-failure');
+    const project = path.join(tmpDir, 'all-projects-cleanup-failure');
+    const legacyTarget = path.join(tmpDir, 'all-projects-legacy-target');
+    await fs.mkdir(path.join(project, '.codex'), { recursive: true });
+    await fs.mkdir(path.join(legacyTarget, 'owner'), { recursive: true });
+    await fs.writeFile(path.join(legacyTarget, 'owner', 'SKILL.md'), '# Legacy Owner\n');
+    await fs.symlink(
+      legacyTarget,
+      path.join(project, '.codex', 'skills'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    await upsertProjectInstallation(project, [{ platform: 'codex', language: 'en' }], 'init', {
+      homeDir: fakeHome,
+    });
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(project, { allProjects: true, json: true, skipNpm: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.projects[0].status).toBe('failed');
+      expect(result.projects[0].reason).toMatch(/cleanup/iu);
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+  });
+
+  it('preserves legacy Codex skills when the canonical installation is incomplete', async () => {
+    const fakeHome = path.join(tmpDir, 'home-incomplete');
+    const legacySkill = path.join(tmpDir, '.codex', 'skills', 'owner', 'SKILL.md');
+    const canonicalConflict = path.join(tmpDir, '.agents', 'skills', 'owner', 'user-file.md');
+    await fs.mkdir(path.dirname(legacySkill), { recursive: true });
+    await fs.writeFile(legacySkill, '# Legacy Owner\n');
+    await fs.mkdir(path.dirname(canonicalConflict), { recursive: true });
+    await fs.writeFile(canonicalConflict, '# Keep\n');
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        skipNpm: true,
+        scope: 'project',
+        installMode: 'symlink',
+      });
+    } finally {
+      error.mockRestore();
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.readFile(legacySkill, 'utf8')).resolves.toBe('# Legacy Owner\n');
+  });
+
+  it('detects project package scope from local node_modules install path', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    const packageRoot = path.join(projectDir, 'node_modules', 'owner');
+
+    await expect(detectOwnerPackageScope(projectDir, packageRoot)).resolves.toBe('project');
+  });
+
+  it('detects project package scope from package.json dependencies', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(
+      path.join(projectDir, 'package.json'),
+      JSON.stringify({ devDependencies: { owner: '^0.2.4' } }),
+      'utf-8',
+    );
+
+    await expect(detectOwnerPackageScope(projectDir, tmpDir)).resolves.toBe('project');
+  });
+
+  it('falls back to global package scope when no project install is found', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    await fs.mkdir(projectDir, { recursive: true });
+
+    await expect(detectOwnerPackageScope(projectDir, tmpDir)).resolves.toBe('global');
+  });
+
+  it('builds npm update args preserving package install scope with official registry', () => {
+    expect(buildNpmUpdateArgs('global')).toEqual([
+      'install',
+      '-g',
+      'owner@latest',
+      '--registry',
+      'https://registry.npmjs.org',
+    ]);
+    expect(buildNpmUpdateArgs('project')).toEqual([
+      'install',
+      'owner@latest',
+      '--registry',
+      'https://registry.npmjs.org',
+    ]);
+  });
+
+  it('blocks a prerelease downgrade before invoking npm', async () => {
+    expect(resolveNpmSelfUpdatePlan('0.4.0-beta.7', '0.4.0-beta.6')).toEqual({
+      action: 'skip',
+      reason: 'registry version 0.4.0-beta.6 is older than current version 0.4.0-beta.7',
+    });
+  });
+
+  it('covers self-update semver and package-scope decision branches', async () => {
+    expect(resolveNpmSelfUpdatePlan('not-semver', '0.4.0')).toMatchObject({ action: 'fail' });
+    expect(resolveNpmSelfUpdatePlan('0.4.0', 'not-semver')).toMatchObject({ action: 'fail' });
+    expect(resolveNpmSelfUpdatePlan('0.4.0', '0.4.0')).toMatchObject({ action: 'skip' });
+    expect(resolveNpmSelfUpdatePlan('0.4.0', '0.4.1')).toEqual({
+      action: 'update',
+      version: '0.4.1',
+    });
+    expect(resolveNpmSelfUpdatePlan('0.4.0-beta.10', '0.4.0-beta.2')).toMatchObject({
+      action: 'skip',
+    });
+    expect(resolveNpmSelfUpdatePlan('0.4.0-alpha', '0.4.0-beta')).toMatchObject({
+      action: 'update',
+    });
+    expect(resolveNpmSelfUpdatePlan('0.4.0-alpha.1', '0.4.0-alpha.beta')).toMatchObject({
+      action: 'update',
+    });
+
+    const project = path.join(tmpDir, 'package-scope');
+    await fs.mkdir(path.join(project, 'node_modules', 'owner'), { recursive: true });
+    await expect(
+      detectOwnerPackageScope(project, path.join(project, 'node_modules', 'owner')),
+    ).resolves.toBe('project');
+    await fs.rm(path.join(project, 'node_modules'), { recursive: true, force: true });
+    await fs.writeFile(
+      path.join(project, 'package.json'),
+      JSON.stringify({ optionalDependencies: { owner: '^0.4.0' } }),
+    );
+    await expect(detectOwnerPackageScope(project, path.join(tmpDir, 'other'))).resolves.toBe(
+      'project',
+    );
+  });
+
+  it('does not self-update the global package for an explicit current-project refresh', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-current-project-no-self-update');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        scope: 'skipped',
+        status: 'skipped',
+        command: null,
+        reason: 'self-update disabled for current-project updates; pass --self-update to opt in',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(mockedGetLatestVersion).not.toHaveBeenCalled();
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it('does not self-update for implicit JSON current-project mode even with global scope', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-implicit-current-global-scope');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { json: true, scope: 'global' });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        scope: 'skipped',
+        status: 'skipped',
+        reason: 'self-update disabled for current-project updates; pass --self-update to opt in',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(mockedGetLatestVersion).not.toHaveBeenCalled();
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it('blocks registry prerelease downgrade when current-project explicitly opts into self-update', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    mockedGetLatestVersion.mockResolvedValue('0.4.0-beta.6');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-current-project-downgrade');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        scope: 'global',
+        status: 'skipped',
+        command: null,
+        reason: 'registry version 0.4.0-beta.6 is older than current version 0.4.0-beta.7',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(
+      mockedSpawn.mock.calls.some((call) =>
+        ((call[1] ?? []) as string[]).some((arg) => arg === 'install'),
+      ),
+    ).toBe(false);
+  });
+
+  it('compares against the actual installed global package instead of the running CLI version', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    await writeFakeOwnerPackage(path.join(fakeGlobalNpmRoot, 'owner'), '0.4.0-beta.9');
+    mockedGetLatestVersion.mockResolvedValue('0.4.0-beta.8');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-actual-global-version');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'skipped',
+        reason: 'registry version 0.4.0-beta.8 is older than current version 0.4.0-beta.9',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(mockedSpawn.mock.calls.some((call) => (call[1]?.slice(1) ?? [])[0] === 'install')).toBe(
+      false,
+    );
+  });
+
+  it('allows current-project to opt into a validated self-update explicitly', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-current-project-self-update');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        scope: 'global',
+        status: 'updated',
+        command: 'npm install -g owner@0.4.0-beta.8 --registry https://registry.npmjs.org',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(6);
+    expect(mockedSpawn.mock.calls.at(-1)?.[0]).toBe(process.execPath);
+    expect(mockedSpawn.mock.calls.at(-1)?.[1]?.slice(1)).toEqual([
+      'install',
+      '-g',
+      'owner@0.4.0-beta.8',
+      '--registry',
+      'https://registry.npmjs.org',
+    ]);
+    expect(mockedSpawn.mock.calls.every((call) => call[2]?.shell === false)).toBe(true);
+    expect(mockedSpawn.mock.calls.every((call) => call[0] === process.execPath)).toBe(true);
+    const candidateBinCalls = mockedSpawn.mock.calls.filter((call) =>
+      String(call[1]?.[0]).endsWith(path.join('bin', 'owner.js')),
+    );
+    expect(candidateBinCalls).toHaveLength(3);
+    expect(candidateBinCalls.every((call) => path.isAbsolute(String(call[1]?.[0])))).toBe(true);
+  });
+
+  it('does not mutate the installation when candidate command validation fails', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateCommandFailure = 'native';
+
+    const fakeHome = path.join(tmpDir, 'fake-home-invalid-candidate');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('candidate native command failed'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const targetInstallCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(targetInstallCalls).toHaveLength(0);
+  });
+
+  it('terminates candidate validation that exceeds the combined output budget', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateCommandOutputBytes = 256 * 1024 + 1;
+
+    const fakeHome = path.join(tmpDir, 'fake-home-candidate-output-limit');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('process output exceeded 262144 bytes'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const targetInstallCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(targetInstallCalls).toHaveLength(0);
+  });
+
+  it('terminates candidate validation after its dedicated timeout', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateCommandHang = true;
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(((
+        callback: (...args: unknown[]) => void,
+        delay?: number,
+        ...args: unknown[]
+      ) => realSetTimeout(callback, delay === 15_000 ? 0 : delay, ...args)) as typeof setTimeout);
+
+    const fakeHome = path.join(tmpDir, 'fake-home-candidate-timeout');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('process timed out after 15000ms'),
+      });
+    } finally {
+      timeoutSpy.mockRestore();
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+  });
+
+  it('terminates a candidate npm install after its longer dedicated timeout', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateInstallHang = true;
+    const realSetTimeout = globalThis.setTimeout;
+    const timeoutSpy = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(((
+        callback: (...args: unknown[]) => void,
+        delay?: number,
+        ...args: unknown[]
+      ) => realSetTimeout(callback, delay === 180_000 ? 0 : delay, ...args)) as typeof setTimeout);
+
+    const fakeHome = path.join(tmpDir, 'fake-home-candidate-install-timeout');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('process timed out after 180000ms'),
+      });
+    } finally {
+      timeoutSpy.mockRestore();
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const targetInstallCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(targetInstallCalls).toHaveLength(0);
+  });
+
+  it('rejects a candidate bin whose real path escapes the package root', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateBinEscapesPackage = true;
+
+    const fakeHome = path.join(tmpDir, 'fake-home-candidate-bin-escape');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('Owner package bin is invalid: linked/owner.js'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(
+      mockedSpawn.mock.calls.some((call) => String(call[1]?.[0]).includes('candidate-bin-outside')),
+    ).toBe(false);
+  });
+
+  it('waits for child close instead of resolving on exit', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    mockedGetLatestVersion.mockResolvedValue('0.4.0-beta.6');
+    delayGlobalRootClose = true;
+
+    const fakeHome = path.join(tmpDir, 'fake-home-close-wait');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let settled = false;
+    try {
+      const update = updateCommand(tmpDir, {
+        currentProject: true,
+        selfUpdate: true,
+        json: true,
+      }).then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() => expect(releaseGlobalRootClose).toBeTypeOf('function'));
+      expect(settled).toBe(false);
+      releaseGlobalRootClose?.();
+      await update;
+      expect(settled).toBe(true);
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+  });
+
+  it('retries candidate prefix cleanup without masking the validation error', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateCommandFailure = 'native';
+    const originalRm = fs.rm.bind(fs);
+    let cleanupAttempts = 0;
+    const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+      if (String(target).includes('owner-self-update-')) {
+        cleanupAttempts++;
+        if (cleanupAttempts < 3) {
+          throw Object.assign(new Error('temporary directory busy'), { code: 'EPERM' });
+        }
+      }
+      return originalRm(target, options);
+    });
+
+    const fakeHome = path.join(tmpDir, 'fake-home-cleanup-retry');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm.reason).toContain('candidate native command failed');
+      expect(result.npm.reason).not.toContain('temporary cleanup failed');
+      expect(cleanupAttempts).toBe(3);
+    } finally {
+      rmSpy.mockRestore();
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+  });
+
+  it('restores the exact current version when the npm install command fails', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    targetInstallFailureVersion = '0.4.0-beta.8';
+
+    const fakeHome = path.join(tmpDir, 'fake-home-install-rollback');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('restored 0.4.0-beta.7'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const installCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(installCalls.map((call) => call[1]?.[3])).toEqual([
+      'owner@0.4.0-beta.8',
+      'owner@0.4.0-beta.7',
+    ]);
+  });
+
+  it('restores project package metadata byte-for-byte after a failed project install', async () => {
+    const projectDir = path.join(tmpDir, 'project with spaces & metadata');
+    const packageJson = '{\n  "devDependencies": { "owner": "^0.4.0-beta.7" }\n}\n';
+    const packageLock = '{"lockfileVersion":3,"name":"before"}\n';
+    await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    await fs.writeFile(path.join(projectDir, 'package.json'), packageJson);
+    await fs.writeFile(path.join(projectDir, 'package-lock.json'), packageLock);
+    await writeFakeOwnerPackage(path.join(projectDir, 'node_modules', 'owner'), '0.4.0-beta.7');
+    targetInstallFailureVersion = '0.4.0-beta.8';
+    mutateProjectMetadataOnFailure = true;
+
+    const fakeHome = path.join(tmpDir, 'fake-home-project-metadata');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(projectDir, {
+        currentProject: true,
+        selfUpdate: true,
+        scope: 'project',
+        json: true,
+      });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('restored 0.4.0-beta.7'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.readFile(path.join(projectDir, 'package.json'), 'utf8')).resolves.toBe(
+      packageJson,
+    );
+    await expect(fs.readFile(path.join(projectDir, 'package-lock.json'), 'utf8')).resolves.toBe(
+      packageLock,
+    );
+    expect(mockedSpawn.mock.calls.every((call) => call[2]?.shell === false)).toBe(true);
+  });
+
+  it('reads a hoisted project package and restores workspace-root metadata after failure', async () => {
+    const workspaceRoot = path.join(tmpDir, 'workspace with spaces');
+    const projectDir = path.join(workspaceRoot, 'packages', 'app');
+    const projectPackageJson = '{\n  "devDependencies": { "owner": "^0.4.0-beta.7" }\n}\n';
+    const rootPackageJson = '{\n  "private": true, "workspaces": ["packages/*"]\n}\n';
+    const rootPackageLock = '{"lockfileVersion":3,"name":"workspace-before"}\n';
+    const config = defaultProjectConfig('.');
+    config.workflows = ['classic'];
+    config.default_workflow = 'classic';
+    await fs.mkdir(projectDir, { recursive: true });
+    await writeProjectConfig(projectDir, config);
+    await fs.mkdir(path.join(projectDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    await fs.writeFile(path.join(projectDir, 'package.json'), projectPackageJson);
+    await fs.writeFile(path.join(workspaceRoot, 'package.json'), rootPackageJson);
+    await fs.writeFile(path.join(workspaceRoot, 'package-lock.json'), rootPackageLock);
+    projectNpmRootOverride = path.join(workspaceRoot, 'node_modules');
+    projectNpmPrefixOverride = workspaceRoot;
+    await writeFakeOwnerPackage(path.join(projectNpmRootOverride, 'owner'), '0.4.0-beta.7');
+    targetInstallFailureVersion = '0.4.0-beta.8';
+    mutateProjectMetadataOnFailure = true;
+
+    const fakeHome = path.join(tmpDir, 'fake-home-workspace-metadata');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(projectDir, {
+        currentProject: true,
+        selfUpdate: true,
+        scope: 'project',
+        json: true,
+      });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: expect.stringContaining('restored 0.4.0-beta.7'),
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.readFile(path.join(projectDir, 'package.json'), 'utf8')).resolves.toBe(
+      projectPackageJson,
+    );
+    await expect(fs.readFile(path.join(workspaceRoot, 'package.json'), 'utf8')).resolves.toBe(
+      rootPackageJson,
+    );
+    await expect(fs.readFile(path.join(workspaceRoot, 'package-lock.json'), 'utf8')).resolves.toBe(
+      rootPackageLock,
+    );
+    expect(mockedSpawn.mock.calls.some((call) => call[1]?.slice(1).join(' ') === 'root')).toBe(
+      true,
+    );
+    expect(mockedSpawn.mock.calls.some((call) => call[1]?.slice(1).join(' ') === 'prefix')).toBe(
+      true,
+    );
+  });
+
+  it('rejects a candidate whose installed package version does not exactly match the target', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    candidateVersionOverride = '0.4.0-beta.80';
+
+    const fakeHome = path.join(tmpDir, 'fake-home-candidate-version-mismatch');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, selfUpdate: true, json: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        reason: 'candidate package version mismatch: expected 0.4.0-beta.8, got 0.4.0-beta.80',
+      });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const targetInstallCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(targetInstallCalls).toHaveLength(0);
+  });
+
+  it('formats the npm update command for friendly console output', () => {
+    expect(formatNpmUpdateCommand('global')).toBe(
+      'npm install -g owner@latest --registry https://registry.npmjs.org',
+    );
+    expect(formatNpmUpdateCommand('project')).toBe(
+      'npm install owner@latest --registry https://registry.npmjs.org',
+    );
+  });
+
+  it('formats the skill update command with scope, platform, and language source', () => {
+    expect(formatSkillUpdateCommand('project', claudePlatform, 'skills-zh')).toBe(
+      'copy assets/skills-zh -> .claude/skills/ (project)',
+    );
+    expect(formatSkillUpdateCommand('global', claudePlatform, 'skills')).toBe(
+      'copy assets/skills -> ~/.claude/skills/ (global)',
+    );
+    expect(formatSkillUpdateCommand('project', claudePlatform, 'skills', 'symlink')).toBe(
+      'symlink via .owner/skills/ in .claude/skills/ (project)',
+    );
+  });
+
+  it('prints the skill update command when updating installed skills', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时使用这个技能。',
+      'utf-8',
+    );
+
+    const fakeHome = path.join(tmpDir, 'fake-home-print-command');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let output: string;
+    try {
+      await updateCommand(tmpDir, { skipNpm: true });
+      output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    expect(output).toContain('$ copy assets/skills-zh -> .claude/skills/ (project)');
+  });
+
+  it('prints structured JSON when requested', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+
+    const fakeHome = path.join(tmpDir, 'fake-home-json');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.npm.scope).toBe('skipped');
+    expect(result.skills.totalCopied).toBeGreaterThan(0);
+    expect(result.skills.targets[0]).toMatchObject({
+      scope: 'project',
+      platform: 'claude',
+      language: 'en',
+      source: 'skills',
+    });
+  });
+
+  it('reports npm stderr and an incomplete status when a JSON update fails', async () => {
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+    targetInstallFailureVersion = '0.4.0-beta.8';
+
+    const fakeHome = path.join(tmpDir, 'fake-home-npm-json-failure');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { json: true, selfUpdate: true });
+      const result = JSON.parse(log.mock.calls.map((call) => call.join(' ')).join('\n'));
+      expect(result.status).toBe('incomplete');
+      expect(result.npm).toMatchObject({
+        status: 'failed',
+        exitCode: 1,
+        reason: expect.stringContaining('EACCES permission denied'),
+      });
+      expect(result.failures).toEqual([
+        expect.objectContaining({ component: 'npm', reason: expect.stringContaining('EACCES') }),
+      ]);
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+  });
+
+  it('updates all indexed project-scope installs when --all-projects is explicit in JSON mode', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    const projectA = path.join(tmpDir, 'project-a');
+    const projectB = path.join(tmpDir, 'project-b');
+    await fs.mkdir(fakeHome, { recursive: true });
+
+    for (const project of [projectA, projectB]) {
+      await fs.mkdir(path.join(project, '.claude', 'skills', 'owner'), { recursive: true });
+      await fs.writeFile(
+        path.join(project, '.claude', 'skills', 'owner', 'SKILL.md'),
+        '# Owner',
+        'utf-8',
+      );
+      await upsertProjectInstallation(project, [{ platform: 'claude', language: 'en' }], 'init', {
+        homeDir: fakeHome,
+      });
+    }
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(projectA, { json: true, skipNpm: true, allProjects: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.mode).toBe('all-projects');
+    expect(result.registry.projectsFound).toBe(2);
+    expect(
+      result.projects.map((project: { projectPath: string }) => project.projectPath).sort(),
+    ).toEqual([path.resolve(projectA), path.resolve(projectB)].sort());
+    expect(
+      result.projects.every((project: { status: string }) => project.status === 'updated'),
+    ).toBe(true);
+
+    const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')) as {
+      projects: Array<{ lastSource: string }>;
+    };
+    expect(registry.projects.every((project) => project.lastSource === 'update')).toBe(true);
+  });
+
+  it('does not run local npm installs for all-projects entries without project package dependencies', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-global-npm-once');
+    const projectA = path.join(tmpDir, 'project-a-global-package');
+    const projectB = path.join(tmpDir, 'project-b-global-package');
+
+    for (const project of [projectA, projectB]) {
+      await fs.mkdir(path.join(project, '.claude', 'skills', 'owner'), { recursive: true });
+      await fs.writeFile(path.join(project, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+      await upsertProjectInstallation(project, [{ platform: 'claude', language: 'en' }], 'init', {
+        homeDir: fakeHome,
+      });
+    }
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(projectA, { json: true, allProjects: true });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const installCalls = mockedSpawn.mock.calls.filter((call) => {
+      const npmArgs = call[1]?.slice(1) ?? [];
+      return npmArgs[0] === 'install' && !npmArgs.includes('--prefix');
+    });
+    expect(mockedSpawn).toHaveBeenCalledTimes(6);
+    expect(installCalls).toHaveLength(1);
+    expect(installCalls[0][1]?.slice(1)).toEqual([
+      'install',
+      '-g',
+      'owner@0.4.0-beta.8',
+      '--registry',
+      'https://registry.npmjs.org',
+    ]);
+    expect(installCalls.some((call) => !(call[1]?.slice(1) ?? []).includes('-g'))).toBe(false);
+  });
+
+  it('reports global npm update failure before updating all indexed projects', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-global-npm-failure');
+    const projectA = path.join(tmpDir, 'project-a-global-failure');
+    const projectB = path.join(tmpDir, 'project-b-global-failure');
+
+    for (const project of [projectA, projectB]) {
+      await fs.mkdir(path.join(project, '.claude', 'skills', 'owner'), { recursive: true });
+      await fs.writeFile(path.join(project, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner');
+      await upsertProjectInstallation(project, [{ platform: 'claude', language: 'en' }], 'init', {
+        homeDir: fakeHome,
+      });
+    }
+
+    targetInstallFailureVersion = '0.4.0-beta.8';
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(projectA, { json: true, allProjects: true, selfUpdate: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.projects).toEqual([
+      expect.objectContaining({
+        projectPath: path.resolve(projectA),
+        status: 'failed',
+        reason: expect.stringContaining('npm package update failed'),
+      }),
+      expect.objectContaining({
+        projectPath: path.resolve(projectB),
+        status: 'not_attempted',
+        reason: expect.stringContaining('global npm package update failed'),
+      }),
+    ]);
+    expect(result.status).toBe('incomplete');
+    expect(mockedSpawn.mock.calls.some((call) => call[1]?.includes('-g'))).toBe(true);
+  });
+
+  it('removes stale indexed projects that no longer have project-scope installs during all-projects update', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-stale');
+    const staleProject = path.join(tmpDir, 'stale-project');
+    await fs.mkdir(staleProject, { recursive: true });
+    await upsertProjectInstallation(
+      staleProject,
+      [{ platform: 'claude', language: 'en' }],
+      'init',
+      {
+        homeDir: fakeHome,
+      },
+    );
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(staleProject, { json: true, skipNpm: true, allProjects: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.mode).toBe('all-projects');
+    expect(result.registry).toMatchObject({ projectsFound: 1, staleRemoved: 1 });
+    expect(result.projects).toEqual([
+      {
+        projectPath: path.resolve(staleProject),
+        status: 'skipped',
+        reason: 'no project-scope Owner install detected',
+        targets: [],
+      },
+    ]);
+
+    const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')) as {
+      projects: unknown[];
+    };
+    expect(registry.projects).toHaveLength(0);
+  });
+
+  it('keeps indexed projects when all-projects update cannot inspect installed targets', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-inspection-error');
+    const project = path.join(tmpDir, 'project-inspection-error');
+    const skillsDir = path.join(project, '.claude', 'skills');
+    await fs.mkdir(path.join(skillsDir, 'owner'), { recursive: true });
+    await fs.writeFile(path.join(skillsDir, 'owner', 'SKILL.md'), '# Owner', 'utf-8');
+    await upsertProjectInstallation(project, [{ platform: 'claude', language: 'en' }], 'init', {
+      homeDir: fakeHome,
+    });
+
+    const originalAccess = fs.access.bind(fs);
+    const accessSpy = vi.spyOn(fs, 'access').mockImplementation(async (target) => {
+      if (path.resolve(String(target)) === path.resolve(skillsDir)) {
+        throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      }
+      return originalAccess(target);
+    });
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(project, { json: true, skipNpm: true, allProjects: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+      accessSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.registry).toMatchObject({ projectsFound: 1, staleRemoved: 0 });
+    expect(result.projects).toEqual([
+      {
+        projectPath: path.resolve(project),
+        status: 'failed',
+        reason: 'unable to inspect project: permission denied',
+        targets: [],
+      },
+    ]);
+    expect(result.status).toBe('incomplete');
+
+    const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')) as {
+      projects: Array<{ path: string }>;
+    };
+    expect(registry.projects.map((entry) => entry.path)).toEqual([path.resolve(project)]);
+  });
+
+  it('rejects --all-projects with --scope global during update', async () => {
+    await expect(
+      updateCommand(tmpDir, { json: true, skipNpm: true, allProjects: true, scope: 'global' }),
+    ).rejects.toThrow('--all-projects cannot be combined with --scope global');
+  });
+
+  it('rejects --all-projects with --current-project during update', async () => {
+    await expect(
+      updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        allProjects: true,
+        currentProject: true,
+      }),
+    ).rejects.toThrow('--all-projects cannot be combined with --current-project');
+  });
+
+  it('keeps JSON update current-project by default even when registry has projects', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-current');
+    const projectA = path.join(tmpDir, 'project-current');
+    await fs.mkdir(path.join(projectA, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectA, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner',
+      'utf-8',
+    );
+    await upsertProjectInstallation(projectA, [{ platform: 'claude', language: 'en' }], 'init', {
+      homeDir: fakeHome,
+    });
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(projectA, { json: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.mode).toBeUndefined();
+    expect(result.skills.targets).toHaveLength(1);
+    expect(result.npm).toMatchObject({
+      scope: 'skipped',
+      status: 'skipped',
+      command: null,
+      reason: 'self-update disabled for current-project updates; pass --self-update to opt in',
+    });
+    expect(mockedGetLatestVersion).not.toHaveBeenCalled();
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it('does not update global targets when the interactive scope selects current project', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-interactive-current-project');
+    const projectSkill = path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md');
+    const globalSkill = path.join(fakeHome, '.claude', 'skills', 'owner', 'SKILL.md');
+    await fs.mkdir(path.dirname(projectSkill), { recursive: true });
+    await fs.mkdir(path.dirname(globalSkill), { recursive: true });
+    await fs.writeFile(projectSkill, '# Stale project Owner\n', 'utf8');
+    await fs.writeFile(globalSkill, '# Stale global Owner\n', 'utf8');
+    await upsertProjectInstallation(tmpDir, [{ platform: 'claude', language: 'en' }], 'init', {
+      homeDir: fakeHome,
+    });
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockedSelect.mockResolvedValueOnce('current-project' as never);
+    try {
+      await updateCommand(tmpDir, { skipNpm: true, installMode: 'copy' });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.readFile(projectSkill, 'utf8')).resolves.toContain(
+      'owner workflow resolve . --activate --json',
+    );
+    await expect(fs.readFile(globalSkill, 'utf8')).resolves.toBe('# Stale global Owner\n');
+  });
+
+  it('does not fall back to global targets when bare update has no indexed projects', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-no-indexed-projects');
+    const globalSkill = path.join(fakeHome, '.claude', 'skills', 'owner', 'SKILL.md');
+    await fs.mkdir(path.dirname(globalSkill), { recursive: true });
+    await fs.writeFile(globalSkill, '# Stale global Owner\n', 'utf8');
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let output: string;
+    try {
+      await updateCommand(tmpDir, { skipNpm: true, installMode: 'copy' });
+      output = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    await expect(fs.readFile(globalSkill, 'utf8')).resolves.toBe('# Stale global Owner\n');
+    expect(output!).toContain('No indexed Owner projects found');
+  });
+
+  it('refreshes the project registry after a successful current-project update', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-current-refresh');
+    const projectA = path.join(tmpDir, 'project-current-refresh');
+    await fs.mkdir(path.join(projectA, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(projectA, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner',
+      'utf-8',
+    );
+    await upsertProjectInstallation(projectA, [{ platform: 'claude', language: 'en' }], 'init', {
+      homeDir: fakeHome,
+    });
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(projectA, { json: true, skipNpm: true });
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf-8')) as {
+      projects: Array<{ lastSource: string }>;
+    };
+    expect(registry.projects).toHaveLength(1);
+    expect(registry.projects[0].lastSource).toBe('update');
+  });
+
+  it('updates only the explicit native platform target', async () => {
+    const fakeHome = path.join(tmpDir, 'explicit-native-home');
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Stale Claude Owner\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        platform: 'codex',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.skills.targets).toEqual([
+      expect.objectContaining({ scope: 'project', platform: 'codex' }),
+    ]);
+    await expect(
+      fs.readFile(path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('owner workflow resolve . --activate --json');
+    await expect(
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Stale Claude Owner\n');
+  });
+
+  it('applies the project workflow selection to an explicit Claude update target', async () => {
+    const fakeHome = path.join(tmpDir, 'explicit-claude-both-home');
+    const config = defaultProjectConfig('docs');
+    config.workflows = ['native', 'classic'];
+    config.default_workflow = 'native';
+    await writeProjectConfig(tmpDir, config);
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        platform: 'claude',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.skills.targets).toEqual([
+      expect.objectContaining({ scope: 'project', platform: 'claude' }),
+    ]);
+    const manifest = await readManifest();
+    for (const skillPath of manifest.skills) {
+      await expect(
+        fs.access(path.join(tmpDir, '.claude', 'skills', skillPath)),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it('updates installed OpenSpec platform assets against the configured docs artifact root', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-update-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+    await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('does not update Classic dependencies during a regular Owner update', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-dependencies-regular-update-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'brainstorming'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'brainstorming', 'SKILL.md'),
+      '# Brainstorming\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        skipNpm: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).not.toHaveBeenCalled();
+    expect(mockedInstallSuperpowers).not.toHaveBeenCalled();
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'complete',
+      openspec: { status: 'skipped' },
+      superpowers: { status: 'skipped' },
+    });
+  });
+
+  it('updates installed Classic dependencies with explicit self-update', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-dependencies-self-update-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'brainstorming'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'brainstorming', 'SKILL.md'),
+      '# Brainstorming\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+    expect(mockedInstallSuperpowers).toHaveBeenCalledWith(tmpDir, 'project', ['claude'], true);
+  });
+
+  it.each(['missing', 'corrupt'] as const)(
+    'leaves project config unchanged when OpenSpec reports installed with a %s config',
+    async (openSpecConfig) => {
+      const fakeHome = path.join(tmpDir, `classic-docs-${openSpecConfig}-home`);
+      await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+      const configPath = path.join(tmpDir, '.owner', 'config.yaml');
+      const configBefore = await fs.readFile(configPath, 'utf8');
+      mockedInstallOpenSpec.mockImplementationOnce(
+        async (projectPath, _toolIds, scope, _shouldInstallCli, artifactLayout) => {
+          if (scope === 'project') {
+            await writeMockOpenSpecProject(projectPath, artifactLayout, openSpecConfig);
+          }
+          return 'installed';
+        },
+      );
+
+      const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      let json: string;
+      try {
+        await updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'copy',
+          language: 'zh',
+          json: true,
+          selfUpdate: true,
+        });
+        json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      } finally {
+        log.mockRestore();
+        homeSpy.mockRestore();
+      }
+
+      expect(JSON.parse(json)).toMatchObject({
+        status: 'incomplete',
+        openspec: {
+          status: 'failed',
+          reason: expect.stringMatching(/OpenSpec root is unhealthy/iu),
+        },
+      });
+      await expect(fs.readFile(configPath, 'utf8')).resolves.toBe(configBefore);
+    },
+  );
+
+  it('upgrades a legacy partial Native and Classic project config without moving its root', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-legacy-partial-home');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'default_workflow: native',
+        'native:',
+        '  artifact_root: docs',
+        '  language: en',
+        'language: zh-CN',
+        'context_compression: beta',
+        'review_mode: thorough',
+        'auto_transition: false',
+        'custom_top: keep',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'openspec-propose', 'SKILL.md'),
+      '# OpenSpec\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        language: 'zh',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({ status: 'complete' });
+    const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'));
+    expect(config).toMatchObject({
+      schema: 'owner.project.v1',
+      default_workflow: 'native',
+      workflows: ['native', 'classic'],
+      native: {
+        artifact_root: 'docs',
+        language: 'en',
+      },
+      classic: {
+        artifact_layout: 'legacy',
+        language: 'zh-CN',
+        context_compression: 'beta',
+        review_mode: 'thorough',
+        auto_transition: false,
+      },
+      custom_top: 'keep',
+    });
+    await expect(assertClassicLayoutReadable(tmpDir)).resolves.toMatchObject({
+      artifactLayout: 'legacy',
+      openSpecRoot: path.join(tmpDir, 'openspec'),
+    });
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      true,
+      'legacy',
+      expect.any(Function),
+      undefined,
+    );
+    await expect(fs.access(path.join(tmpDir, 'docs', 'openspec'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('backfills every managed Native and Classic default with the docs layout', async () => {
+    const fakeHome = path.join(tmpDir, 'partial-config-defaults-home');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      ['default_workflow: native', 'native:', '  custom_native: keep', 'custom_top: keep', ''].join(
+        '\n',
+      ),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'openspec-propose', 'SKILL.md'),
+      '# OpenSpec\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        language: 'en',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({ status: 'complete' });
+    const config = parse(await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'));
+    expect(config).toMatchObject({
+      schema: 'owner.project.v1',
+      default_workflow: 'native',
+      workflows: ['native', 'classic'],
+      ambient_resume: true,
+      native: {
+        artifact_root: 'docs',
+        language: 'en',
+        clarification_mode: 'batch',
+        archive_confirmation: 'automatic',
+        max_verify_failures: 5,
+      },
+      classic: {
+        artifact_layout: 'docs',
+        language: 'en',
+        context_compression: 'off',
+        review_mode: 'standard',
+        auto_transition: true,
+      },
+      custom_top: 'keep',
+    });
+    await expect(assertClassicLayoutReadable(tmpDir)).resolves.toMatchObject({
+      artifactLayout: 'docs',
+      openSpecRoot: path.join(tmpDir, 'docs', 'openspec'),
+    });
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+  });
+
+  it('updates the configured Classic root when both roots exist', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-dual-root-update-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'openspec', 'legacy-marker.txt'), 'legacy\n', 'utf8');
+    await fs.writeFile(path.join(tmpDir, 'docs', 'openspec', 'docs-marker.txt'), 'docs\n', 'utf8');
+    const configPath = path.join(tmpDir, '.owner', 'config.yaml');
+    const managedSkillPath = path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md');
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'complete',
+      openspec: { status: 'installed' },
+      failures: [],
+    });
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+    await expect(
+      fs.readFile(path.join(tmpDir, 'openspec', 'legacy-marker.txt'), 'utf8'),
+    ).resolves.toBe('legacy\n');
+    await expect(
+      fs.readFile(path.join(tmpDir, 'docs', 'openspec', 'docs-marker.txt'), 'utf8'),
+    ).resolves.toBe('docs\n');
+    expect(parse(await fs.readFile(configPath, 'utf8'))).toMatchObject({
+      classic: { artifact_layout: 'docs' },
+    });
+    await expect(fs.readFile(managedSkillPath, 'utf8')).resolves.toContain('# Owner');
+  });
+
+  it('rejects a project .owner junction without touching the external config or OpenSpec', async () => {
+    const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-update-config-outside-'));
+    const source = [
+      'schema: owner.project.v1',
+      'default_workflow: classic',
+      'workflows: [classic]',
+      'classic:',
+      '  artifact_layout: docs',
+      '',
+    ].join('\n');
+    try {
+      await fs.writeFile(path.join(outsideRoot, 'config.yaml'), source, 'utf8');
+      await fs.writeFile(path.join(outsideRoot, 'marker.txt'), 'keep\n', 'utf8');
+      try {
+        await fs.symlink(
+          outsideRoot,
+          path.join(tmpDir, '.owner'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+        throw error;
+      }
+
+      await expect(
+        updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'copy',
+          json: true,
+          skipNpm: true,
+        }),
+      ).rejects.toThrow(/symbolic link or junction/iu);
+      expect(mockedInstallOpenSpec).not.toHaveBeenCalled();
+      await expect(fs.readFile(path.join(outsideRoot, 'config.yaml'), 'utf8')).resolves.toBe(
+        source,
+      );
+      await expect(fs.readFile(path.join(outsideRoot, 'marker.txt'), 'utf8')).resolves.toBe(
+        'keep\n',
+      );
+    } finally {
+      await fs.rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a project config symlink without touching its external target or OpenSpec', async () => {
+    const outsideRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'owner-update-file-outside-'));
+    const outsideConfig = path.join(outsideRoot, 'config.yaml');
+    const source = [
+      'schema: owner.project.v1',
+      'default_workflow: classic',
+      'workflows: [classic]',
+      'classic:',
+      '  artifact_layout: docs',
+      '',
+    ].join('\n');
+    try {
+      await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+      await fs.writeFile(outsideConfig, source, 'utf8');
+      try {
+        await fs.symlink(outsideConfig, path.join(tmpDir, '.owner', 'config.yaml'), 'file');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') return;
+        throw error;
+      }
+
+      await expect(
+        updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'copy',
+          json: true,
+          skipNpm: true,
+        }),
+      ).rejects.toThrow(/symbolic link or junction/iu);
+      expect(mockedInstallOpenSpec).not.toHaveBeenCalled();
+      await expect(fs.readFile(outsideConfig, 'utf8')).resolves.toBe(source);
+    } finally {
+      await fs.rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('refreshes only the Classic artifact root when no OpenSpec tool assets are installed', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-no-openspec-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.rm(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
+      recursive: true,
+      force: true,
+    });
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      [],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+  });
+
+  it('keeps config unchanged when an artifact-only OpenSpec refresh cannot run', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-artifact-only-missing-cli-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    await fs.rm(path.join(tmpDir, '.claude', 'skills', 'openspec-propose'), {
+      recursive: true,
+      force: true,
+    });
+    const configPath = path.join(tmpDir, '.owner', 'config.yaml');
+    const configBefore = await fs.readFile(configPath);
+    mockedInstallOpenSpec.mockResolvedValue('skipped');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        language: 'zh',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'incomplete',
+      openspec: {
+        status: 'failed',
+        reason: expect.stringContaining('CLI'),
+      },
+    });
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      [],
+      'project',
+      true,
+      'docs',
+      expect.any(Function),
+      undefined,
+    );
+    await expect(fs.readFile(configPath)).resolves.toEqual(configBefore);
+  });
+
+  it('fails closed when installed OpenSpec assets cannot be refreshed because the CLI is missing', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-missing-openspec-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    mockedInstallOpenSpec.mockResolvedValue('skipped');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'incomplete',
+      openspec: {
+        status: 'failed',
+        reason: expect.stringContaining('CLI'),
+      },
+      failures: [expect.objectContaining({ component: 'OpenSpec' })],
+    });
+  });
+
+  it('reports an OpenSpec integration failure as an incomplete update', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-failed-openspec-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    mockedInstallOpenSpec.mockResolvedValue('failed');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'incomplete',
+      openspec: { status: 'failed' },
+      failures: [expect.objectContaining({ component: 'OpenSpec' })],
+    });
+  });
+
+  it('reports a thrown OpenSpec adapter error without falling back to the legacy root', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-docs-throwing-openspec-home');
+    await arrangeClassicDocsOpenSpecUpdate(tmpDir);
+    mockedInstallOpenSpec.mockRejectedValue(new Error('adapter exploded'));
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        selfUpdate: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(json)).toMatchObject({
+      status: 'incomplete',
+      openspec: {
+        status: 'failed',
+        reason: expect.stringContaining('adapter exploded'),
+      },
+      failures: [expect.objectContaining({ component: 'OpenSpec' })],
+    });
+    await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('updates installed OpenSpec assets at global scope without initializing a project root', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-global-openspec-home');
+    await fs.mkdir(path.join(fakeHome, '.claude', 'skills', 'openspec-propose'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(fakeHome, '.claude', 'skills', 'openspec-propose', 'SKILL.md'),
+      '# OpenSpec\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        scope: 'global',
+        platform: 'claude',
+        json: true,
+        selfUpdate: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedInstallOpenSpec).toHaveBeenCalledWith(
+      tmpDir,
+      ['claude'],
+      'global',
+      true,
+      'legacy',
+      undefined,
+      undefined,
+    );
+    await expect(fs.access(path.join(tmpDir, 'openspec'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('reports no indexed projects in JSON when no project installation is found', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-instructions');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result).toMatchObject({
+      mode: 'all-projects',
+      status: 'complete',
+      registry: {
+        projectsFound: 0,
+        staleRemoved: 0,
+      },
+      projects: [],
+      reason: 'no indexed Owner projects found',
+    });
+  });
+
+  it('does not backfill an unindexed project config through a global-only installation', async () => {
+    const fakeHome = path.join(tmpDir, 'global-config-refresh-home');
+    await fs.mkdir(path.join(fakeHome, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    const originalConfig = [
+      'default_workflow: classic',
+      'language: zh-CN',
+      'context_compression: beta',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), originalConfig, 'utf8');
+    await fs.mkdir(path.join(tmpDir, 'openspec'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'docs', 'openspec'), { recursive: true });
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { installMode: 'copy', skipNpm: true });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedSelect).not.toHaveBeenCalled();
+    await expect(fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8')).resolves.toBe(
+      originalConfig,
+    );
+    await expect(
+      fs.readFile(path.join(fakeHome, '.claude', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Owner\n');
+  });
+
+  it('does not create or update root project instructions when only global targets are updated', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+    await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# User\nKeep this.\n', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'CLAUDE.md'), '# User\nAlso keep this.\n', 'utf-8');
+
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true, scope: 'global' });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.projectInstructions.updated).toBe(0);
+
+    const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf-8');
+    const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    expect(agents).toBe('# User\nKeep this.\n');
+    expect(claude).toBe('# User\nAlso keep this.\n');
+    expect(agents).not.toContain('<owner-ambient-resume>');
+    expect(claude).not.toContain('<owner-ambient-resume>');
+  });
+
+  it('updates Native project Skills and shared config comments without rewriting Classic state', async () => {
+    const fakeHome = path.join(tmpDir, 'native-update-home');
+    const nativeConfig = [
+      'schema: owner.project.v1',
+      'default_workflow: native',
+      'native:',
+      '  artifact_root: docs',
+      'language: legacy',
+      'keep: true',
+      '',
+    ].join('\n');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), nativeConfig, 'utf8');
+    const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
+    const legacySelection = `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`;
+    await fs.writeFile(selectionPath, legacySelection, 'utf8');
+
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Stale Owner\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner-classic'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'keep.md'),
+      'keep classic history\n',
+      'utf8',
+    );
+
+    await fs.mkdir(path.join(tmpDir, 'docs', 'superpowers'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'docs', 'superpowers', 'keep.md'),
+      'keep classic working files\n',
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'rules'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'rules', 'owner-phase-guard.md'),
+      'keep classic rule\n',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'settings.local.json'),
+      '{"keep":"classic hook"}\n',
+      'utf8',
+    );
+    await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# User\nKeep this.\n', 'utf8');
+    await fs.writeFile(path.join(tmpDir, 'CLAUDE.md'), '# User\nAlso keep this.\n', 'utf8');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'symlink',
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    await expect(
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('owner workflow resolve . --activate --json');
+    await expect(
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('name: owner-native');
+    await expect(
+      fs.access(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'SKILL.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-classic', 'keep.md'), 'utf8'),
+    ).resolves.toBe('keep classic history\n');
+    await expect(fs.access(path.join(tmpDir, '.owner', 'skills'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    const updatedConfig = await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8');
+    expect(updatedConfig).toContain(
+      '# Enables automatic recovery through the read-only Ambient Resume probe',
+    );
+    expect(updatedConfig).toContain('ambient_resume: true');
+    expect(updatedConfig).toContain('keep: true');
+    expect(updatedConfig).toContain('artifact_root: docs');
+    expect(updatedConfig).toContain('clarification_mode: batch');
+    expect(updatedConfig).not.toContain('classic:');
+    expect(updatedConfig).toContain('language: legacy');
+    await expect(
+      fs.readFile(path.join(tmpDir, 'docs', 'superpowers', 'keep.md'), 'utf8'),
+    ).resolves.toBe('keep classic working files\n');
+    await expect(
+      fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-phase-guard.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-native-phase-guard.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      fs.access(path.join(tmpDir, '.claude', 'rules', 'owner-workflow-guard.md')),
+    ).resolves.toBeUndefined();
+    const settings = JSON.parse(
+      await fs.readFile(path.join(tmpDir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { keep: string; hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> } };
+    expect(settings.keep).toBe('classic hook');
+    expect(JSON.stringify(settings.hooks)).toContain('owner-hook-router.mjs');
+    expect(JSON.stringify(settings.hooks)).not.toContain('owner-native-hook-guard.mjs');
+    const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8');
+    const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf8');
+    for (const content of [agents, claude]) {
+      expect(content).toContain('<owner-ambient-resume>');
+      expect(content).toContain('owner resume-probe . --stdin --json');
+      expect(content).toContain('Trust only the returned `workflow`, `skill`');
+      expect(content).toContain('permanent entry in `nextCommand`');
+      expect(content).not.toContain('`.owner.yaml`');
+    }
+    expect(agents).toContain('# User\nKeep this.');
+    expect(claude).toContain('# User\nAlso keep this.');
+    expect(mockedSelect).not.toHaveBeenCalled();
+    await expect(fs.readFile(selectionPath, 'utf8')).resolves.toBe(legacySelection);
+  });
+
+  it('upgrades a beta17 Native project without leaving retired bundles or hiding config', async () => {
+    expect(spawnSync('git', ['init'], { cwd: tmpDir }).status).toBe(0);
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'native:',
+        '  artifact_root: .',
+        '  snapshot:',
+        '    include: ["**/*"]',
+        '    exclude: ["custom/generated/**"]',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'), '# Owner\n');
+    const installedSkillsRoot = path.join(tmpDir, '.claude', 'skills');
+    const userBundle = path.join(installedSkillsRoot, 'owner-native', 'scripts', 'user-helper.mjs');
+    await fs.mkdir(path.dirname(userBundle), { recursive: true });
+    for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+      await fs.writeFile(
+        path.join(installedSkillsRoot, ...relativePath.split('/')),
+        'legacy bundle\n',
+        'utf8',
+      );
+    }
+    await fs.writeFile(userBundle, 'keep user content\n', 'utf8');
+    await fs.writeFile(
+      path.join(tmpDir, '.gitignore'),
+      ['node_modules/', '.owner/', 'dist/', ''].join('\n'),
+      'utf8',
+    );
+    for (const relativePath of [
+      '.owner/runtime/native/locks/demo.lock',
+      '.owner/runtime/native/logs/demo.log',
+    ]) {
+      const target = path.join(tmpDir, ...relativePath.split('/'));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, `${relativePath}\n`, 'utf8');
+    }
+
+    const fakeHome = path.join(tmpDir, 'native-snapshot-update-home');
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'symlink',
+        skipNpm: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const updated = parse(
+      await fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'),
+    ) as {
+      native: { snapshot?: unknown };
+    };
+    expect(updated.native.snapshot).toBeUndefined();
+    for (const relativePath of RETIRED_NATIVE_BUNDLES) {
+      await expect(
+        fs.access(path.join(installedSkillsRoot, ...relativePath.split('/'))),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+    await expect(fs.readFile(userBundle, 'utf8')).resolves.toBe('keep user content\n');
+
+    const gitignore = await fs.readFile(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(gitignore).toContain('node_modules/\n');
+    expect(gitignore).toContain('dist/\n');
+    expect(gitignore).toContain('!/.owner/config.yaml\n');
+    expect(
+      spawnSync('git', ['check-ignore', '--quiet', '.owner/config.yaml'], { cwd: tmpDir }).status,
+    ).toBe(1);
+    for (const relativePath of [
+      '.owner/runtime/native/locks/demo.lock',
+      '.owner/runtime/native/logs/demo.log',
+    ]) {
+      expect(
+        spawnSync('git', ['check-ignore', '--quiet', relativePath], { cwd: tmpDir }).status,
+        relativePath,
+      ).toBe(0);
+    }
+  });
+
+  it('migrates Classic v1 selection after update installs the project Router', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-update-home');
+    const config = defaultProjectConfig('.');
+    config.workflows = ['classic'];
+    config.default_workflow = 'classic';
+    await writeProjectConfig(tmpDir, config);
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Stale Owner\n',
+    );
+    const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
+    await fs.writeFile(
+      selectionPath,
+      `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`,
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, { currentProject: true, installMode: 'copy', skipNpm: true });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(JSON.parse(await fs.readFile(selectionPath, 'utf8'))).toEqual({
+      schema: 'owner.selection.v2',
+      workflow: 'classic',
+      change: 'legacy-change',
+      branch: null,
+    });
+    await expect(
+      fs.access(path.join(tmpDir, '.claude', 'settings.local.json')),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps Classic v1 selection when historical global Hook cleanup fails', async () => {
+    const fakeHome = path.join(tmpDir, 'classic-hook-cleanup-failure-home');
+    const config = defaultProjectConfig('.');
+    config.workflows = ['classic'];
+    config.default_workflow = 'classic';
+    await writeProjectConfig(tmpDir, config);
+    await fs.mkdir(path.join(tmpDir, '.agents', 'skills', 'owner'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.codex'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md'),
+      '# Stale Owner\n',
+    );
+    const selectionPath = path.join(tmpDir, '.owner', 'current-change.json');
+    const legacySelection = `${JSON.stringify({ version: 1, change: 'legacy-change', branch: null })}\n`;
+    await fs.writeFile(selectionPath, legacySelection, 'utf8');
+    const globalLegacyPath = path.join(fakeHome, '.codex', 'settings.local.json');
+    await fs.mkdir(path.dirname(globalLegacyPath), { recursive: true });
+    await fs.writeFile(globalLegacyPath, '{not-json', 'utf8');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let result;
+    try {
+      result = await updateCommand(tmpDir, {
+        skipNpm: true,
+        scope: 'project',
+        platform: 'codex',
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(result!.status).toBe('incomplete');
+    await expect(fs.readFile(selectionPath, 'utf8')).resolves.toBe(legacySelection);
+    await expect(fs.readFile(globalLegacyPath, 'utf8')).resolves.toBe('{not-json');
+    await expect(fs.access(path.join(tmpDir, '.codex', 'hooks.json'))).resolves.toBeUndefined();
+  });
+
+  it('migrates manifest-managed legacy Codex Skills for Native without touching unrelated state', async () => {
+    const fakeHome = path.join(tmpDir, 'native-codex-migration-home');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'native:',
+        '  artifact_root: docs',
+        'keep: classic',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const legacyOwner = path.join(tmpDir, '.codex', 'skills', 'owner');
+    const legacyPersonal = path.join(tmpDir, '.codex', 'skills', 'personal');
+    const legacyOpenSpec = path.join(tmpDir, '.codex', 'skills', 'openspec');
+    await fs.mkdir(legacyOwner, { recursive: true });
+    await fs.mkdir(legacyPersonal, { recursive: true });
+    await fs.mkdir(legacyOpenSpec, { recursive: true });
+    await fs.writeFile(path.join(legacyOwner, 'SKILL.md'), '# Legacy thick Owner\n', 'utf8');
+    await fs.writeFile(path.join(legacyPersonal, 'SKILL.md'), '# Personal\n', 'utf8');
+    await fs.writeFile(path.join(legacyOpenSpec, 'SKILL.md'), '# OpenSpec\n', 'utf8');
+    await fs.mkdir(path.join(tmpDir, 'docs', 'superpowers'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'docs', 'superpowers', 'keep.md'),
+      'keep classic state\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await updateCommand(tmpDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        skipNpm: true,
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    await expect(
+      fs.readFile(path.join(tmpDir, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('owner workflow resolve . --activate --json');
+    await expect(fs.access(legacyOwner)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(path.join(legacyPersonal, 'SKILL.md'), 'utf8')).resolves.toBe(
+      '# Personal\n',
+    );
+    await expect(fs.readFile(path.join(legacyOpenSpec, 'SKILL.md'), 'utf8')).resolves.toBe(
+      '# OpenSpec\n',
+    );
+    await expect(
+      fs.readFile(path.join(tmpDir, '.owner', 'config.yaml'), 'utf8'),
+    ).resolves.toContain('keep: classic');
+    await expect(
+      fs.readFile(path.join(tmpDir, 'docs', 'superpowers', 'keep.md'), 'utf8'),
+    ).resolves.toBe('keep classic state\n');
+  });
+
+  it.each(['skills-root', 'managed-entry'] as const)(
+    'converts an old %s symlink installation to Native copies without writing through it',
+    async (layout) => {
+      const fakeHome = path.join(tmpDir, `native-symlink-${layout}-home`);
+      await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+      await fs.writeFile(
+        path.join(tmpDir, '.owner', 'config.yaml'),
+        [
+          'schema: owner.project.v1',
+          'default_workflow: native',
+          'native:',
+          '  artifact_root: docs',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      const centralSkills = path.join(tmpDir, '.owner', 'skills', 'skills');
+      const centralOwner = path.join(centralSkills, 'owner');
+      const platformSkills = path.join(tmpDir, '.claude', 'skills');
+      await fs.mkdir(centralOwner, { recursive: true });
+      await fs.writeFile(path.join(centralOwner, 'SKILL.md'), '# Central stale Owner\n', 'utf8');
+      await fs.mkdir(path.dirname(platformSkills), { recursive: true });
+      if (layout === 'skills-root') {
+        await fs.symlink(
+          centralSkills,
+          platformSkills,
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
+      } else {
+        await fs.mkdir(platformSkills, { recursive: true });
+        await fs.symlink(
+          centralOwner,
+          path.join(platformSkills, 'owner'),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
+        await fs.mkdir(path.join(platformSkills, 'personal'), { recursive: true });
+        await fs.writeFile(
+          path.join(platformSkills, 'personal', 'SKILL.md'),
+          '# Personal\n',
+          'utf8',
+        );
+      }
+
+      const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      let json: string;
+      try {
+        await updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'symlink',
+          json: true,
+          skipNpm: true,
+        });
+        json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+      } finally {
+        log.mockRestore();
+        homeSpy.mockRestore();
+      }
+
+      expect(JSON.parse(json).skills.installMode).toBe('copy');
+      expect((await fs.lstat(platformSkills)).isSymbolicLink()).toBe(false);
+      expect((await fs.lstat(path.join(platformSkills, 'owner'))).isSymbolicLink()).toBe(false);
+      await expect(
+        fs.readFile(path.join(platformSkills, 'owner', 'SKILL.md'), 'utf8'),
+      ).resolves.toContain('owner workflow resolve . --activate --json');
+      await expect(fs.readFile(path.join(centralOwner, 'SKILL.md'), 'utf8')).resolves.toBe(
+        '# Central stale Owner\n',
+      );
+      await expect(
+        fs.access(path.join(centralSkills, 'owner-native', 'SKILL.md')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      if (layout === 'managed-entry') {
+        await expect(
+          fs.readFile(path.join(platformSkills, 'personal', 'SKILL.md'), 'utf8'),
+        ).resolves.toBe('# Personal\n');
+      }
+    },
+  );
+
+  it('refuses to detach a shared Skill-root symlink that contains unmanaged Skills', async () => {
+    const fakeHome = path.join(tmpDir, 'native-shared-symlink-home');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const centralSkills = path.join(tmpDir, '.owner', 'skills', 'skills');
+    const platformSkills = path.join(tmpDir, '.claude', 'skills');
+    await fs.mkdir(path.join(centralSkills, 'owner'), { recursive: true });
+    await fs.mkdir(path.join(centralSkills, 'openspec'), { recursive: true });
+    await fs.writeFile(
+      path.join(centralSkills, 'owner', 'SKILL.md'),
+      '# Central stale Owner\n',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(centralSkills, 'openspec', 'SKILL.md'),
+      '# Keep OpenSpec\n',
+      'utf8',
+    );
+    await fs.mkdir(path.dirname(platformSkills), { recursive: true });
+    await fs.symlink(
+      centralSkills,
+      platformSkills,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await expect(
+        updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'symlink',
+          json: true,
+          skipNpm: true,
+        }),
+      ).rejects.toThrow(/unmanaged entries: openspec/iu);
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect((await fs.lstat(platformSkills)).isSymbolicLink()).toBe(true);
+    await expect(
+      fs.readFile(path.join(centralSkills, 'openspec', 'SKILL.md'), 'utf8'),
+    ).resolves.toBe('# Keep OpenSpec\n');
+    await expect(fs.readFile(path.join(centralSkills, 'owner', 'SKILL.md'), 'utf8')).resolves.toBe(
+      '# Central stale Owner\n',
+    );
+  });
+
+  it('updates a Native project at its root when invoked from a nested directory', async () => {
+    const fakeHome = path.join(tmpDir, 'nested-native-update-home');
+    const nestedDir = path.join(tmpDir, 'src', 'features', 'nested');
+    await fs.mkdir(nestedDir, { recursive: true });
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Stale Owner\n',
+      'utf8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(nestedDir, {
+        currentProject: true,
+        installMode: 'copy',
+        json: true,
+        skipNpm: true,
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.skills.targets).toHaveLength(1);
+    await expect(
+      fs.readFile(path.join(tmpDir, '.claude', 'skills', 'owner-native', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('name: owner-native');
+    await expect(fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8')).resolves.toContain(
+      '<owner-ambient-resume>',
+    );
+    await expect(fs.access(path.join(nestedDir, '.claude'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(fs.access(path.join(nestedDir, 'AGENTS.md'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    const registry = JSON.parse(await fs.readFile(getProjectRegistryPath(fakeHome), 'utf8')) as {
+      projects: Array<{ path: string }>;
+    };
+    expect(registry.projects.map((entry) => entry.path)).toEqual([tmpDir]);
+  });
+
+  it('fails a project update before npm or file writes when entry resolution fails', async () => {
+    const fakeHome = path.join(tmpDir, 'invalid-native-update-home');
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, '.owner', 'config.yaml'), 'schema: [', 'utf8');
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    const staleSkill = path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md');
+    await fs.writeFile(staleSkill, '# Stale Owner\n', 'utf8');
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await expect(
+        updateCommand(tmpDir, {
+          currentProject: true,
+          installMode: 'copy',
+        }),
+      ).rejects.toThrow(/\.owner\/config\.yaml/iu);
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    expect(mockedSpawn).not.toHaveBeenCalled();
+    await expect(fs.readFile(staleSkill, 'utf8')).resolves.toBe('# Stale Owner\n');
+  });
+
+  it('installs ambient resume instructions and preserves existing user AGENTS/CLAUDE rules', async () => {
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'workflows: [native]',
+        'ambient_resume: true',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+    await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# User\n\nKeep this.\n', 'utf-8');
+    await fs.writeFile(path.join(tmpDir, 'CLAUDE.md'), '# User\n\nAlso keep this.\n', 'utf-8');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-instructions');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.projectInstructions.updated).toBe(2);
+
+    const agents = await fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf-8');
+    const claude = await fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    expect(agents).toContain('# User\n\nKeep this.');
+    expect(claude).toContain('# User\n\nAlso keep this.');
+    expect(agents).toContain('<owner-ambient-resume>');
+    expect(claude).toContain('<owner-ambient-resume>');
+  });
+
+  it('removes ambient resume instructions when the project disables the probe', async () => {
+    await fs.mkdir(path.join(tmpDir, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.owner', 'config.yaml'),
+      [
+        'schema: owner.project.v1',
+        'default_workflow: native',
+        'workflows:',
+        '  - native',
+        'ambient_resume: false',
+        'native:',
+        '  artifact_root: docs',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.mkdir(path.join(tmpDir, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf8',
+    );
+    await fs.writeFile(path.join(tmpDir, 'AGENTS.md'), '# User\n\nKeep this.\n', 'utf8');
+    await fs.writeFile(path.join(tmpDir, 'CLAUDE.md'), '# User\n\nKeep this too.\n', 'utf8');
+    const instructions = await import('../../domains/skill/project-instructions.js');
+    await instructions.installOwnerProjectInstructions(tmpDir, 'en');
+
+    const fakeHome = path.join(tmpDir, 'fake-home-disabled-instructions');
+    const homedirSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+    try {
+      await updateCommand(tmpDir, { json: true, skipNpm: true });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homedirSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.projectInstructions.updated).toBe(2);
+    await expect(fs.readFile(path.join(tmpDir, 'AGENTS.md'), 'utf8')).resolves.toBe(
+      '# User\n\nKeep this.\n',
+    );
+    await expect(fs.readFile(path.join(tmpDir, 'CLAUDE.md'), 'utf8')).resolves.toBe(
+      '# User\n\nKeep this too.\n',
+    );
+  });
+
+  it('persists the installed language when updating global Owner skills', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时使用这个技能。',
+      'utf-8',
+    );
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+        language: 'zh',
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const config = await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf-8');
+    expect(config).toContain('language: zh-CN');
+    await expect(fs.stat(path.join(fakeHome, 'docs', 'superpowers'))).rejects.toThrow();
+  });
+
+  it('syncs Native Skills during a global update of a Native+Classic install', async () => {
+    // Regression for #262: global scope used to hardcode the Skill
+    // workflowSelection to 'classic', which filtered out owner-native/* and
+    // left global Native installs frozen at their first-install version. With
+    // both owner-native and owner-classic on disk the selection is 'both', so
+    // Native Skills stay current.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-native-sync');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf-8',
+    );
+    // Seed a both-workflow install: stale owner-native plus owner-classic so
+    // the derived selection is 'both', and prove the stale Native Skill is
+    // overwritten rather than merely created.
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-native'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+      '---\nname: owner-native\n---\n# STALE\n',
+      'utf-8',
+    );
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-classic'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-classic', 'SKILL.md'),
+      '# stale classic\n',
+      'utf-8',
+    );
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    // Silence update progress logging; this test only asserts file contents.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string | undefined;
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    // Native Skills must be copied alongside Classic ones for global installs.
+    // Codex installs land in the canonical `.agents/skills/` directory, and a
+    // previously stale Native Skill must be replaced with the current asset.
+    const nativeSkill = await fs.readFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+      'utf8',
+    );
+    expect(nativeSkill).toContain('name: owner-native');
+    expect(nativeSkill).not.toContain('# STALE');
+    await expect(
+      fs.readFile(path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('owner workflow resolve');
+
+    // With 'both' selected, no manifest entries are filtered out, so the
+    // Codex target reports zero skipped Skills.
+    const result = json ? JSON.parse(json) : {};
+    const codexSkills = (result.skills?.targets ?? []).find(
+      (t: { platform: string }) => t.platform === 'codex',
+    );
+    expect(codexSkills?.skipped).toBe(0);
+  });
+
+  it('does not add Native Skills to a Classic-only global install during update', async () => {
+    // A global install created with `owner init --scope global --workflow
+    // classic` must not gain owner-native after `owner update --scope global`.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-classic-only');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf-8',
+    );
+    // No owner-native directory: this is a Classic-only install.
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string | undefined;
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    // Classic Skills update, but owner-native must NOT be introduced.
+    await expect(
+      fs.readFile(path.join(fakeHome, '.agents', 'skills', 'owner', 'SKILL.md'), 'utf8'),
+    ).resolves.toContain('owner workflow resolve');
+    await expect(
+      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // The Native manifest entries filtered out by the Classic selection are
+    // reported as skipped rather than hidden.
+    const result = json ? JSON.parse(json) : {};
+    const codexSkills = (result.skills?.targets ?? []).find(
+      (t: { platform: string }) => t.platform === 'codex',
+    );
+    expect(codexSkills?.skipped).toBeGreaterThan(0);
+  });
+
+  it('does not add Classic Skills to a Native-only global install during update', async () => {
+    // A global install created with `owner init --scope global --workflow
+    // native` must not gain owner-classic after `owner update --scope global`.
+    const fakeHome = path.join(tmpDir, 'fake-home-global-native-only');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n',
+      'utf-8',
+    );
+    // Native-only install: owner-native present, owner-classic absent.
+    await fs.mkdir(path.join(fakeHome, '.agents', 'skills', 'owner-native'), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+      '---\nname: owner-native\n---\n# STALE\n',
+      'utf-8',
+    );
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string | undefined;
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    // Native Skills update, but owner-classic must NOT be introduced.
+    const nativeSkill = await fs.readFile(
+      path.join(fakeHome, '.agents', 'skills', 'owner-native', 'SKILL.md'),
+      'utf8',
+    );
+    expect(nativeSkill).toContain('name: owner-native');
+    expect(nativeSkill).not.toContain('# STALE');
+    await expect(
+      fs.access(path.join(fakeHome, '.agents', 'skills', 'owner-classic', 'SKILL.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // The Classic manifest entries filtered out by the Native selection are
+    // reported as skipped rather than hidden.
+    const result = json ? JSON.parse(json) : {};
+    const codexSkills = (result.skills?.targets ?? []).find(
+      (t: { platform: string }) => t.platform === 'codex',
+    );
+    expect(codexSkills?.skipped).toBeGreaterThan(0);
+  });
+
+  it('preserves installed language for an explicit global platform update', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home-explicit-global-language');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时使用这个技能。',
+      'utf-8',
+    );
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let json: string;
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+        platform: 'codex',
+      });
+      json = log.mock.calls.map((call) => call.join(' ')).join('\n');
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const result = JSON.parse(json);
+    expect(result.skills.targets).toEqual([
+      expect.objectContaining({ scope: 'global', platform: 'codex', language: 'zh' }),
+    ]);
+    const config = await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf-8');
+    expect(config).toContain('language: zh-CN');
+  });
+
+  it('re-persists an explicitly requested language even when the config already has a different one', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    await fs.mkdir(path.join(fakeHome, '.codex', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.codex', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+    await fs.mkdir(path.join(fakeHome, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.owner', 'config.yaml'),
+      'classic:\n  language: en\n',
+      'utf-8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+        language: 'zh',
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const config = await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf-8');
+    expect(config).toContain('language: zh-CN');
+    expect(config).not.toMatch(/^language:/mu);
+  });
+
+  it('does not guess a language when installed platforms in the same scope disagree and none is requested', async () => {
+    const fakeHome = path.join(tmpDir, 'fake-home');
+    await fs.mkdir(path.join(fakeHome, '.claude', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.claude', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\nUse this skill.',
+      'utf-8',
+    );
+    await fs.mkdir(path.join(fakeHome, '.cursor', 'skills', 'owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.cursor', 'skills', 'owner', 'SKILL.md'),
+      '# Owner\n\n当用户提出需求时使用这个技能。',
+      'utf-8',
+    );
+    await fs.mkdir(path.join(fakeHome, '.owner'), { recursive: true });
+    await fs.writeFile(
+      path.join(fakeHome, '.owner', 'config.yaml'),
+      'classic:\n  language: en\n',
+      'utf-8',
+    );
+
+    const homeSpy = vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    try {
+      await updateCommand(tmpDir, {
+        json: true,
+        skipNpm: true,
+        scope: 'global',
+      });
+    } finally {
+      log.mockRestore();
+      homeSpy.mockRestore();
+    }
+
+    const config = await fs.readFile(path.join(fakeHome, '.owner', 'config.yaml'), 'utf-8');
+    expect(config).toContain('language: en');
+    expect(config).not.toMatch(/^language:/mu);
+  });
+});

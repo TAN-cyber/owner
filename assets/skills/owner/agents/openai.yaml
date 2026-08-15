@@ -1,0 +1,3 @@
+interface:
+  display_name: "Owner"
+  short_description: "Resolve and load the Native or Classic Owner entry"

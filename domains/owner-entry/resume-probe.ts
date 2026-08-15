@@ -1,0 +1,678 @@
+import { spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+import {
+  OWNER_RESUME_PROBE_SCHEMA_VERSION as CLASSIC_RESUME_PROBE_SCHEMA_VERSION,
+  resolveOwnerResumeProbe as resolveClassicResumeProbe,
+  type OwnerResumeProbeAction,
+  type OwnerResumeProbeConfidence,
+  type OwnerResumeProbeEvidence,
+  type OwnerResumeProbeInput as ClassicResumeProbeInput,
+} from '../owner-classic/classic-resume-probe.js';
+import {
+  inspectNativeChangeStateDocument,
+  nativeChangeDir,
+  readNativeChange,
+} from '../owner-native/native-change.js';
+import { assertNoPendingNativeRootMove } from '../owner-native/native-config.js';
+import {
+  inspectNativeArtifactFindings,
+  listNativeChangeNames,
+  NATIVE_STATUS_PAGE_LIMITS,
+} from '../owner-native/native-diagnostics.js';
+import { nativeProjectPaths } from '../owner-native/native-paths.js';
+import {
+  isNativePortableChange,
+  nativePortableChangeDir,
+  readNativePortableChange,
+} from '../owner-native/native-portable-runtime.js';
+import {
+  inspectNativePortableStatus,
+  type NativePortableStatusProjection,
+} from '../owner-native/native-portable-status.js';
+import { runWithHookReadCache } from '../../platform/process/hook-read-cache.js';
+import { discoverCachedNativeProject, readCachedProjectConfig } from './entry-reads.js';
+import { readNativeSelectionRecord } from '../owner-native/native-selection.js';
+import { readNativeProposedSpecs } from '../owner-native/native-specs.js';
+import type {
+  NativeChangeState,
+  NativeFinding,
+  NativeProjectPaths,
+} from '../owner-native/native-types.js';
+import type { NativePortableState } from '../owner-native/native-portable-types.js';
+import { resolveOwnerEntry } from './resolve-entry.js';
+import type { OwnerEntryResolutionSource, OwnerEntrySkill, OwnerWorkflow } from './types.js';
+
+export const OWNER_RESUME_PROBE_SCHEMA_VERSION = 'owner.resume_probe.v2' as const;
+
+export interface OwnerEntryResumeProbeInput {
+  schema_version: typeof OWNER_RESUME_PROBE_SCHEMA_VERSION;
+  utterance: string;
+  locale: string;
+  agent_context: {
+    non_trivial_work: boolean;
+    already_in_owner_flow: boolean;
+  };
+}
+
+export interface OwnerEntryResumeProbeCandidate {
+  name: string;
+  phase: string;
+  selected: boolean;
+}
+
+export interface OwnerEntryResumeProbeResult {
+  schema_version: typeof OWNER_RESUME_PROBE_SCHEMA_VERSION;
+  workflow: OwnerWorkflow | null;
+  skill: OwnerEntrySkill | null;
+  entrySource: OwnerEntryResolutionSource | null;
+  action: OwnerResumeProbeAction;
+  changeName: string | null;
+  phase: string | null;
+  nextCommand: '/owner-native' | '/owner-classic' | null;
+  confidence: OwnerResumeProbeConfidence;
+  reasonCode: string;
+  reason: string;
+  evidence: OwnerResumeProbeEvidence[];
+  candidates: OwnerEntryResumeProbeCandidate[];
+}
+
+interface ResultOptions {
+  workflow?: OwnerWorkflow | null;
+  skill?: OwnerEntrySkill | null;
+  entrySource?: OwnerEntryResolutionSource | null;
+  action: OwnerResumeProbeAction;
+  change?: { name: string; phase: string } | null;
+  confidence: OwnerResumeProbeConfidence;
+  reasonCode: string;
+  reason: string;
+  evidence?: OwnerResumeProbeEvidence[];
+  candidates?: OwnerEntryResumeProbeCandidate[];
+}
+
+const RESUME_WORDS = [
+  'continue',
+  'resume',
+  'carry on',
+  'finish',
+  '继续',
+  '接着',
+  '恢复',
+  '跑完',
+  '提交',
+  '验证',
+  '归档',
+  '修刚才',
+] as const;
+
+const OPT_OUT_WORDS = [
+  'do not resume',
+  "don't resume",
+  'without owner',
+  'skip owner',
+  '不要恢复',
+  '不走 owner',
+  '不要走 owner',
+  '直接解释',
+  '只回答',
+] as const;
+
+const GENERIC_RELATED_TOKENS = new Set([
+  'acceptance',
+  'build',
+  'change',
+  'constraints',
+  'decisions',
+  'implementation',
+  'native',
+  'non-goals',
+  'outcome',
+  'questions',
+  'scope',
+  'specification',
+  'verification',
+]);
+
+const RESUMABLE_NATIVE_FINDING_CODES = new Set([
+  'run-action-pending',
+  'transition-incomplete',
+  'verification-report-missing',
+]);
+
+function blockingNativeResumeFinding(findings: NativeFinding[]): NativeFinding | null {
+  return findings.find((finding) => !RESUMABLE_NATIVE_FINDING_CODES.has(finding.code)) ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeInput(input: unknown): OwnerEntryResumeProbeInput {
+  if (!isRecord(input)) {
+    throw new Error('Invalid OwnerEntryResumeProbeInput: input must be an object');
+  }
+  if (input.schema_version !== OWNER_RESUME_PROBE_SCHEMA_VERSION) {
+    throw new Error(
+      `Invalid OwnerEntryResumeProbeInput: schema_version must be ${OWNER_RESUME_PROBE_SCHEMA_VERSION}`,
+    );
+  }
+  if (typeof input.utterance !== 'string') {
+    throw new Error('Invalid OwnerEntryResumeProbeInput: utterance must be a string');
+  }
+  const context = isRecord(input.agent_context) ? input.agent_context : {};
+  return {
+    schema_version: OWNER_RESUME_PROBE_SCHEMA_VERSION,
+    utterance: input.utterance,
+    locale: typeof input.locale === 'string' ? input.locale : 'unknown',
+    agent_context: {
+      non_trivial_work: context.non_trivial_work === true,
+      already_in_owner_flow: context.already_in_owner_flow === true,
+    },
+  };
+}
+
+function result(options: ResultOptions): OwnerEntryResumeProbeResult {
+  const nextCommand =
+    options.action === 'auto_resume'
+      ? options.skill === 'owner-native'
+        ? '/owner-native'
+        : options.skill === 'owner-classic'
+          ? '/owner-classic'
+          : null
+      : null;
+  return {
+    schema_version: OWNER_RESUME_PROBE_SCHEMA_VERSION,
+    workflow: options.workflow ?? null,
+    skill: options.skill ?? null,
+    entrySource: options.entrySource ?? null,
+    action: options.action,
+    changeName: options.change?.name ?? null,
+    phase: options.change?.phase ?? null,
+    nextCommand,
+    confidence: options.confidence,
+    reasonCode: options.reasonCode,
+    reason: options.reason,
+    evidence: options.evidence ?? [],
+    candidates: options.candidates ?? [],
+  };
+}
+
+function includesAny(text: string, words: readonly string[]): boolean {
+  return words.some((word) => text.includes(word));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function namesInUtterance(utterance: string, names: readonly string[]): string[] {
+  const lower = utterance.toLowerCase();
+  return names.filter((name) => {
+    const pattern = new RegExp(
+      `(?:^|[^a-z0-9_-])${escapeRegExp(name.toLowerCase())}(?=$|[^a-z0-9_-])`,
+      'u',
+    );
+    return pattern.test(lower);
+  });
+}
+
+async function nativeResumeCandidates(
+  paths: NativeProjectPaths,
+  names: readonly string[],
+  selectedName: string | null,
+  targetName: string | null,
+): Promise<OwnerEntryResumeProbeCandidate[]> {
+  const displayedNames = names.slice(0, NATIVE_STATUS_PAGE_LIMITS.maxItems);
+  if (targetName && !displayedNames.includes(targetName)) {
+    if (displayedNames.length === NATIVE_STATUS_PAGE_LIMITS.maxItems) displayedNames.pop();
+    displayedNames.push(targetName);
+  }
+  return Promise.all(
+    displayedNames.map(async (name) => {
+      try {
+        if (await isNativePortableChange(paths, name)) {
+          const state = await readNativePortableChange(paths, name);
+          return {
+            name,
+            phase: state.phase,
+            selected: name === selectedName,
+          };
+        }
+        const inspection = await inspectNativeChangeStateDocument(paths, name);
+        return {
+          name,
+          phase: inspection.state?.phase ?? 'invalid',
+          selected: name === selectedName,
+        };
+      } catch {
+        return { name, phase: 'invalid', selected: name === selectedName };
+      }
+    }),
+  );
+}
+
+async function nativeRelatedEvidence(
+  paths: NativeProjectPaths,
+  change: { name: string; phase: string },
+  state: NativeChangeState | NativePortableState,
+  utterance: string,
+): Promise<OwnerResumeProbeEvidence[]> {
+  let source: string;
+  try {
+    const portable = state.schema === 'owner.native.v4';
+    const specs = portable
+      ? Object.fromEntries(
+          await Promise.all(
+            state.spec_changes
+              .filter((entry): entry is typeof entry & { source: string } => entry.source !== null)
+              .map(async (entry) => [
+                entry.capability,
+                await fs.readFile(
+                  path.join(nativePortableChangeDir(paths, change.name), entry.source),
+                  'utf8',
+                ),
+              ]),
+          ),
+        )
+      : await readNativeProposedSpecs(paths, change.name);
+    const changeDirectory = portable
+      ? nativePortableChangeDir(paths, change.name)
+      : nativeChangeDir(paths, change.name);
+    source = [
+      change.name,
+      await fs.readFile(path.join(changeDirectory, state.brief), 'utf8'),
+      ...Object.keys(specs),
+      ...Object.values(specs),
+    ]
+      .join('\n')
+      .toLowerCase();
+  } catch {
+    return [];
+  }
+  const lower = utterance.toLowerCase();
+  const tokens = source
+    .split(/[^a-zA-Z0-9_\-\u4e00-\u9fff/]+/u)
+    .map((token) => token.trim())
+    .filter((token) => {
+      if (GENERIC_RELATED_TOKENS.has(token)) return false;
+      return /^[\u4e00-\u9fff]+$/u.test(token) ? token.length >= 2 : token.length >= 4;
+    });
+  return [...new Set(tokens.filter((token) => lower.includes(token)))]
+    .slice(0, 3)
+    .map((token) => ({ source: 'repo' as const, quote: token }));
+}
+
+async function gitDirtyFiles(projectRoot: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['status', '--short', '--untracked-files=all'], {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      shell: false,
+    });
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    child.on('error', () => resolve([]));
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        resolve([]);
+        return;
+      }
+      resolve(
+        Buffer.concat(chunks)
+          .toString('utf8')
+          .split(/\r?\n/u)
+          .map((line) => line.trim())
+          .filter(Boolean),
+      );
+    });
+  });
+}
+
+function mapClassicResult(
+  classic: Awaited<ReturnType<typeof resolveClassicResumeProbe>>,
+  entrySource: OwnerEntryResolutionSource,
+): OwnerEntryResumeProbeResult {
+  return result({
+    workflow: 'classic',
+    skill: 'owner-classic',
+    entrySource,
+    action: classic.action,
+    change:
+      classic.changeName && classic.phase
+        ? { name: classic.changeName, phase: classic.phase }
+        : null,
+    confidence: classic.confidence,
+    reasonCode: `classic-${classic.action.replaceAll('_', '-')}`,
+    reason: classic.reason,
+    evidence: classic.evidence,
+    candidates:
+      classic.changeName && classic.phase
+        ? [{ name: classic.changeName, phase: classic.phase, selected: false }]
+        : [],
+  });
+}
+
+async function resolveNativeResumeProbe(
+  projectRoot: string,
+  input: OwnerEntryResumeProbeInput,
+  entrySource: OwnerEntryResolutionSource,
+): Promise<OwnerEntryResumeProbeResult> {
+  const config = await readCachedProjectConfig(projectRoot);
+  if (!config?.native) {
+    throw new Error('.owner/config.yaml has no Native configuration after resolving Native entry');
+  }
+  await assertNoPendingNativeRootMove(projectRoot);
+  const paths = await nativeProjectPaths(projectRoot, config.native.artifact_root);
+  const names = await listNativeChangeNames(paths);
+  let selectedName: string | null = null;
+  let selectionError: string | null = null;
+  try {
+    const selection = await readNativeSelectionRecord(paths);
+    if (selection && names.includes(selection.change)) {
+      selectedName = selection.change;
+    } else if (selection) {
+      selectionError = `ENOENT: selected Native change ${selection.change} is missing or archived`;
+    }
+  } catch (error) {
+    selectionError = error instanceof Error ? error.message : String(error);
+  }
+  if (names.length === 0) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'none',
+      confidence: 'none',
+      reasonCode: 'no-active-native-changes',
+      reason: 'no active Native changes',
+      candidates: [],
+    });
+  }
+
+  const utterance = input.utterance.trim();
+  const lower = utterance.toLowerCase();
+  const resumeLike = includesAny(lower, RESUME_WORDS);
+  const named = namesInUtterance(utterance, names);
+  const targetName = named[0] ?? selectedName ?? (names.length === 1 ? names[0] : null);
+  const candidates = await nativeResumeCandidates(paths, names, selectedName, targetName);
+  if (!input.agent_context.non_trivial_work && !resumeLike) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'out_of_scope',
+      confidence: 'low',
+      reasonCode: 'request-not-workflow-work',
+      reason: 'request is informational rather than workflow work',
+      candidates,
+    });
+  }
+
+  if (named.length > 1) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'ask_user',
+      confidence: 'low',
+      reasonCode: 'multiple-native-changes-named',
+      reason: 'request names multiple active Native changes',
+      evidence: named.map((name) => ({ source: 'user', quote: name })),
+      candidates,
+    });
+  }
+
+  if (!targetName) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: resumeLike ? 'ask_user' : 'out_of_scope',
+      confidence: 'low',
+      reasonCode: resumeLike ? 'multiple-native-changes' : 'request-unrelated',
+      reason: resumeLike
+        ? 'multiple active Native changes require an explicit name or Native selection'
+        : 'request does not identify an active Native change',
+      ...(selectionError
+        ? { evidence: [{ source: 'state' as const, quote: selectionError }] }
+        : {}),
+      candidates,
+    });
+  }
+
+  const target = candidates.find((change) => change.name === targetName);
+  let targetState: NativeChangeState | NativePortableState | null = null;
+  let targetPortableStatus: NativePortableStatusProjection | null = null;
+  let targetStateError: string | null = null;
+  if (target) {
+    try {
+      if (await isNativePortableChange(paths, target.name)) {
+        targetState = await readNativePortableChange(paths, target.name);
+        targetPortableStatus = await inspectNativePortableStatus({ paths, name: target.name });
+      } else {
+        targetState = await readNativeChange(paths, target.name);
+      }
+    } catch (error) {
+      targetStateError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (!target || targetStateError || !targetState) {
+    if (!resumeLike && named.length === 0) {
+      return result({
+        workflow: 'native',
+        skill: 'owner-native',
+        entrySource,
+        action: 'out_of_scope',
+        change: { name: targetName, phase: target?.phase ?? 'invalid' },
+        confidence: 'low',
+        reasonCode: 'request-unrelated',
+        reason: 'request does not identify the invalid Native change as its resume target',
+        candidates,
+      });
+    }
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'ask_user',
+      change: { name: targetName, phase: target?.phase ?? 'invalid' },
+      confidence: 'low',
+      reasonCode: 'native-change-invalid',
+      reason: targetStateError ?? `selected Native change ${targetName} is unavailable`,
+      evidence: [{ source: 'state', quote: `change: ${targetName}` }],
+      candidates,
+    });
+  }
+
+  const exactName = named[0] === target.name;
+  const related =
+    !resumeLike && !exactName
+      ? await nativeRelatedEvidence(paths, target, targetState, utterance)
+      : [];
+  if (!resumeLike && !exactName && related.length === 0) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'out_of_scope',
+      change: { name: target.name, phase: target.phase },
+      confidence: 'low',
+      reasonCode: 'request-unrelated',
+      reason: 'request does not appear related to the active Native change',
+      candidates,
+    });
+  }
+
+  if (targetPortableStatus?.workspace.bindingState === 'mismatch') {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'ask_user',
+      change: { name: target.name, phase: target.phase },
+      confidence: 'low',
+      reasonCode: 'native-workspace-mismatch',
+      reason: targetPortableStatus.workspace.message ?? 'Native workspace binding is invalid',
+      evidence: [{ source: 'state', quote: `change: ${target.name}` }],
+      candidates,
+    });
+  }
+
+  const blockingFinding =
+    targetState.schema === 'owner.native.v4'
+      ? null
+      : blockingNativeResumeFinding(await inspectNativeArtifactFindings(paths, targetState));
+  if (blockingFinding) {
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource,
+      action: 'ask_user',
+      change: { name: target.name, phase: target.phase },
+      confidence: 'low',
+      reasonCode: 'native-change-invalid',
+      reason: blockingFinding.message,
+      evidence: [
+        { source: 'state', quote: `change: ${target.name}` },
+        { source: 'state', quote: `finding: ${blockingFinding.code}` },
+      ],
+      candidates,
+    });
+  }
+
+  const dirtyFiles = await gitDirtyFiles(projectRoot);
+  return result({
+    workflow: 'native',
+    skill: 'owner-native',
+    entrySource,
+    action: 'auto_resume',
+    change: { name: target.name, phase: target.phase },
+    confidence: 'high',
+    reasonCode: exactName
+      ? 'native-change-named'
+      : selectedName === target.name
+        ? 'native-change-selected'
+        : 'single-native-change-related',
+    reason: 'configured Native workflow has one unambiguous related resume target',
+    evidence: [
+      { source: 'state', quote: `phase: ${target.phase}` },
+      ...(exactName ? [{ source: 'user' as const, quote: target.name }] : related),
+      ...(selectionError ? [{ source: 'state' as const, quote: selectionError }] : []),
+      ...(dirtyFiles.length > 0
+        ? [{ source: 'repo' as const, quote: `${dirtyFiles.length} dirty file(s)` }]
+        : []),
+    ],
+    candidates,
+  });
+}
+
+export async function resolveOwnerEntryResumeProbe(
+  startPath: string,
+  rawInput: unknown,
+): Promise<OwnerEntryResumeProbeResult> {
+  // Activate a per-invocation read cache so the project-root discovery and
+  // config read below are shared with `resolveOwnerEntry` and the per-workflow
+  // resolvers instead of being repeated 2-3 times.
+  return runWithHookReadCache(() => resolveOwnerEntryResumeProbeImpl(startPath, rawInput));
+}
+
+async function resolveOwnerEntryResumeProbeImpl(
+  startPath: string,
+  rawInput: unknown,
+): Promise<OwnerEntryResumeProbeResult> {
+  const input = normalizeInput(rawInput);
+  const utterance = input.utterance.trim();
+  const lower = utterance.toLowerCase();
+  if (input.agent_context.already_in_owner_flow) {
+    return result({
+      action: 'out_of_scope',
+      confidence: 'low',
+      reasonCode: 'already-in-owner-flow',
+      reason: 'already in Owner flow',
+    });
+  }
+  if (includesAny(lower, OPT_OUT_WORDS)) {
+    return result({
+      action: 'out_of_scope',
+      confidence: 'low',
+      reasonCode: 'user-opted-out',
+      reason: 'user opted out of Owner resume',
+      evidence: [{ source: 'user', quote: utterance }],
+    });
+  }
+
+  let projectRoot: string;
+  let entry: Awaited<ReturnType<typeof resolveOwnerEntry>>;
+  try {
+    projectRoot = await discoverCachedNativeProject(startPath);
+    // Read config once here; the cached read is reused by resolveOwnerEntry
+    // and the per-workflow resolvers below, instead of each re-opening the
+    // file. Check ambient_resume on the same cached config.
+    const ambientConfig = await readCachedProjectConfig(projectRoot);
+    if (ambientConfig !== null && !ambientConfig.ambient_resume) {
+      return result({
+        action: 'out_of_scope',
+        confidence: 'none',
+        reasonCode: 'ambient-resume-disabled',
+        reason: 'Ambient Resume is disabled by .owner/config.yaml',
+        evidence: [{ source: 'state', quote: 'ambient_resume: false' }],
+      });
+    }
+    entry = await resolveOwnerEntry(projectRoot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return result({
+      action: 'ask_user',
+      confidence: 'low',
+      reasonCode: 'project-config-invalid',
+      reason: message,
+      evidence: [{ source: 'state', quote: message }],
+    });
+  }
+
+  if (entry.workflow === 'classic') {
+    const classicInput: ClassicResumeProbeInput = {
+      schema_version: CLASSIC_RESUME_PROBE_SCHEMA_VERSION,
+      utterance: input.utterance,
+      locale: input.locale,
+      agent_context: input.agent_context,
+    };
+    try {
+      return mapClassicResult(
+        await resolveClassicResumeProbe(projectRoot, classicInput),
+        entry.source,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return result({
+        workflow: 'classic',
+        skill: 'owner-classic',
+        entrySource: entry.source,
+        action: 'ask_user',
+        confidence: 'low',
+        reasonCode: 'classic-state-invalid',
+        reason: message,
+        evidence: [{ source: 'state', quote: message }],
+      });
+    }
+  }
+
+  try {
+    return await resolveNativeResumeProbe(projectRoot, input, entry.source);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return result({
+      workflow: 'native',
+      skill: 'owner-native',
+      entrySource: entry.source,
+      action: 'ask_user',
+      confidence: 'low',
+      reasonCode: 'native-state-invalid',
+      reason: message,
+      evidence: [{ source: 'state', quote: message }],
+    });
+  }
+}

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Owner Classic Phase 1: Open"
+  short_description: "Open an OpenSpec change and stand up its artifacts"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,13 @@
+allowedSkills:
+  - owner-open
+  - owner-design
+  - owner-build
+  - owner-verify
+  - owner-archive
+  - owner-hotfix
+  - owner-tweak
+allowedAgents: []
+allowedTools: []
+maxIterations: 500
+maxRetriesPerAction: 3
+confirmationRequiredFor: []
