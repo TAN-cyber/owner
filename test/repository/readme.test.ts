@@ -72,6 +72,29 @@ describe('Owner README contract', () => {
     expect(contributingZh).toContain(`Node.js \`>=${minimumMajor}\``);
   });
 
+  it('keeps maintainer workflows in the contributing guides', async () => {
+    const [readmeEn, readmeZh, contributingEn, contributingZh] = await Promise.all([
+      fs.readFile('README.md', 'utf-8'),
+      fs.readFile('README-zh.md', 'utf-8'),
+      fs.readFile('CONTRIBUTING.md', 'utf-8'),
+      fs.readFile('CONTRIBUTING-zh.md', 'utf-8'),
+    ]);
+
+    expect(readmeEn).toContain('[CONTRIBUTING.md](./CONTRIBUTING.md)');
+    expect(readmeZh).toContain('[CONTRIBUTING-zh.md](./CONTRIBUTING-zh.md)');
+    for (const content of [readmeEn, readmeZh]) {
+      expect(content).not.toContain('npm publish');
+      expect(content).not.toContain('pnpm test:package-e2e');
+      expect(content).not.toContain('NPM_TOKEN');
+    }
+    expect(contributingEn).toContain('## Release (Maintainers)');
+    expect(contributingZh).toContain('## 发布流程（维护者）');
+    for (const content of [contributingEn, contributingZh]) {
+      expect(content).toContain('npm run prepublishOnly');
+      expect(content).toContain('npm publish --access public');
+    }
+  });
+
   it('documents recovery boundaries and license information', async () => {
     const [english, chinese] = await readBoth();
 

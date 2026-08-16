@@ -37,7 +37,7 @@
 ## 开发环境
 
 ```bash
-git clone https://github.com/<YOUR_GITHUB_USER>/owner.git
+git clone https://github.com/TAN-cyber/owner.git
 cd owner
 pnpm install
 pnpm build
@@ -48,22 +48,22 @@ pnpm build
 
 ## 常用命令
 
-| 命令                         | 用途                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `pnpm dev`                   | TypeScript watch 模式                                                     |
-| `pnpm build`                 | 全量构建（Pipeline、Loop、Entry runtime）                                |
-| `pnpm build:pipeline-runtime` | 单独打包 Pipeline runtime（`scripts/build/build-pipeline-runtime.mjs`）     |
-| `pnpm build:loop-runtime`  | 单独打包 Loop runtime（`scripts/build/build-loop-runtime.mjs`）       |
-| `pnpm build:entry-runtime`   | 单独打包共享入口与 Hook Router（`scripts/build/build-entry-runtime.mjs`） |
-| `pnpm test`                  | 运行单元测试（Vitest）                                                    |
-| `pnpm test:coverage`         | 运行测试并生成覆盖率                                                      |
-| `pnpm test:script-smoke`     | 运行 Pipeline 启动器 smoke 套件，CI 入口                                   |
-| `pnpm test:watch`            | Vitest watch 模式                                                         |
-| `pnpm lint`                  | ESLint + 架构 linter                                                      |
-| `pnpm lint:architecture`     | 仓库分层 linter（`scripts/lint/architecture.mjs`）                        |
-| `pnpm lint:fix`              | ESLint 自动修复                                                           |
-| `pnpm format`                | Prettier 格式化 `app/`、`domains/`、`platform/`                           |
-| `pnpm format:check`          | Prettier 校验（CI 强制）                                                  |
+| 命令                          | 用途                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| `pnpm dev`                    | TypeScript watch 模式                                                     |
+| `pnpm build`                  | 全量构建（Pipeline、Loop、Entry runtime）                                 |
+| `pnpm build:pipeline-runtime` | 单独打包 Pipeline runtime（`scripts/build/build-pipeline-runtime.mjs`）   |
+| `pnpm build:loop-runtime`     | 单独打包 Loop runtime（`scripts/build/build-loop-runtime.mjs`）           |
+| `pnpm build:entry-runtime`    | 单独打包共享入口与 Hook Router（`scripts/build/build-entry-runtime.mjs`） |
+| `pnpm test`                   | 运行单元测试（Vitest）                                                    |
+| `pnpm test:coverage`          | 运行测试并生成覆盖率                                                      |
+| `pnpm test:script-smoke`      | 运行 Pipeline 启动器 smoke 套件，CI 入口                                  |
+| `pnpm test:watch`             | Vitest watch 模式                                                         |
+| `pnpm lint`                   | ESLint + 架构 linter                                                      |
+| `pnpm lint:architecture`      | 仓库分层 linter（`scripts/lint/architecture.mjs`）                        |
+| `pnpm lint:fix`               | ESLint 自动修复                                                           |
+| `pnpm format`                 | Prettier 格式化 `app/`、`domains/`、`platform/`                           |
+| `pnpm format:check`           | Prettier 校验（CI 强制）                                                  |
 
 如果改动 Workflow runtime，先按归属运行对应新鲜度检查；Pipeline launcher 另有定向 smoke：
 
@@ -361,6 +361,42 @@ owner-hook-router.mjs    <- 平台唯一 Hook 入口 -> 当前 selection 的一�
 ```
 
 `### Tests` 只在测试/评估能力本身是用户可运行的发布能力时使用；普通回归测试、覆盖率补充、测试文件迁移不写入。
+
+## 发布流程（维护者）
+
+1. 将发布提交推送到 GitHub，并确认工作区干净。
+2. 运行发布检查：
+
+   ```bash
+   node bin/owner.js --version
+   node bin/owner.js init --help
+   pnpm check:generated
+   npm run prepublishOnly
+   npm pack --dry-run
+   ```
+
+3. 使用拥有 `redv` 作用域的账号执行 `npm login`。
+4. 执行 `npm publish --access public`，并在 npm 提示时输入当前双因素认证验证码。不要把验证码写进 shell 历史。
+5. CI 或其他非交互发布场景必须使用 Granular Access Token，授予 `redv` 作用域的包读写权限并启用 2FA bypass。Token 只能存入密码管理器或 CI Secret；不得提交 Token 或包含凭据的 `.npmrc`。
+6. 验证 registry 和干净安装：
+
+   ```bash
+   npm view @redv/owner version
+   npm install @redv/owner
+   ```
+
+维护者确需在本机临时配置 Granular Access Token 时，应隐藏输入并在发布后删除 npm 配置：
+
+```bash
+printf '请输入 Granular npm token: '
+read -s NPM_TOKEN
+printf '\n'
+export NPM_TOKEN
+npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+npm publish --access public
+npm config delete //registry.npmjs.org/:_authToken
+unset NPM_TOKEN
+```
 
 ## 安全
 

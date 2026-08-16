@@ -260,50 +260,9 @@ npx owner uninstall /path/to/project --scope project --force
 
 更新和卸载只处理 Owner 管理的文件，保留用户已有 Skills、Rules 和非 Owner Hooks。
 
-## 开发与验证
+## 参与贡献
 
-```bash
-corepack enable
-pnpm install
-pnpm build
-pnpm lint
-pnpm test
-pnpm test:package-e2e
-```
-
-发布前至少验证：
-
-```bash
-node bin/owner.js --version
-node bin/owner.js init --help
-pnpm check:generated
-npm pack --dry-run
-```
-
-## 发布到 npm
-
-1. 将仓库推送到 GitHub。
-2. 使用拥有 `redv` 作用域的 npm 账号执行 `npm login`。
-3. npm 发布需要双因素认证。交互式发布时执行 `npm publish --access public --otp=<六位验证码>`；npm 也可能在命令执行后提示输入验证码。
-4. CI 或其他非交互发布场景需要创建 Granular Access Token，授予 `redv` 作用域的包读写权限，并启用该 Token 的 2FA bypass。Token 只能放在密码管理器或 CI Secret 中，不要提交到 Git 或写入受跟踪的 `.npmrc`。
-5. 使用 `npm publish --access public` 发布公开包。
-6. 在干净项目运行 `npm install @redv/owner`。
-7. 分别验证 `--platform claude` 与 `--platform codex`。
-8. 分别验证 `--workflow loop`、`pipeline` 和 `both`。
-9. 保留 LICENSE 与 NOTICE，不要删除授权文件。
-
-本机临时使用 Token 发布时，可以这样配置，发布后立即删除本机配置：
-
-```bash
-printf '请输入 Granular npm token: '
-read -s NPM_TOKEN
-printf '\n'
-export NPM_TOKEN
-npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-npm publish --access public
-npm config delete //registry.npmjs.org/:_authToken
-unset NPM_TOKEN
-```
+开发、验证和发布流程统一维护在 [CONTRIBUTING-zh.md](./CONTRIBUTING-zh.md) 中。
 
 ## 安全边界
 

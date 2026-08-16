@@ -125,40 +125,9 @@ npx owner archive <change> --dry-run
 
 Loop portable artifacts live under `docs/owner/`; local locks, logs, receipts, and transactions live under `.owner/runtime/loop/`. Pipeline state lives in `docs/openspec/changes/<change>/.owner.yaml` by default.
 
-## Develop
+## Contributing
 
-```bash
-corepack enable
-pnpm install
-pnpm build
-pnpm lint
-pnpm test
-pnpm test:package-e2e
-```
-
-## Publish
-
-1. Push this repository to GitHub.
-2. Run `npm login` with an npm account that owns the `redv` scope.
-3. npm requires two-factor authentication for publishing. For an interactive publish, run `npm publish --access public --otp=<six-digit-code>`; npm may also prompt for the code.
-4. For CI or other non-interactive publishing, create a Granular Access Token with read/write package access for the `redv` scope and enable its 2FA bypass. Store it in a secret such as `NPM_TOKEN`; never commit it or place it in a tracked `.npmrc`.
-5. Publish the public package with `npm publish --access public`.
-6. Test `npm install @redv/owner` in a clean project.
-7. Test both hosts and all three workflow selections: `loop`, `pipeline`, and `both`.
-8. Keep LICENSE and NOTICE intact.
-
-For a token-based local publish, configure the token only for the current machine and remove it afterwards:
-
-```bash
-printf 'Granular npm token: '
-read -s NPM_TOKEN
-printf '\n'
-export NPM_TOKEN
-npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-npm publish --access public
-npm config delete //registry.npmjs.org/:_authToken
-unset NPM_TOKEN
-```
+Development, verification, and release instructions are maintained in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Boundaries
 

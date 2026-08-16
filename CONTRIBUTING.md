@@ -57,7 +57,7 @@ covers only the contribution flow itself and does not repeat those rules.
 ## Development Setup
 
 ```bash
-git clone https://github.com/<YOUR_GITHUB_USER>/owner.git
+git clone https://github.com/TAN-cyber/owner.git
 cd owner
 pnpm install
 pnpm build
@@ -70,22 +70,22 @@ pnpm build
 
 ## Commands
 
-| Command                      | Purpose                                                                               |
-| ---------------------------- | ------------------------------------------------------------------------------------- |
-| `pnpm dev`                   | Watch mode (TypeScript)                                                               |
-| `pnpm build`                 | Full build (Pipeline, Loop, and entry runtimes)                                      |
-| `pnpm build:pipeline-runtime` | Build only the Pipeline runtime (`scripts/build/build-pipeline-runtime.mjs`)            |
-| `pnpm build:loop-runtime`  | Build only the Loop runtime (`scripts/build/build-loop-runtime.mjs`)              |
-| `pnpm build:entry-runtime`   | Build only the shared entry and Hook Router (`scripts/build/build-entry-runtime.mjs`) |
-| `pnpm test`                  | Run unit tests (Vitest)                                                               |
-| `pnpm test:coverage`         | Run tests with coverage                                                               |
-| `pnpm test:script-smoke`     | Run the Pipeline launcher smoke suite; CI entry point                                  |
-| `pnpm test:watch`            | Vitest watch mode                                                                     |
-| `pnpm lint`                  | ESLint + architecture linter                                                          |
-| `pnpm lint:architecture`     | Repository layering linter (`scripts/lint/architecture.mjs`)                          |
-| `pnpm lint:fix`              | ESLint auto-fix                                                                       |
-| `pnpm format`                | Prettier formatting for `app/`, `domains/`, `platform/`                               |
-| `pnpm format:check`          | Prettier check (CI-enforced)                                                          |
+| Command                       | Purpose                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `pnpm dev`                    | Watch mode (TypeScript)                                                               |
+| `pnpm build`                  | Full build (Pipeline, Loop, and entry runtimes)                                       |
+| `pnpm build:pipeline-runtime` | Build only the Pipeline runtime (`scripts/build/build-pipeline-runtime.mjs`)          |
+| `pnpm build:loop-runtime`     | Build only the Loop runtime (`scripts/build/build-loop-runtime.mjs`)                  |
+| `pnpm build:entry-runtime`    | Build only the shared entry and Hook Router (`scripts/build/build-entry-runtime.mjs`) |
+| `pnpm test`                   | Run unit tests (Vitest)                                                               |
+| `pnpm test:coverage`          | Run tests with coverage                                                               |
+| `pnpm test:script-smoke`      | Run the Pipeline launcher smoke suite; CI entry point                                 |
+| `pnpm test:watch`             | Vitest watch mode                                                                     |
+| `pnpm lint`                   | ESLint + architecture linter                                                          |
+| `pnpm lint:architecture`      | Repository layering linter (`scripts/lint/architecture.mjs`)                          |
+| `pnpm lint:fix`               | ESLint auto-fix                                                                       |
+| `pnpm format`                 | Prettier formatting for `app/`, `domains/`, `platform/`                               |
+| `pnpm format:check`           | Prettier check (CI-enforced)                                                          |
 
 For workflow runtime work, first check freshness for the affected owner. Pipeline
 launchers also have a focused smoke suite:
@@ -481,6 +481,42 @@ Template:
 `### Tests` is only used when the testing/evaluation capability itself is a
 user-runnable release feature; ordinary regression tests, coverage backfill,
 and test file migrations are not recorded in the changelog.
+
+## Release (Maintainers)
+
+1. Push the release commit to GitHub and confirm the working tree is clean.
+2. Run the release checks:
+
+   ```bash
+   node bin/owner.js --version
+   node bin/owner.js init --help
+   pnpm check:generated
+   npm run prepublishOnly
+   npm pack --dry-run
+   ```
+
+3. Run `npm login` with an account that owns the `redv` scope.
+4. Publish with `npm publish --access public` and enter the current two-factor authentication code when npm prompts. Do not put the code in shell history.
+5. For CI or another non-interactive publisher, use a Granular Access Token with read/write package access for the `redv` scope and 2FA bypass enabled. Store it only in a secret manager or CI secret; never commit it or a credential-bearing `.npmrc`.
+6. Verify the registry and a clean installation:
+
+   ```bash
+   npm view @redv/owner version
+   npm install @redv/owner
+   ```
+
+When a maintainer must configure a Granular Access Token locally, read it without echoing it or recording it in shell history, then remove the npm configuration after publishing:
+
+```bash
+printf 'Granular npm token: '
+read -s NPM_TOKEN
+printf '\n'
+export NPM_TOKEN
+npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+npm publish --access public
+npm config delete //registry.npmjs.org/:_authToken
+unset NPM_TOKEN
+```
 
 ## Security
 
