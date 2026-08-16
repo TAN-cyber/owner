@@ -150,7 +150,10 @@ pnpm test:package-e2e
 For a token-based local publish, configure the token only for the current machine and remove it afterwards:
 
 ```bash
-export NPM_TOKEN="<granular-token>"
+printf 'Granular npm token: '
+read -s NPM_TOKEN
+printf '\n'
+export NPM_TOKEN
 npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
 npm publish --access public
 npm config delete //registry.npmjs.org/:_authToken

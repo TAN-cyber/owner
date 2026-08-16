@@ -295,7 +295,10 @@ npm pack --dry-run
 本机临时使用 Token 发布时，可以这样配置，发布后立即删除本机配置：
 
 ```bash
-export NPM_TOKEN="<granular-token>"
+printf '请输入 Granular npm token: '
+read -s NPM_TOKEN
+printf '\n'
+export NPM_TOKEN
 npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
 npm publish --access public
 npm config delete //registry.npmjs.org/:_authToken
