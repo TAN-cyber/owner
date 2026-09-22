@@ -1,6 +1,6 @@
 # Owner
 
-[中文文档](./README-zh.md) | [Contributing](./CONTRIBUTING.md) | [Security](./.github/SECURITY.md)
+[中文文档](./README-zh.md) | [Security](./.github/SECURITY.md)
 
 [![CI](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@redv/owner.svg)](https://www.npmjs.com/package/@redv/owner)
@@ -132,12 +132,6 @@ npx owner archive <change> --dry-run
 ```
 
 Loop portable artifacts live under `docs/owner/`; local locks, logs, receipts, and transactions live under `.owner/runtime/loop/`. Pipeline state lives in `docs/openspec/changes/<change>/.owner.yaml` by default.
-
-## Contributing
-
-Development, verification, and release instructions are maintained in [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-Please also read the [Code of Conduct](./.github/CODE_OF_CONDUCT.md). Do not disclose vulnerabilities in public issues; follow the [Security Policy](./.github/SECURITY.md) instead.
 
 ## Boundaries
 

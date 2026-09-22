@@ -1,6 +1,6 @@
 # Owner
 
-[English](./README.md) | [贡献指南](./CONTRIBUTING-zh.md) | [安全策略](./.github/SECURITY.md)
+[English](./README.md) | [安全策略](./.github/SECURITY.md)
 
 [![CI](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@redv/owner.svg)](https://www.npmjs.com/package/@redv/owner)
@@ -269,12 +269,6 @@ npx owner uninstall /path/to/project --scope project --force
 ```
 
 更新和卸载只处理 Owner 管理的文件，保留用户已有 Skills、Rules 和非 Owner Hooks。
-
-## 参与贡献
-
-开发、验证和发布流程统一维护在 [CONTRIBUTING-zh.md](./CONTRIBUTING-zh.md) 中。
-
-参与前请同时阅读[社区行为规范](./.github/CODE_OF_CONDUCT.md)。安全漏洞请不要通过公开 Issue 披露，处理方式见[安全策略](./.github/SECURITY.md)。
 
 ## 安全边界
 
