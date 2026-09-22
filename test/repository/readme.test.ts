@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { promises as fs } from 'fs';
 
-const readmes = ['README.md', 'README-zh.md'] as const;
+const readmes = ['README-en.md', 'README.md'] as const;
 
 async function readBoth(): Promise<[string, string]> {
-  return Promise.all([fs.readFile('README.md', 'utf-8'), fs.readFile('README-zh.md', 'utf-8')]);
+  return Promise.all(readmes.map((path) => fs.readFile(path, 'utf-8'))) as Promise<
+    [string, string]
+  >;
 }
 
 describe('Owner README contract', () => {

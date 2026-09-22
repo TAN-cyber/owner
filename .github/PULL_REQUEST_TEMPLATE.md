@@ -29,7 +29,7 @@
 ## ✅ Checklist
 
 - [ ] PR title follows Conventional Commits, for example `fix: handle project-scope init`
-- [ ] User-facing behavior is documented in `README.md`, `README-zh.md`, or `docs/`
+- [ ] User-facing behavior is documented in `README.md`, `README-en.md`, or `docs/`
 - [ ] `CHANGELOG.md` is updated when behavior changes
 - [ ] Skill changes were made in Chinese first when applicable, then synced to English
 - [ ] New scripts are included in `assets/manifest.json` and relevant tests

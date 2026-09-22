@@ -2,6 +2,12 @@
 
 All notable changes to `owner` are documented here.
 
+## What's Changed [0.1.2] - 2026-09-22
+
+### Changed
+
+- **Chinese-first repository documentation**: Made the Chinese README the default GitHub landing page while preserving the full English documentation behind a prominent language link.
+
 ## What's Changed [0.1.1] - 2026-08-15
 
 ### Changed

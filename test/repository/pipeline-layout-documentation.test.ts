@@ -14,7 +14,7 @@ describe('Pipeline layout documentation', () => {
     expect(content).not.toContain('`openspec/changes/<name>`');
   });
 
-  it.each(['README.md', 'README-zh.md'])(
+  it.each(['README.md', 'README-en.md'])(
     'documents the default Pipeline path in %s',
     async (path) => {
       const content = await fs.readFile(path, 'utf8');

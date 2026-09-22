@@ -109,6 +109,7 @@
     "platform",
     "pnpm-lock.yaml",
     "pnpm-workspace.yaml",
+    "README-en.md",
     "README-zh.md",
     "README.md",
     "scripts",

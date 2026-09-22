@@ -29,7 +29,7 @@ describe('CLI help text', () => {
     expect(help.status, help.stderr).toBe(0);
     expect(help.stdout).toContain(tagline);
     expect(packageJson.description).toBe(tagline);
-    expect(packageJson.version).toBe('0.1.1');
+    expect(packageJson.version).toBe('0.1.2');
   });
 
   it('exposes only lifecycle, Loop, and Pipeline command surfaces', () => {

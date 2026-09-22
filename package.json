@@ -1,6 +1,6 @@
 {
   "name": "@redv/owner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Resumable Loop and Pipeline vibe coding for Claude Code and Codex",
   "keywords": [
     "owner",
@@ -35,6 +35,7 @@
   },
   "files": [
     "NOTICE",
+    "README-en.md",
     "README-zh.md",
     "dist",
     "bin",
