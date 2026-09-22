@@ -16,12 +16,6 @@ Owner 仅支持：
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex](https://developers.openai.com/codex/skills)
 
-Owner 使用 MIT License。详见 [LICENSE](./LICENSE)。
-
-## 项目状态
-
-Owner 当前处于 `0.x` 早期迭代阶段，已经可以安装和使用，但公开命令、配置与状态格式在 `1.0` 前仍可能调整。欢迎通过 [Issues](https://github.com/TAN-cyber/owner/issues) 反馈可复现的问题或提出改进建议。
-
 ## 为什么需要 Owner
 
 直接 vibe coding 常见的失败不是模型完全不会写代码，而是长任务中的工程状态失控：
@@ -280,7 +274,7 @@ npx owner uninstall /path/to/project --scope project --force
 
 ## 许可证与来源
 
-Owner 使用 MIT License。
+Owner 使用 MIT License。详见 [LICENSE](./LICENSE)。
 
 - 品牌、CLI、状态目录、Skill 和 schema 统一改为 Owner；
 - 公开平台限制为 Claude Code 与 Codex；

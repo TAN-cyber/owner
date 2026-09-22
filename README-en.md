@@ -18,12 +18,6 @@ Supported hosts:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex](https://developers.openai.com/codex/skills)
 
-Owner is distributed under the MIT License. See [LICENSE](./LICENSE).
-
-## Project status
-
-Owner is currently an early-stage `0.x` project. It can be installed and used today, but public commands, configuration, and state formats may still change before `1.0`. Reproducible bug reports and focused proposals are welcome in [Issues](https://github.com/TAN-cyber/owner/issues).
-
 ## Requirements
 
 - Node.js 22+
