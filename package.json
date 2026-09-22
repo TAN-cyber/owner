@@ -16,7 +16,15 @@
     "codex"
   ],
   "license": "MIT",
-  "author": "Owner contributors",
+  "author": "TAN-cyber",
+  "homepage": "https://github.com/TAN-cyber/owner#readme",
+  "bugs": {
+    "url": "https://github.com/TAN-cyber/owner/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TAN-cyber/owner.git"
+  },
   "type": "module",
   "publishConfig": {
     "access": "public",

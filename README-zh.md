@@ -1,5 +1,11 @@
 # Owner
 
+[English](./README.md) | [贡献指南](./CONTRIBUTING-zh.md) | [安全策略](./.github/SECURITY.md)
+
+[![CI](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@redv/owner.svg)](https://www.npmjs.com/package/@redv/owner)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 Owner 是一个面向 Claude Code 和 Codex 的可恢复 vibe coding 工作流。它把一次 AI 代码变更组织为需求确认、实现、验证、失败修复和归档闭环，并提供两套互相独立的工作流：
 
 - **Loop**：`Shape → Build ↔ Verify → Archive`。面向自主规划能力较强的模型，使用 Owner 自带 Runtime，不依赖 OpenSpec 或 Superpowers。
@@ -11,6 +17,10 @@ Owner 仅支持：
 - [Codex](https://developers.openai.com/codex/skills)
 
 Owner 使用 MIT License。详见 [LICENSE](./LICENSE)。
+
+## 项目状态
+
+Owner 当前处于 `0.x` 早期迭代阶段，已经可以安装和使用，但公开命令、配置与状态格式在 `1.0` 前仍可能调整。欢迎通过 [Issues](https://github.com/TAN-cyber/owner/issues) 反馈可复现的问题或提出改进建议。
 
 ## 为什么需要 Owner
 
@@ -26,15 +36,15 @@ Owner 用磁盘状态、阶段守卫、候选版本、Runtime check receipt、�
 
 ## Loop 与 Pipeline 怎么选
 
-| 维度 | Loop | Pipeline |
-|---|---|---|
-| 流程 | Shape → Build ↔ Verify → Archive | Open → Design → Build → Verify → Archive |
-| 规格 | brief + 完整目标 spec + acceptance | OpenSpec proposal + delta spec + tasks |
-| 实现方法 | Agent 自主选择 | Superpowers 设计、计划、TDD、调试、评审 |
-| 验证 | Runtime evidence + 只读 Verifier | Guard + 分层 review + light/full Verify |
-| 恢复 | portable state + continuation + CAS | `.owner.yaml` + plan/tasks + checkpoint + hash |
-| 成本 | 阶段与上下文更少 | 产物、Agent 轮次与审查更多 |
-| 适合 | 普通中型业务、强模型、Token 敏感 | 支付、权限、迁移、并发、公共 API |
+| 维度     | Loop                                | Pipeline                                       |
+| -------- | ----------------------------------- | ---------------------------------------------- |
+| 流程     | Shape → Build ↔ Verify → Archive    | Open → Design → Build → Verify → Archive       |
+| 规格     | brief + 完整目标 spec + acceptance  | OpenSpec proposal + delta spec + tasks         |
+| 实现方法 | Agent 自主选择                      | Superpowers 设计、计划、TDD、调试、评审        |
+| 验证     | Runtime evidence + 只读 Verifier    | Guard + 分层 review + light/full Verify        |
+| 恢复     | portable state + continuation + CAS | `.owner.yaml` + plan/tasks + checkpoint + hash |
+| 成本     | 阶段与上下文更少                    | 产物、Agent 轮次与审查更多                     |
+| 适合     | 普通中型业务、强模型、Token 敏感    | 支付、权限、迁移、并发、公共 API               |
 
 两套工作流不是轻重档位，也不会在任务中自动互相切换。统一入口只读取 `.owner/config.yaml`，确定性加载其中一套。
 
@@ -53,7 +63,7 @@ npm install @redv/owner
 npx owner --version
 ```
 
-也可以从 [TAN-cyber](https://github.com/TAN-cyber) 仓库克隆后本地构建：
+也可以从 [Owner GitHub 仓库](https://github.com/TAN-cyber/owner) 克隆后本地构建：
 
 ```bash
 git clone https://github.com/TAN-cyber/owner.git
@@ -122,10 +132,10 @@ npx owner init /path/to/project \
 
 ## 安装路径
 
-| 宿主 | 项目 Skills | 用户 Skills | Rules/Hooks |
-|---|---|---|---|
+| 宿主        | 项目 Skills       | 用户 Skills         | Rules/Hooks                                     |
+| ----------- | ----------------- | ------------------- | ----------------------------------------------- |
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `.claude/rules/`、`.claude/settings.local.json` |
-| Codex | `.agents/skills/` | `~/.agents/skills/` | `.codex/rules/`、`.codex/hooks.json` |
+| Codex       | `.agents/skills/` | `~/.agents/skills/` | `.codex/rules/`、`.codex/hooks.json`            |
 
 Codex 的 `.agents/skills` 路径遵循[官方 Skills 文档](https://developers.openai.com/codex/skills)。Owner 不会把可分发仓库本身安装到仓库作者当前的 Codex 环境。
 
@@ -214,13 +224,13 @@ docs/superpowers/
 
 永久入口是 `owner-pipeline`，阶段 Skills 包括：
 
-| 阶段 | Skill | 职责 |
-|---|---|---|
-| Open | `owner-open` | 探索需求、OpenSpec proposal/spec/tasks |
-| Design | `owner-design` | Superpowers brainstorming 与 Design Doc |
-| Build | `owner-build` | 计划、TDD、实现、review、checkpoint |
-| Verify | `owner-verify` | light/full 验证与失败预算 |
-| Archive | `owner-archive` | delta 合并、报告、提交与外部动作恢复 |
+| 阶段    | Skill           | 职责                                    |
+| ------- | --------------- | --------------------------------------- |
+| Open    | `owner-open`    | 探索需求、OpenSpec proposal/spec/tasks  |
+| Design  | `owner-design`  | Superpowers brainstorming 与 Design Doc |
+| Build   | `owner-build`   | 计划、TDD、实现、review、checkpoint     |
+| Verify  | `owner-verify`  | light/full 验证与失败预算               |
+| Archive | `owner-archive` | delta 合并、报告、提交与外部动作恢复    |
 
 快捷入口：
 
@@ -263,6 +273,8 @@ npx owner uninstall /path/to/project --scope project --force
 ## 参与贡献
 
 开发、验证和发布流程统一维护在 [CONTRIBUTING-zh.md](./CONTRIBUTING-zh.md) 中。
+
+参与前请同时阅读[社区行为规范](./.github/CODE_OF_CONDUCT.md)。安全漏洞请不要通过公开 Issue 披露，处理方式见[安全策略](./.github/SECURITY.md)。
 
 ## 安全边界
 

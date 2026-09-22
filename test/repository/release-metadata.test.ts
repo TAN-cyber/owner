@@ -23,4 +23,21 @@ describe('release metadata', () => {
     expect(packageLock.packages[''].version).toBe(packageJson.version);
     expect(assetsManifest.version).toBe(packageJson.version);
   });
+
+  it('publishes canonical repository and support links', () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'),
+    ) as {
+      homepage: string;
+      bugs: { url: string };
+      repository: { type: string; url: string };
+    };
+
+    expect(packageJson.homepage).toBe('https://github.com/TAN-cyber/owner#readme');
+    expect(packageJson.bugs.url).toBe('https://github.com/TAN-cyber/owner/issues');
+    expect(packageJson.repository).toEqual({
+      type: 'git',
+      url: 'git+https://github.com/TAN-cyber/owner.git',
+    });
+  });
 });

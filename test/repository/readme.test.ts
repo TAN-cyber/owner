@@ -105,4 +105,21 @@ describe('Owner README contract', () => {
       expect(content).not.toMatch(/derived from|upstream baseline/iu);
     }
   });
+
+  it('exposes open-source contribution and security entry points', async () => {
+    const [english, chinese] = await readBoth();
+    const [security, codeOfConduct] = await Promise.all([
+      fs.readFile('.github/SECURITY.md', 'utf-8'),
+      fs.readFile('.github/CODE_OF_CONDUCT.md', 'utf-8'),
+    ]);
+
+    for (const content of [english, chinese]) {
+      expect(content).toContain('https://github.com/TAN-cyber/owner');
+      expect(content).toContain('./.github/SECURITY.md');
+      expect(content).toContain('./.github/CODE_OF_CONDUCT.md');
+    }
+    expect(security).toContain('security/advisories/new');
+    expect(codeOfConduct).toContain('社区行为规范');
+    expect(codeOfConduct).toContain('Code of Conduct');
+  });
 });

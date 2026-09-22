@@ -22,34 +22,33 @@ covers only the contribution flow itself and does not repeat those rules.
 - Include tests or explain why a change does not need tests.
 - Update documentation and `CHANGELOG.md` when behavior, commands, workflows, or
   user-facing text changes.
-- A PR version may only be ahead of `master` by exactly one version. For
-  example, if `master` is `0.3.0`, the PR version must be `0.3.1`.
+- A PR may prepare at most one release version ahead of `main`. If the branch
+  already contains an unreleased version entry, append to it instead of
+  creating another version.
 
 ## Standard Contribution Workflow
 
 - Leave a comment under the issue you want to claim, to avoid duplicate work.
-- Create a task branch from the latest `master`, named after the feature or fix
+- Create a task branch from the latest `main`, named after the feature or fix
   area, for example `fix/dev-resync-docs` or `docs/contributing-guide`.
 - Implement the change locally, add tests, and run targeted checks.
 - Before PR review, run the full verification command:
   `pnpm build && pnpm lint && pnpm format:check && pnpm test`, unless the change
   is documentation-only.
-- Open a PR against `master` and follow the template to describe what changed,
+- Open a PR against `main` and follow the template to describe what changed,
   why it changed, and how it was verified.
-- After the PR is submitted, three AI reviewers will leave feedback. Their
-  suggestions are not always correct — you need to identify which comments are
-  actionable and which are AI misjudgments, and address everything genuinely
-  related to your PR.
-- Once you fix the AI review comments, just push your changes; the PR updates
-  automatically. You must reply to every AI comment and click
-  `Resolve conversation` on the ones you consider resolved.
+- Automated or AI review suggestions are not always correct. Evaluate them
+  against the code and tests, and address every valid comment related to the
+  current PR.
+- Push follow-up changes and reply to the relevant review comments. Resolve a
+  conversation after the underlying issue has been addressed.
 - After everything is resolved, wait for the human maintainer's review
   feedback.
 
 ## Issues You Can Claim
 
 - Issues labeled `good first issue`.
-- Issues labeled `task`.
+- Issues labeled `help wanted`.
 - Issues labeled `bug`.
 - Before claiming, confirm the issue has not already been claimed by or
   assigned to someone else, to avoid duplicate work.
@@ -106,24 +105,24 @@ pnpm build && pnpm lint && pnpm format:check && pnpm test
 
 ## Branching Model
 
-- `master` is the canonical development and release base.
-- Create task branches from the latest `master`.
-- Open PRs against `master`.
+- `main` is the canonical development and release base.
+- Create task branches from the latest `main`.
+- Open PRs against `main`.
 - Merge PRs with **Squash and merge**.
 - Treat squashed PR branches as disposable: delete them after merge, or
-  recreate/reset them from `master` before reuse.
+  recreate/reset them from `main` before reuse.
 
-Squash merge creates a new commit on `master`. If the source branch still keeps
+Squash merge creates a new commit on `main`. If the source branch still keeps
 the original commits, Git cannot always recognize that both histories contain
-equivalent changes. Because of that, do not keep merging `master` back into a
+equivalent changes. Because of that, do not keep merging `main` back into a
 branch that has already been squashed.
 
 ## Preparing a Change
 
 ```bash
 git fetch origin
-git switch master
-git pull --ff-only origin master
+git switch main
+git pull --ff-only origin main
 git switch -c <type>/<short-topic>
 ```
 
@@ -140,13 +139,13 @@ While working:
 
 ## Keeping a PR Current
 
-If a PR branch falls behind `master`, prefer rebasing your task branch onto the
-latest `master`:
+If a PR branch falls behind `main`, prefer rebasing your task branch onto the
+latest `main`:
 
 ```bash
 git fetch origin
 git switch <your-branch>
-git rebase origin/master
+git rebase origin/main
 # resolve conflicts, then run the relevant checks
 git push --force-with-lease
 ```
@@ -155,11 +154,11 @@ Use `--force-with-lease` after a rebase because it protects remote work that you
 do not have locally. Avoid plain `--force`.
 
 If the branch has become tangled with unrelated commits, create a clean branch
-from `origin/master` and cherry-pick only the commits that belong to the PR:
+from `origin/main` and cherry-pick only the commits that belong to the PR:
 
 ```bash
 git fetch origin
-git switch -c <topic>-take-2 origin/master
+git switch -c <topic>-take-2 origin/main
 git cherry-pick <commit-1> <commit-2>
 # run checks
 git push --force-with-lease origin <topic>-take-2:<original-branch>
@@ -170,8 +169,8 @@ This keeps the PR reviewable and prevents accidental merges of unrelated work.
 ## Shared `dev` Branch
 
 If you keep a shared `dev` branch, use it only as a temporary working branch.
-After a PR from `dev` is squashed into `master`, do not merge `master` back into
-`dev`. Reset `dev` to `origin/master` after confirming there is no unsquashed
+After a PR from `dev` is squashed into `main`, do not merge `main` back into
+`dev`. Reset `dev` to `origin/main` after confirming there is no unsquashed
 work that still needs to be preserved:
 
 ```bash
@@ -179,12 +178,12 @@ git fetch origin
 git switch dev
 git status --short
 git branch backup/dev-before-sync-YYYYMMDD
-git reset --hard origin/master
+git reset --hard origin/main
 git push --force-with-lease origin dev
 ```
 
-If `dev` contains work that has not been merged to `master`, move that work to a
-new branch from `origin/master` before resetting `dev`.
+If `dev` contains work that has not been merged to `main`, move that work to a
+new branch from `origin/main` before resetting `dev`.
 
 ## Commit Conventions
 
@@ -221,17 +220,17 @@ is editor-independent, and applies to every contributor.
 
 ## PR Process
 
-1. Update `master` and create a feature branch from it.
+1. Update `main` and create a feature branch from it.
 2. Implement a focused change with tests.
 3. Run targeted checks while developing.
 4. Run `pnpm build && pnpm lint && pnpm format:check && pnpm test` before PR
    review, unless the change is documentation-only.
-5. Open a PR against `master`.
+5. Open a PR against `main`.
 6. Describe what changed, why it changed, and how it was verified.
 7. Respond to review feedback with follow-up commits.
 8. Use **Squash and merge** when the PR is approved.
 9. Delete or recreate the source branch after merge; do not keep merging
-   `master` back into a squashed branch.
+   `main` back into a squashed branch.
 
 For documentation-only changes, run at least the relevant formatter check. Root
 `README.md` and `README-zh.md` are listed in `.prettierignore` and are not
@@ -444,8 +443,8 @@ changes. See `CLAUDE.md` for the full categorization and the
 "release-perspective check" rules. Quick reference:
 
 - The version number must match `package.json`. New version entries go at the
-  top, and a PR may only be one version ahead of `master`.
-- If the current branch already has a version entry ahead of `master`, append
+  top, and a PR may only be one version ahead of `main`.
+- If the current branch already has a version entry ahead of `main`, append
   to that same entry instead of adding a new running-tally version.
 - Group order: `Added → Changed → Fixed → Tests → Removed → Security`. Each
   entry starts with `- **Bold keyword**: `.
@@ -527,5 +526,4 @@ unset NPM_TOKEN
 - Validate user-provided change names against path traversal before using them
   in filesystem paths.
 - In symlink install mode, skill installation must not replace a `skills/`
-  directory that contains files outside the managed manifest (see issue #159 in
-  the `0.4.0-beta.2` entry of `CHANGELOG.md`).
+  directory that contains files outside the managed manifest.

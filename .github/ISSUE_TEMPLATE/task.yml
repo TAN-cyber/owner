@@ -1,7 +1,7 @@
 name: 🛠️ Maintenance Task
 description: Track project maintenance, refactoring, docs, or release work.
 title: 'chore: '
-labels: ['task']
+labels: []
 body:
   - type: textarea
     attributes:

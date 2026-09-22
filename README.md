@@ -1,6 +1,10 @@
 # Owner
 
-[中文文档](./README-zh.md)
+[中文文档](./README-zh.md) | [Contributing](./CONTRIBUTING.md) | [Security](./.github/SECURITY.md)
+
+[![CI](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TAN-cyber/owner/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@redv/owner.svg)](https://www.npmjs.com/package/@redv/owner)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 Owner is a resumable vibe-coding workflow for Claude Code and Codex. It turns an AI coding request into a persisted, guarded lifecycle with requirement shaping, implementation, evidence-backed verification, bounded repair, recovery, and archive.
 
@@ -15,6 +19,10 @@ Supported hosts:
 - [Codex](https://developers.openai.com/codex/skills)
 
 Owner is distributed under the MIT License. See [LICENSE](./LICENSE).
+
+## Project status
+
+Owner is currently an early-stage `0.x` project. It can be installed and used today, but public commands, configuration, and state formats may still change before `1.0`. Reproducible bug reports and focused proposals are welcome in [Issues](https://github.com/TAN-cyber/owner/issues).
 
 ## Requirements
 
@@ -31,7 +39,7 @@ npm install @redv/owner
 npx owner --version
 ```
 
-You can also clone the [TAN-cyber](https://github.com/TAN-cyber) repository and build locally:
+You can also clone the [Owner GitHub repository](https://github.com/TAN-cyber/owner) and build locally:
 
 ```bash
 git clone https://github.com/TAN-cyber/owner.git
@@ -75,10 +83,10 @@ npx owner init --scope global --platform claude --workflow both
 
 ## Host paths
 
-| Host | Project Skills | User Skills | Rules/Hooks |
-|---|---|---|---|
+| Host        | Project Skills    | User Skills         | Rules/Hooks                                     |
+| ----------- | ----------------- | ------------------- | ----------------------------------------------- |
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | `.claude/rules/`, `.claude/settings.local.json` |
-| Codex | `.agents/skills/` | `~/.agents/skills/` | `.codex/rules/`, `.codex/hooks.json` |
+| Codex       | `.agents/skills/` | `~/.agents/skills/` | `.codex/rules/`, `.codex/hooks.json`            |
 
 Codex paths follow the [official Skills documentation](https://developers.openai.com/codex/skills).
 
@@ -128,6 +136,8 @@ Loop portable artifacts live under `docs/owner/`; local locks, logs, receipts, a
 ## Contributing
 
 Development, verification, and release instructions are maintained in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+Please also read the [Code of Conduct](./.github/CODE_OF_CONDUCT.md). Do not disclose vulnerabilities in public issues; follow the [Security Policy](./.github/SECURITY.md) instead.
 
 ## Boundaries
 

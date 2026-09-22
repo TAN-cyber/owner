@@ -15,6 +15,8 @@ describe('CI workflows', () => {
     };
 
     expect(workflow).toMatch(/pull_request:\s*\n\s*permissions:/);
+    expect(workflow).toMatch(/push:\s*\n\s*branches:\s*\n\s*- main/);
+    expect(workflow).not.toMatch(/\s- master\s/);
     expect(workflow).toContain('cancel-in-progress: true');
     expect(workflow).toContain('pnpm check:generated');
     expect(workflow.indexOf('pnpm check:generated')).toBeLessThan(workflow.indexOf('pnpm build'));
@@ -64,6 +66,7 @@ describe('CI workflows', () => {
     const dependabot = await fs.readFile('.github/dependabot.yml', 'utf8');
 
     expect(workflow).toContain('actions/dependency-review-action@');
+    expect(workflow).toContain("branches: [main, 'beta*', 'release/**', 'hotfix/**']");
     expect(workflow).toContain('github/codeql-action/init@');
     expect(workflow).toContain('security-events: write');
     expect(workflow).toContain('fail-on-severity: high');

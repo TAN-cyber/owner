@@ -1,1 +1,5 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/TAN-cyber/owner/blob/main/.github/SECURITY.md
+    about: Please read the private disclosure policy before reporting a vulnerability.

@@ -14,23 +14,23 @@
 - 每个贡献保持一个清晰目的；无关改动拆成多个 PR。
 - 添加测试，或说明为什么这次改动不需要测试。
 - 行为、命令、工作流或用户可见文案变化时，同步更新文档与 `CHANGELOG.md`。
-- PR版本只能够领先master 1个版本，如master为0.3.0，则pr的版本为0.3.1。
+- 一个 PR 最多只准备一个高于 `main` 的发布版本；如果当前分支已经有待发布版本条目，请追加到同一条目，不要重复升级版本。
 
 ## 标准贡献流程
 
 - 在想要认领的issue下留言认领，避免重复工作。
-- 从最新 `master` 创建任务分支，按功能或修复点命名，例如 `fix/dev-resync-docs` 或 `docs/contributing-guide`。
+- 从最新 `main` 创建任务分支，按功能或修复点命名，例如 `fix/dev-resync-docs` 或 `docs/contributing-guide`。
 - 在本地实现改动，补充测试，运行定向检查。
 - 在 PR review 前运行完整验证：`pnpm build && pnpm lint && pnpm format:check && pnpm test`，纯文档改动除外。
-- 向 `master` 开 PR，按照模版说明改了什么、为什么改、如何验证。
-- 提交PR后会有3位AI Review，他们不一定给出的是正确的意见，你需要识别哪些是需要修改的，哪些是AI误判的，尽可能的解决和自身PR相关的内容
-- 修复完AI Review意见后，只需要推送你的修改，PR会自动识别，你需要对AI的每一个评论进行回复，对于已解决的问题点击Resolve conversation。
+- 向 `main` 开 PR，按照模版说明改了什么、为什么改、如何验证。
+- 自动化或 AI Review 的建议不一定都正确；请结合代码与测试判断，并处理所有与当前 PR 相关的有效意见。
+- 修复 review 意见后推送修改，并回复相关评论；确认问题已解决后再关闭对应 conversation。
 - 完整修复后，等待项目维护者的人工审核反馈。
 
 ## 哪些是可以认领的任务
 
 - issue标签为“good first issue”的任务。
-- issue标签为“task”的任务
+- issue 标签为“help wanted”的任务。
 - issue标签为“bug”的任务
 - 认领前请确认该issue没有被其他人认领，或分配给其他人，避免重复工作。
 
@@ -82,20 +82,20 @@ pnpm build && pnpm lint && pnpm format:check && pnpm test
 
 ## 分支模型
 
-- `master` 是唯一权威的开发与发布基线。
-- 任务分支从最新 `master` 创建。
-- PR 目标分支是 `master`。
+- `main` 是唯一权威的开发与发布基线。
+- 任务分支从最新 `main` 创建。
+- PR 目标分支是 `main`。
 - PR 使用 **Squash and merge** 合并。
-- 被 squash 的 PR 源分支视为一次性分支：合并后删除，或从 `master` 重新创建/重置后再使用。
+- 被 squash 的 PR 源分支视为一次性分支：合并后删除，或从 `main` 重新创建/重置后再使用。
 
-Squash merge 会在 `master` 上生成一个新提交。源分支如果仍保留原始多个提交，Git 不一定能识别两边历史包含的是等价变更。因此，不要把 `master` 继续 merge 回已经被 squash 的源分支。
+Squash merge 会在 `main` 上生成一个新提交。源分支如果仍保留原始多个提交，Git 不一定能识别两边历史包含的是等价变更。因此，不要把 `main` 继续 merge 回已经被 squash 的源分支。
 
 ## 准备一个改动
 
 ```bash
 git fetch origin
-git switch master
-git pull --ff-only origin master
+git switch main
+git pull --ff-only origin main
 git switch -c <type>/<short-topic>
 ```
 
@@ -109,25 +109,25 @@ git switch -c <type>/<short-topic>
 - 最终 diff 前重新运行格式化。
 - 避免大范围重写、无关格式化或无关元数据变更。
 
-## 让 PR 跟上 `master`
+## 让 PR 跟上 `main`
 
-如果 PR 分支落后 `master`，优先把任务分支 rebase 到最新 `master`：
+如果 PR 分支落后 `main`，优先把任务分支 rebase 到最新 `main`：
 
 ```bash
 git fetch origin
 git switch <your-branch>
-git rebase origin/master
+git rebase origin/main
 # 解决冲突后运行相关检查
 git push --force-with-lease
 ```
 
 rebase 后需要改写远端分支历史，因此使用 `--force-with-lease`。它会保护你本地没有的远端更新；避免使用普通 `--force`。
 
-如果分支混入了无关提交，从 `origin/master` 新建干净分支，只 cherry-pick 属于这个 PR 的提交：
+如果分支混入了无关提交，从 `origin/main` 新建干净分支，只 cherry-pick 属于这个 PR 的提交：
 
 ```bash
 git fetch origin
-git switch -c <topic>-take-2 origin/master
+git switch -c <topic>-take-2 origin/main
 git cherry-pick <commit-1> <commit-2>
 # 运行检查
 git push --force-with-lease origin <topic>-take-2:<original-branch>
@@ -137,18 +137,18 @@ git push --force-with-lease origin <topic>-take-2:<original-branch>
 
 ## 共享 `dev` 分支
 
-如果保留共享 `dev` 分支，只把它当作临时工作入口。来自 `dev` 的 PR 被 squash 到 `master` 后，不要再把 `master` merge 回 `dev`。确认 `dev` 没有仍需保留的未 squash 工作后，把 `dev` 重置到 `origin/master`：
+如果保留共享 `dev` 分支，只把它当作临时工作入口。来自 `dev` 的 PR 被 squash 到 `main` 后，不要再把 `main` merge 回 `dev`。确认 `dev` 没有仍需保留的未 squash 工作后，把 `dev` 重置到 `origin/main`：
 
 ```bash
 git fetch origin
 git switch dev
 git status --short
 git branch backup/dev-before-sync-YYYYMMDD
-git reset --hard origin/master
+git reset --hard origin/main
 git push --force-with-lease origin dev
 ```
 
-如果 `dev` 里还有尚未合并到 `master` 的工作，先把这些工作移到从 `origin/master` 创建的新分支，再重置 `dev`。
+如果 `dev` 里还有尚未合并到 `main` 的工作，先把这些工作移到从 `origin/main` 创建的新分支，再重置 `dev`。
 
 ## 提交规范
 
@@ -179,15 +179,15 @@ docs: update contributor commit rules
 
 ## PR 流程
 
-1. 更新 `master`，并从它创建任务分支。
+1. 更新 `main`，并从它创建任务分支。
 2. 实现聚焦的改动，并补充测试。
 3. 开发过程中运行定向检查。
 4. PR review 前运行 `pnpm build && pnpm lint && pnpm format:check && pnpm test`，纯文档改动除外。
-5. 向 `master` 开 PR。
+5. 向 `main` 开 PR。
 6. 说明改了什么、为什么改、如何验证。
 7. 用后续提交响应 review 反馈。
 8. PR 通过后使用 **Squash and merge**。
-9. 合并后删除或重新创建源分支；不要继续把 `master` merge 回被 squash 的分支。
+9. 合并后删除或重新创建源分支；不要继续把 `main` merge 回被 squash 的分支。
 
 纯文档改动至少运行相关格式检查。根 `README.md` 与 `README-zh.md` 在 `.prettierignore` 中，不参与 Prettier 校验，例如：
 
@@ -332,8 +332,8 @@ owner-hook-router.mjs    <- 平台唯一 Hook 入口 -> 当前 selection 的一�
 
 `CHANGELOG.md` 用英文撰写，记录**用户可见**的行为变化。详细分类与"发布视角检查"规则见 `CLAUDE.md`，这里只列要点：
 
-- 版本号与 `package.json` 一致，新版本条目置顶；只比 `master` 当前版本大一个版本。
-- 如果当前分支已有高于 `master` 的版本条目，追加到同一版本下，不要新增流水账版本。
+- 版本号与 `package.json` 一致，新版本条目置顶；只比 `main` 当前版本大一个版本。
+- 如果当前分支已有高于 `main` 的版本条目，追加到同一版本下，不要新增流水账版本。
 - 分组顺序：`Added → Changed → Fixed → Tests → Removed → Security`，每条以 `- **粗体关键词**: ` 开头。
 - 描述行为变化和原因，不写实现细节。
 - 写之前先用 `git log <上一个tag>..HEAD --oneline` 看实际差异；只写"用户从上一个版本升级后会注意到的变化"。
@@ -404,4 +404,4 @@ unset NPM_TOKEN
 - 保持 `.npmignore` 准确，避免 source-only 文件和本地配置发布到 npm。
 - 保持 `.gitignore` 覆盖 secret、凭据和 IDE 特定文件。
 - 使用用户提供的 change name 作为文件路径前，必须校验 path traversal。
-- Skill 安装在 symlink 模式下，不得替换包含 manifest 外文件的 `skills/` 目录（参见 `CHANGELOG.md` 0.4.0-beta.2 的 issue #159）。
+- Skill 安装在 symlink 模式下，不得替换包含 manifest 外文件的 `skills/` 目录。
